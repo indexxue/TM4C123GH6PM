@@ -1,0 +1,39 @@
+﻿{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "GDB (OpenOCD)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/tm4c123-project.elf",
+            "stopAtEntry": true,
+            "cwd": "${workspaceRoot}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin/arm-none-eabi-gdb.exe",
+            "miDebuggerArgs": "-ex \"target remote localhost:3333\" -ex \"monitor reset halt\" -ex \"load\"",
+            "serverStarted": "Listening on port .*3333",
+            "logging": {
+                "moduleLoad": false,
+                "programOutput": true,
+                "trace": false
+            }
+        },
+        {
+            "name": "GDB (J-Link)",
+            "type": "cppdbg",
+            "request": "launch",
+            "program": "${workspaceRoot}/build/tm4c123-project.elf",
+            "stopAtEntry": true,
+            "cwd": "${workspaceRoot}",
+            "MIMode": "gdb",
+            "miDebuggerPath": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin/arm-none-eabi-gdb.exe",
+            "miDebuggerArgs": "-ex \"target remote localhost:2331\" -ex \"monitor reset\" -ex \"load\"",
+            "serverStarted": "Connecting to target",
+            "logging": {
+                "moduleLoad": false,
+                "programOutput": true,
+                "trace": false
+            }
+        }
+    ]
+}

@@ -1,0 +1,31 @@
+﻿{
+    "env": {
+        "SDK_ROOT": "${workspaceRoot}/../tm4c123gh6pm-sdk",
+        "PATH": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin;${env:PATH}"
+    },
+    "configurations": [
+        {
+            "name": "TM4C123GH6PM (ARM Cortex-M4F)",
+            "includePath": [
+                "${workspaceRoot}/include",
+                "${workspaceRoot}/../tm4c123gh6pm-sdk/include"
+            ],
+            "defines": [
+                "TM4C123GH6PM",
+                "PART_TM4C123GH6PM",
+                "__ARM_ARCH_7EM__",
+                "__ARM_FP=4"
+            ],
+            "compilerPath": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin/arm-none-eabi-gcc.exe",
+            "cStandard": "c11",
+            "cppStandard": "c++17",
+            "intelliSenseMode": "gcc-arm",
+            "compilerArgs": [
+                "-mcpu=cortex-m4",
+                "-mthumb",
+                "-mfloat-abi=soft"
+            ]
+        }
+    ],
+    "version": 4
+}

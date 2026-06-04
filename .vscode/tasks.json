@@ -1,0 +1,59 @@
+﻿{
+    "version": "2.0.0",
+    "options": {
+        "shell": {
+            "executable": "powershell",
+            "args": ["-NoLogo", "-ExecutionPolicy", "Bypass", "-Command"]
+        }
+    },
+    "tasks": [
+        {
+            "label": "Build",
+            "type": "shell",
+            "command": "& { & \"${workspaceRoot}\\scripts\\build.ps1\" }",
+            "group": {
+                "kind": "build",
+                "isDefault": true
+            },
+            "presentation": {
+                "echo": true,
+                "reveal": "always",
+                "focus": false,
+                "panel": "dedicated"
+            },
+            "problemMatcher": {
+                "owner": "cpp",
+                "fileLocation": ["relative", "${workspaceRoot}"],
+                "pattern": {
+                    "regexp": "^(.*):(\\d+):(\\d+):\\s+(warning|error):\\s+(.*)$",
+                    "file": 1,
+                    "line": 2,
+                    "column": 3,
+                    "severity": 4,
+                    "message": 5
+                }
+            }
+        },
+        {
+            "label": "Clean",
+            "type": "shell",
+            "command": "if (Test-Path \"${workspaceRoot}\\build\") { Remove-Item \"${workspaceRoot}\\build\" -Recurse -Force; Write-Host 'Cleaned.' } else { Write-Host 'Nothing to clean.' }",
+            "group": "build",
+            "presentation": { "echo": true, "reveal": "always" }
+        },
+        {
+            "label": "Rebuild",
+            "type": "shell",
+            "command": "if (Test-Path \"${workspaceRoot}\\build\") { Remove-Item \"${workspaceRoot}\\build\" -Recurse -Force }; & \"${workspaceRoot}\\scripts\\build.ps1\"",
+            "group": { "kind": "build", "isDefault": false },
+            "presentation": { "echo": true, "reveal": "always" }
+        },
+        {
+            "label": "Flash (UniFlash)",
+            "type": "shell",
+            "command": "& \"${workspaceRoot}\\scripts\\flash-uniflash.ps1\" -Image \"${workspaceRoot}\\build\\tm4c123-project.bin\"",
+            "group": "test",
+            "presentation": { "echo": true, "reveal": "always", "focus": true }
+        }
+    ]
+}

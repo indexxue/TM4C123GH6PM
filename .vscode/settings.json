@@ -1,0 +1,14 @@
+﻿{
+    "editor.renderWhitespace": "boundary",
+    "editor.rulers": [100],
+    "files.associations": {
+        "*.ld": "linkerscript"
+    },
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "search.exclude": {
+        "build/": true
+    },
+    "terminal.integrated.defaultProfile.windows": "PowerShell",
+    "C_Cpp.default.configurationProvider": "ms-vscode.cpptools"
+}
