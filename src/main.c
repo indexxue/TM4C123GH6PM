@@ -1,9 +1,12 @@
 /**
  * \file    main.c
- * \brief   TM4C123GH6PM 项目入口
+ * \brief   TM4C123GH6PM ??????
  *
- * GPIO 初始化由 SysConfig 生成 (src/generated/tm4c123_board.c)，
- * 应用层只负责逻辑。配置来源: .syscfg/project.json
+ * GPIO ???? gen-board-config.py ? .syscfg/project.json ?????
+ * ??????? .syscfg/project.json?????? src/generated/ ?????
+ *
+ * ???????
+ *   ?? 500ms ???? SW1 (PF4) ?? LED ????????????
  */
 
 #include "tm4c123gh6pm.h"
@@ -20,6 +23,8 @@ typedef enum {
 
 static LedColor_t g_active_led = LED_COLOR_RED;
 
+/* ===== LED ?? ============================================================ */
+
 static void LED_SetActive(LedColor_t color)
 {
     GPIO_PORTF_DATA_R = (uint32_t)color;
@@ -35,22 +40,40 @@ static void LED_NextColor(void)
     }
 }
 
+/* ===== ???? ============================================================ */
+
+static uint32_t DebounceSW1(void)
+{
+    /* ??????50 ms ??????? */
+    if (((GPIO_PORTF_DATA_R >> 4) & 1u) != 0u)
+        return 0u;
+
+    SysTick_DelayMs(50);
+
+    return (((GPIO_PORTF_DATA_R >> 4) & 1u) == 0u) ? 1u : 0u;
+}
+
+/* ===== ??? ============================================================== */
+
 int main(void)
 {
-    Board_Init();                        /* 由 gen-board-config.py 生成 */
+    /* ---- ??????? .syscfg/project.json ?? ---- */
+    Board_Init();
     SysTick_Init();
     LED_SetActive(LED_COLOR_RED);
 
-    static uint32_t sw1_last = 1u;
+    uint32_t sw1_last = 1u;
 
+    /* ---- ??? ---- */
     while (1) {
+        /* ?? 500 ms ?? */
         GPIOF_RedLED_Toggle();
         SysTick_DelayMs(500);
 
+        /* ?? SW1 ?? ? ?? LED ?? */
         uint32_t sw1_now = (GPIO_PORTF_DATA_R >> 4) & 1u;
         if (sw1_now == 0u && sw1_last == 1u) {
-            SysTick_DelayMs(50);
-            if (((GPIO_PORTF_DATA_R >> 4) & 1u) == 0u) {
+            if (DebounceSW1()) {
                 LED_NextColor();
             }
         }

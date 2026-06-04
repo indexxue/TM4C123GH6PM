@@ -29,6 +29,9 @@ $TivaWareFound=Test-Path $TivaWareLib
 if($LASTEXITCODE-ne0){throw "SysConfig failed."}
 New-Item -ItemType Directory -Force -Path $BuildDir|Out-Null
 
+$TiDriversConfig=Join-Path $SrcDir "generated\ti_drivers_config.c"
+$UseTivaWareDriver=$TivaWareFound -and (Test-Path $TiDriversConfig)
+
 # ===== 3. ???? ===========================================================
 $CommonFlags=@(
     "-mcpu=cortex-m4","-mthumb","-mfloat-abi=soft"
@@ -43,10 +46,10 @@ $LinkFlags=@(
     "-Wl,--gc-sections","-Wl,-Map=$BuildDir\$Project.map"
     "-nostartfiles","-specs=nosys.specs"
 )
-if($TivaWareFound){
+if($UseTivaWareDriver){
     $CommonFlags+="-I$TivaWareInc"
     $LinkFlags+="-L$(Join-Path $TivaWareRoot 'driverlib\gcc') -ldriver -lc -lgcc"
-    Write-Host "TivaWare: $TivaWareRoot" -ForegroundColor DarkGray
+    Write-Host "TivaWare DriverLib: $TivaWareRoot" -ForegroundColor DarkGray
 }
 
 # ===== 4. ????? =========================================================
@@ -56,8 +59,8 @@ $Sources=@(
     (Join-Path $SrcDir "syscalls.c")
     (Join-Path $SrcDir "systick.c"), (Join-Path $SrcDir "generated\tm4c123_board.c")
 )
-if($TivaWareFound){
-    $Sources+=(Join-Path $SrcDir "generated\ti_drivers_config.c")
+if($UseTivaWareDriver){
+    $Sources+=$TiDriversConfig
 }
 Write-Host "Compiling..." -ForegroundColor Cyan
 $Objects=@()

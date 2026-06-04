@@ -8,7 +8,8 @@
 ```powershell
 git clone <repo-url>
 cd tm4c123-project
-.\scripts\build.ps1
+.\scripts\setup-terminal.ps1   # 首次：允许终端运行 .ps1（可选）
+.\scripts\build.ps1          # 或 .\build.cmd（不受执行策略限制）
 ```
 
 ## ??????

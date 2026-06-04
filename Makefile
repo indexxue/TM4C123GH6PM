@@ -17,7 +17,7 @@ LD_SCRIPT  := $(LD_DIR)/tm4c123gh6pm.ld
 
 # --- TivaWare (optional) ---
 TIVAWARE_ROOT ?= D:/Ti/TivaWare_C_Series-2.2.0.295
-ifneq ($(wildcard $(TIVAWARE_ROOT)/driverlib/gcc/libdriver.a),)
+ifneq ($(wildcard $(SRC_DIR)/generated/ti_drivers_config.c),)
     CFLAGS  += -I$(TIVAWARE_ROOT)/inc
     LDFLAGS += -L$(TIVAWARE_ROOT)/driverlib/gcc -ldriver -lc -lgcc
     SOURCES += $(SRC_DIR)/generated/ti_drivers_config.c
