@@ -1,24 +1,17 @@
-﻿# --- Build output -----------------------------------------------------------
+# Build output
 build/
-*.o
-*.elf
-*.bin
-*.map
-*.hex
+*.o *.elf *.bin *.map *.hex
 
-# --- ARM toolchain (downloaded on demand by install-toolchain.ps1) -----------
+# ARM toolchain (downloaded on demand)
 tools/
 downloads/
 
-# --- IDE / Editor -----------------------------------------------------------
-.vs/
-*.suo
-*.user
-*.db
-*.swp
-*.swo
-*~
+# Generated board config
+src/generated/
 
-# --- Windows junk -----------------------------------------------------------
-Thumbs.db
-Desktop.ini
+# IDE / Editor
+.vs/
+*.suo *.user *.db *.swp *.swo *~
+
+# Windows junk
+Thumbs.db Desktop.ini

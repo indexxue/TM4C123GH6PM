@@ -1,20 +1,17 @@
 /**
  * \file    main.c
- * \brief   TM4C123GH6PM ÏîÄ¿Èë¿Ú
+ * \brief   TM4C123GH6PM é¡¹ç›®å…¥å£
  *
- * ¹¦ÄÜ£º³õÊ¼»¯ Port F£¬ºì LED ÒÔ SysTick ¾«È·ÑÓÊ±ÉÁË¸¡£
- *       °´ SW1 (PF4) ¿ÉÇĞ»» LED ÑÕÉ«¡£
- *
- * ±àÒë£º
- *   powershell -ExecutionPolicy Bypass -File .\scripts\build.ps1
- *   »ò: make
+ * GPIO åˆå§‹åŒ–ç”± SysConfig ç”Ÿæˆ (src/generated/tm4c123_board.c)ï¼Œ
+ * åº”ç”¨å±‚åªè´Ÿè´£é€»è¾‘ã€‚é…ç½®æ¥æº: .syscfg/project.json
  */
 
 #include "tm4c123gh6pm.h"
 #include "gpio.h"
 #include "systick.h"
+#include "tm4c123_board.h"
+extern void Board_Init(void);
 
-/* LED ÑÕÉ«Ã¶¾Ù */
 typedef enum {
     LED_COLOR_RED   = LED_RED,
     LED_COLOR_BLUE  = LED_BLUE,
@@ -23,40 +20,12 @@ typedef enum {
 
 static LedColor_t g_active_led = LED_COLOR_RED;
 
-/* ---------------------------------------------------------------------------
- * ³õÊ¼»¯ LaunchPad °åÉÏ GPIO (LED + °´¼ü)
- * -------------------------------------------------------------------------*/
-static void GPIO_Init(void)
-{
-    /* Ê¹ÄÜ Port F Ê±ÖÓ */
-    SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R5;
-    while ((SYSCTL_PRGPIO_R & (1u << 5)) == 0u) { }
-
-    /* ½âËø PF0 (SW2) + Commit */
-    GPIO_PORTF_LOCK_R = GPIO_LOCK_KEY;
-    GPIO_PORTF_CR_R   |= LED_RED | LED_BLUE | LED_GREEN | SW1 | SW2;
-
-    /* ·½Ïò */
-    GPIO_PORTF_DIR_R  |= LED_RED | LED_BLUE | LED_GREEN;
-    GPIO_PORTF_DIR_R  &= ~(SW1 | SW2);
-
-    /* Êı×ÖÊ¹ÄÜ + ÉÏÀ­ */
-    GPIO_PORTF_DEN_R  |= LED_RED | LED_BLUE | LED_GREEN | SW1 | SW2;
-    GPIO_PORTF_PUR_R  |= SW1 | SW2;
-}
-
-/* ---------------------------------------------------------------------------
- * ÉèÖÃÖ¸¶¨ LED ÁÁÆğ£¬ÆäÓàÏ¨Ãğ
- * -------------------------------------------------------------------------*/
 static void LED_SetActive(LedColor_t color)
 {
     GPIO_PORTF_DATA_R = (uint32_t)color;
     g_active_led = color;
 }
 
-/* ---------------------------------------------------------------------------
- * ÇĞ»» LED ÑÕÉ« (ºì ¡ú À¶ ¡ú ÂÌ ¡ú ºì ¡­)
- * -------------------------------------------------------------------------*/
 static void LED_NextColor(void)
 {
     switch (g_active_led) {
@@ -66,29 +35,21 @@ static void LED_NextColor(void)
     }
 }
 
-/* ---------------------------------------------------------------------------
- * Ö÷º¯Êı
- * -------------------------------------------------------------------------*/
 int main(void)
 {
-    GPIO_Init();
+    Board_Init();                        /* ç”± gen-board-config.py ç”Ÿæˆ */
     SysTick_Init();
     LED_SetActive(LED_COLOR_RED);
 
-    /* °´¼üÏû¶¶×´Ì¬ */
     static uint32_t sw1_last = 1u;
 
     while (1) {
-        /* ºìµÆ»ù´¡ÉÁË¸ (500 ms) */
         GPIOF_RedLED_Toggle();
         SysTick_DelayMs(500);
 
-        /* ¼ì²â SW1 °´ÏÂ (µÍµçÆ½ÓĞĞ§£¬Èí¼şÏû¶¶) */
         uint32_t sw1_now = (GPIO_PORTF_DATA_R >> 4) & 1u;
         if (sw1_now == 0u && sw1_last == 1u) {
-            /* ·À¶¶ÑÓÊ± */
             SysTick_DelayMs(50);
-            /* ÔÙ´ÎÈ·ÈÏ */
             if (((GPIO_PORTF_DATA_R >> 4) & 1u) == 0u) {
                 LED_NextColor();
             }

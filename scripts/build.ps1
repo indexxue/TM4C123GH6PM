@@ -1,4 +1,4 @@
-param(
+ï»¿param(
     [string]$Project = "tm4c123-project"
 )
 
@@ -12,7 +12,7 @@ $LdScript     = Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
 $ToolsDir     = Join-Path $ProjectRoot "tools"
 $ToolchainBin = Join-Path $ToolsDir "bin"
 
-# ===== 1. ×Ô¶¯°²×°¹¤¾ßÁ´ =====================================================
+# ===== 1. è‡ªåŠ¨å®‰è£…å·¥å…·é“¾ =====================================================
 $GccPath = Join-Path $ToolchainBin "arm-none-eabi-gcc.exe"
 if (-not (Test-Path $GccPath)) {
     Write-Host "ARM GNU Toolchain not found. Installing..." -ForegroundColor Yellow
@@ -21,18 +21,17 @@ if (-not (Test-Path $GccPath)) {
         throw "Toolchain installation failed."
     }
 }
-
-# ¼ÓÈë PATH
 $env:PATH = "$ToolchainBin;$env:PATH"
-
-# ÑéÖ¤
 $gccVer = & arm-none-eabi-gcc --version
 if ($LASTEXITCODE -ne 0) { throw "arm-none-eabi-gcc not found after installation." }
 
-# ===== 2. ´´½¨¹¹½¨Ä¿Â¼ =======================================================
+# ===== 2. è¿è¡Œ SysConfig é…ç½®ç”Ÿæˆå™¨ ==========================================
+& (Join-Path $ProjectRoot "scripts\run-sysconfig.ps1")
+if ($LASTEXITCODE -ne 0) { throw "SysConfig code generation failed." }
+
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-# ===== 3. ±àÒë±êÖ¾ ===========================================================
+# ===== 3. ç¼–è¯‘æ ‡å¿— ===========================================================
 $CommonFlags = @(
     "-mcpu=cortex-m4",
     "-mthumb",
@@ -40,6 +39,7 @@ $CommonFlags = @(
     "-DTM4C123GH6PM",
     "-DPART_TM4C123GH6PM",
     "-I$IncDir",
+    "-I$SrcDir\generated",
     "-std=c11",
     "-Wall", "-Wextra", "-Wpedantic",
     "-ffunction-sections",
@@ -48,12 +48,13 @@ $CommonFlags = @(
     "-g3"
 )
 
-# ===== 4. ±àÒëËùÓĞÔ´ÎÄ¼ş =====================================================
+# ===== 4. ç¼–è¯‘æ‰€æœ‰æºæ–‡ä»¶ =====================================================
 $Sources = @(
     (Join-Path $SrcDir "startup_tm4c123gh6pm.c"),
     (Join-Path $SrcDir "main.c"),
     (Join-Path $SrcDir "syscalls.c"),
-    (Join-Path $SrcDir "systick.c")
+    (Join-Path $SrcDir "systick.c"),
+    (Join-Path $SrcDir "generated\tm4c123_board.c")
 )
 
 Write-Host "Compiling..." -ForegroundColor Cyan
@@ -67,7 +68,7 @@ foreach ($Source in $Sources) {
     $Objects += $Object
 }
 
-# ===== 5. Á´½Ó ===============================================================
+# ===== 5. é“¾æ¥ ===============================================================
 $Elf = Join-Path $BuildDir "$Project.elf"
 $Bin = Join-Path $BuildDir "$Project.bin"
 $Map = Join-Path $BuildDir "$Project.map"

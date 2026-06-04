@@ -1,4 +1,4 @@
-﻿{
+{
     "env": {
         "PATH": "${workspaceRoot}/tools/bin;${env:PATH}"
     },
@@ -6,7 +6,8 @@
         {
             "name": "TM4C123GH6PM (ARM Cortex-M4F)",
             "includePath": [
-                "${workspaceRoot}/include"
+                "${workspaceRoot}/include",
+                "${workspaceRoot}/src/generated"
             ],
             "defines": [
                 "TM4C123GH6PM",

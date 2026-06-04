@@ -1,0 +1,12 @@
+{
+  "version": "sysconfig-v1",
+  "project": { "name": "TM4C123GH6PM Project", "mcu": "TM4C123GH6PM" },
+  "system": { "clock_hz": 16000000 },
+  "gpio": [
+    { "port": "F", "pin": 1, "label": "LED_RED",    "direction": "output", "init": "high" },
+    { "port": "F", "pin": 2, "label": "LED_BLUE",   "direction": "output", "init": "low"  },
+    { "port": "F", "pin": 3, "label": "LED_GREEN",  "direction": "output", "init": "low"  },
+    { "port": "F", "pin": 4, "label": "SW1",        "direction": "input",  "pull": "up"   },
+    { "port": "F", "pin": 0, "label": "SW2",        "direction": "input",  "pull": "up", "commit": "unlock" }
+  ]
+}
