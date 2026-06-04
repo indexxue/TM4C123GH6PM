@@ -7,8 +7,10 @@ $IncDir=Join-Path $ProjectRoot "include"
 $LdScript=Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
 $ToolsDir=Join-Path $ProjectRoot "tools"
 $ToolchainBin=Join-Path $ToolsDir "bin"
+$TivaWareRoot="D:\Ti\TivaWare_C_Series-2.2.0.295"
+$TivaWareLib=Join-Path $TivaWareRoot "driverlib\gcc\libdriver.a"
+$TivaWareFound=Test-Path $TivaWareLib
 
-# ===== 1. ??????? =====================================================
 $GccPath=Join-Path $ToolchainBin "arm-none-eabi-gcc.exe"
 if(-not(Test-Path $GccPath)){
     Write-Host "ARM GNU Toolchain not found. Installing..." -ForegroundColor Yellow
@@ -16,52 +18,43 @@ if(-not(Test-Path $GccPath)){
     if(-not(Test-Path $GccPath)){throw "Toolchain installation failed."}}
 $env:PATH="$ToolchainBin;$env:PATH"
 $gccVer=& arm-none-eabi-gcc --version
-if($LASTEXITCODE-ne0){throw "arm-none-eabi-gcc not found after installation."}
+if($LASTEXITCODE-ne0){throw "arm-none-eabi-gcc not found."}
 
-# ===== 1b. ?? TivaWare =====================================================
-$TivaWareRoot="D:\Ti\TivaWare_C_Series-2.2.0.295"
-$TivaWareLib=Join-Path $TivaWareRoot "driverlib\gcc\libdriver.a"
-$TivaWareInc=Join-Path $TivaWareRoot "inc"
-$TivaWareFound=Test-Path $TivaWareLib
-
-# ===== 2. ?? SysConfig =====================================================
 &(Join-Path $ProjectRoot "scripts\run-sysconfig.ps1")
 if($LASTEXITCODE-ne0){throw "SysConfig failed."}
 New-Item -ItemType Directory -Force -Path $BuildDir|Out-Null
 
-$TiDriversConfig=Join-Path $SrcDir "generated\ti_drivers_config.c"
-$UseTivaWareDriver=$TivaWareFound -and (Test-Path $TiDriversConfig)
-
-# ===== 3. ???? ===========================================================
 $CommonFlags=@(
-    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=soft"
+    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=hard","-mfpu=fpv4-sp-d16"
     "-DTM4C123GH6PM","-DPART_TM4C123GH6PM"
     "-I$IncDir","-I$SrcDir\generated"
     "-std=c11","-Wall","-Wextra","-Wpedantic"
     "-ffunction-sections","-fdata-sections","-Os","-g3"
 )
 $LinkFlags=@(
-    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=soft"
+    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=hard","-mfpu=fpv4-sp-d16"
     "-T$LdScript"
     "-Wl,--gc-sections","-Wl,-Map=$BuildDir\$Project.map"
     "-nostartfiles","-specs=nosys.specs"
 )
-if($UseTivaWareDriver){
-    $CommonFlags+="-I$TivaWareInc"
-    $LinkFlags+="-L$(Join-Path $TivaWareRoot 'driverlib\gcc') -ldriver -lc -lgcc"
-    Write-Host "TivaWare DriverLib: $TivaWareRoot" -ForegroundColor DarkGray
+# TivaWare SDK integration
+if($TivaWareFound){
+    Write-Host "TivaWare: $TivaWareRoot" -ForegroundColor DarkGray
+    $CommonFlags+="-I$TivaWareRoot"
+    $CommonFlags+="-I$(Join-Path $TivaWareRoot "inc")"
+    $LinkFlags+="-L$(Join-Path $TivaWareRoot "driverlib\gcc")"
+    $LinkFlags+="-ldriver"
+    $LinkFlags+="-lc"
+    $LinkFlags+="-lgcc"
 }
 
-# ===== 4. ????? =========================================================
 $Sources=@(
     (Join-Path $SrcDir "startup_tm4c123gh6pm.c")
     (Join-Path $SrcDir "main.c")
     (Join-Path $SrcDir "syscalls.c")
-    (Join-Path $SrcDir "systick.c"), (Join-Path $SrcDir "generated\tm4c123_board.c")
+    (Join-Path $SrcDir "systick.c")
 )
-if($UseTivaWareDriver){
-    $Sources+=$TiDriversConfig
-}
+
 Write-Host "Compiling..." -ForegroundColor Cyan
 $Objects=@()
 foreach($Source in $Sources){
@@ -71,15 +64,13 @@ foreach($Source in $Sources){
     if($LASTEXITCODE-ne0){throw "Compilation failed: $Source"}
     $Objects+=$Object
 }
-
-# ===== 5. ?? ===============================================================
+Write-Host "Linking..." -ForegroundColor Cyan
 $Elf=Join-Path $BuildDir "$Project.elf"
 $Bin=Join-Path $BuildDir "$Project.bin"
 $Map=Join-Path $BuildDir "$Project.map"
-Write-Host "Linking..." -ForegroundColor Cyan
 & arm-none-eabi-gcc @Objects @LinkFlags -o $Elf
 if($LASTEXITCODE-ne0){throw "Link failed"}
 & arm-none-eabi-objcopy -O binary $Elf $Bin
 & arm-none-eabi-size $Elf
-Write-Host "`nOutput:" -ForegroundColor Green
+Write-Host "Output:" -ForegroundColor Green
 Write-Host "  $Elf`n  $Bin`n  $Map"
