@@ -1,35 +1,38 @@
-ï»¿param(
+param(
     [string]$Project = "tm4c123-project"
 )
 
 $ErrorActionPreference = "Stop"
 
-# --- è·¯å¾„ --------------------------------------------------------------------
 $ProjectRoot  = Split-Path -Parent $PSScriptRoot
 $BuildDir     = Join-Path $ProjectRoot "build"
 $SrcDir       = Join-Path $ProjectRoot "src"
 $IncDir       = Join-Path $ProjectRoot "include"
+$LdScript     = Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
+$ToolsDir     = Join-Path $ProjectRoot "tools"
+$ToolchainBin = Join-Path $ToolsDir "bin"
 
-# SDK è·¯å¾„ (åŒçº§ç›®å½•)
-$SdkRoot      = Join-Path (Split-Path -Parent $ProjectRoot) "tm4c123gh6pm-sdk"
-$LdScript     = Join-Path $SdkRoot "ld\tm4c123gh6pm.ld"
-$Startup      = Join-Path $SdkRoot "src\startup_tm4c123gh6pm.c"
-$SdkInclude   = Join-Path $SdkRoot "include"
-$ToolBin      = Join-Path $SdkRoot "tools\bin"
-
-# ä¼˜å…ˆä» SDK å†…æŸ¥æ‰¾å·¥å…·é“¾
-if (-not (Get-Command arm-none-eabi-gcc -ErrorAction SilentlyContinue)) {
-    $env:PATH = "$ToolBin;$env:PATH"
+# ===== 1. ×Ô¶¯°²×°¹¤¾ßÁ´ =====================================================
+$GccPath = Join-Path $ToolchainBin "arm-none-eabi-gcc.exe"
+if (-not (Test-Path $GccPath)) {
+    Write-Host "ARM GNU Toolchain not found. Installing..." -ForegroundColor Yellow
+    & (Join-Path $ProjectRoot "scripts\install-toolchain.ps1")
+    if (-not (Test-Path $GccPath)) {
+        throw "Toolchain installation failed."
+    }
 }
 
-# éªŒè¯å·¥å…·é“¾
-if (-not (Get-Command arm-none-eabi-gcc -ErrorAction SilentlyContinue)) {
-    throw "arm-none-eabi-gcc not found. Expected at: $ToolBin"
-}
+# ¼ÓÈë PATH
+$env:PATH = "$ToolchainBin;$env:PATH"
 
+# ÑéÖ¤
+$gccVer = & arm-none-eabi-gcc --version
+if ($LASTEXITCODE -ne 0) { throw "arm-none-eabi-gcc not found after installation." }
+
+# ===== 2. ´´½¨¹¹½¨Ä¿Â¼ =======================================================
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 
-# --- ç¼–è¯‘æ ‡å¿— ----------------------------------------------------------------
+# ===== 3. ±àÒë±êÖ¾ ===========================================================
 $CommonFlags = @(
     "-mcpu=cortex-m4",
     "-mthumb",
@@ -37,7 +40,6 @@ $CommonFlags = @(
     "-DTM4C123GH6PM",
     "-DPART_TM4C123GH6PM",
     "-I$IncDir",
-    "-I$SdkInclude",
     "-std=c11",
     "-Wall", "-Wextra", "-Wpedantic",
     "-ffunction-sections",
@@ -46,26 +48,26 @@ $CommonFlags = @(
     "-g3"
 )
 
-# --- ç¼–è¯‘å¯åŠ¨æ–‡ä»¶ (æ¥è‡ª SDK) ---------------------------------------------------
-Write-Host "Compiling startup (SDK)..." -ForegroundColor Cyan
-& arm-none-eabi-gcc @CommonFlags -c $Startup -o (Join-Path $BuildDir "startup_tm4c123gh6pm.o")
-
-# --- ç¼–è¯‘é¡¹ç›®æºæ–‡ä»¶ ------------------------------------------------------------
+# ===== 4. ±àÒëËùÓĞÔ´ÎÄ¼ş =====================================================
 $Sources = @(
+    (Join-Path $SrcDir "startup_tm4c123gh6pm.c"),
     (Join-Path $SrcDir "main.c"),
     (Join-Path $SrcDir "syscalls.c"),
     (Join-Path $SrcDir "systick.c")
 )
 
+Write-Host "Compiling..." -ForegroundColor Cyan
+
 $Objects = @()
 foreach ($Source in $Sources) {
     $Object = Join-Path $BuildDir (([IO.Path]::GetFileNameWithoutExtension($Source)) + ".o")
-    Write-Host "  $($Source)" -ForegroundColor Gray
+    Write-Host "  $([IO.Path]::GetFileName($Source))" -ForegroundColor Gray
     & arm-none-eabi-gcc @CommonFlags -c $Source -o $Object
+    if ($LASTEXITCODE -ne 0) { throw "Compilation failed: $Source" }
     $Objects += $Object
 }
 
-# --- é“¾æ¥ --------------------------------------------------------------------
+# ===== 5. Á´½Ó ===============================================================
 $Elf = Join-Path $BuildDir "$Project.elf"
 $Bin = Join-Path $BuildDir "$Project.bin"
 $Map = Join-Path $BuildDir "$Project.map"
@@ -82,7 +84,7 @@ $LinkFlags = @(
 )
 
 Write-Host "Linking..." -ForegroundColor Cyan
-& arm-none-eabi-gcc @(Join-Path $BuildDir "startup_tm4c123gh6pm.o") @Objects @LinkFlags -o $Elf
+& arm-none-eabi-gcc @Objects @LinkFlags -o $Elf
 if ($LASTEXITCODE -ne 0) { throw "Link failed" }
 
 & arm-none-eabi-objcopy -O binary $Elf $Bin

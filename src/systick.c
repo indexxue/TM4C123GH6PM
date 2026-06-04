@@ -1,53 +1,56 @@
-/**
+ï»¿/**
  * \file    systick.c
- * \brief   SysTick ¶¨Ê±Æ÷Çı¶¯ (×èÈûÊ½ÑÓÊ± + ÖĞ¶Ï½ÚÅÄ)
+ * \brief   SysTick å®šæ—¶å™¨é©±åŠ¨ (é˜»å¡å¼å»¶æ—¶ + ä¸­æ–­èŠ‚æ‹)
  */
 
-#include "systick.h"
+#include "tm4c123gh6pm.h"    /* æä¾› HWREG å® */
 #include "systick.h"
 
-/* ÏµÍ³Ê±ÖÓÆµÂÊ (Ä¬ÈÏ 16 MHz ÄÚ²¿Õñµ´Æ÷) */
+/* ========== NVIC SysTick å¯„å­˜å™¨ ==========================================*/
+#define NVIC_ST_BASE          0xE000E000u
+#define NVIC_ST_CSR           HWREG(NVIC_ST_BASE + 0x010u)
+#define NVIC_ST_RELOAD        HWREG(NVIC_ST_BASE + 0x014u)
+#define NVIC_ST_CURRENT       HWREG(NVIC_ST_BASE + 0x018u)
+
+#define NVIC_ST_CSR_ENABLE    (1u << 0)
+#define NVIC_ST_CSR_INTEN     (1u << 1)
+#define NVIC_ST_CSR_CLK_SRC   (1u << 2)
+#define NVIC_ST_CSR_COUNTFLAG (1u << 16)
+
+/* ç³»ç»Ÿæ—¶é’Ÿé¢‘ç‡ (é»˜è®¤ 16 MHz å†…éƒ¨æŒ¯è¡å™¨) */
 #ifndef SYSTICK_CLOCK_HZ
-#define SYSTICK_CLOCK_HZ  16000000u
+#define SYSTICK_CLOCK_HZ      16000000u
 #endif
 
 static volatile uint32_t g_systick_ticks = 0u;
 
-/* ---------------------------------------------------------------------------
- * ³õÊ¼»¯ SysTick (Ê¹ÓÃÄÚ²¿Ê±ÖÓÔ´£¬Ê¹ÄÜÖĞ¶Ï)
- * -------------------------------------------------------------------------*/
+/* ======================================================================== */
+
 void SysTick_Init(void)
 {
-    /* ÉèÖÃÖØÔØÖµ£º1 ms Ò»´ÎÖĞ¶Ï */
     NVIC_ST_RELOAD  = (SYSTICK_CLOCK_HZ / 1000u) - 1u;
     NVIC_ST_CURRENT = 0u;
 
-    /* Ê¹ÄÜ SysTick£ºÊ±ÖÓÔ´ = ÏµÍ³Ê±ÖÓ£¬Ê¹ÄÜÖĞ¶Ï */
+    /* æ—¶é’Ÿæº = ç³»ç»Ÿæ—¶é’Ÿï¼Œä½¿èƒ½ä¸­æ–­ï¼Œå¯åŠ¨è®¡æ•° */
     NVIC_ST_CSR = NVIC_ST_CSR_ENABLE | NVIC_ST_CSR_INTEN | NVIC_ST_CSR_CLK_SRC;
 }
 
 /* ---------------------------------------------------------------------------
- * SysTick ÖĞ¶Ï´¦Àíº¯Êı (weak ±ğÃûÒÑÔÚ startup ÖĞ¶¨Òå)
+ * SysTick ä¸­æ–­å¤„ç†å‡½æ•° (weak åˆ«åå·²åœ¨ startup ä¸­å®šä¹‰)
  * -------------------------------------------------------------------------*/
 void SysTick_Handler(void)
 {
     g_systick_ticks++;
 }
 
-/* ---------------------------------------------------------------------------
- * ºÁÃë¼¶×èÈûÑÓÊ± (»ùÓÚ SysTick ÖĞ¶Ï¼ÆÊı)
- * -------------------------------------------------------------------------*/
 void SysTick_DelayMs(uint32_t ms)
 {
     uint32_t start = g_systick_ticks;
     while ((g_systick_ticks - start) < ms) {
-        __asm volatile ("wfi");     /* µÈ´ıÖĞ¶Ï£¬½µµÍ¹¦ºÄ */
+        __asm volatile ("wfi");     /* ç­‰å¾…ä¸­æ–­ï¼Œé™ä½åŠŸè€— */
     }
 }
 
-/* ---------------------------------------------------------------------------
- * »ñÈ¡µ±Ç° SysTick ºÁÃë¼ÆÊı
- * -------------------------------------------------------------------------*/
 uint32_t SysTick_GetTicks(void)
 {
     return g_systick_ticks;

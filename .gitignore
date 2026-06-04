@@ -6,6 +6,10 @@ build/
 *.map
 *.hex
 
+# --- ARM toolchain (downloaded on demand by install-toolchain.ps1) -----------
+tools/
+downloads/
+
 # --- IDE / Editor -----------------------------------------------------------
 .vs/
 *.suo

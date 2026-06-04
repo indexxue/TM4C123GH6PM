@@ -9,7 +9,7 @@
             "stopAtEntry": true,
             "cwd": "${workspaceRoot}",
             "MIMode": "gdb",
-            "miDebuggerPath": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin/arm-none-eabi-gdb.exe",
+            "miDebuggerPath": "${workspaceRoot}/tools/bin/arm-none-eabi-gdb.exe",
             "miDebuggerArgs": "-ex \"target remote localhost:3333\" -ex \"monitor reset halt\" -ex \"load\"",
             "serverStarted": "Listening on port .*3333",
             "logging": {
@@ -26,7 +26,7 @@
             "stopAtEntry": true,
             "cwd": "${workspaceRoot}",
             "MIMode": "gdb",
-            "miDebuggerPath": "${workspaceRoot}/../tm4c123gh6pm-sdk/tools/bin/arm-none-eabi-gdb.exe",
+            "miDebuggerPath": "${workspaceRoot}/tools/bin/arm-none-eabi-gdb.exe",
             "miDebuggerArgs": "-ex \"target remote localhost:2331\" -ex \"monitor reset\" -ex \"load\"",
             "serverStarted": "Connecting to target",
             "logging": {
