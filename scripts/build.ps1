@@ -1,97 +1,82 @@
-﻿param(
-    [string]$Project = "tm4c123-project"
-)
+param([string]$Project="tm4c123-project")
+$ErrorActionPreference="Stop"
+$ProjectRoot=Split-Path -Parent $PSScriptRoot
+$BuildDir=Join-Path $ProjectRoot "build"
+$SrcDir=Join-Path $ProjectRoot "src"
+$IncDir=Join-Path $ProjectRoot "include"
+$LdScript=Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
+$ToolsDir=Join-Path $ProjectRoot "tools"
+$ToolchainBin=Join-Path $ToolsDir "bin"
 
-$ErrorActionPreference = "Stop"
-
-$ProjectRoot  = Split-Path -Parent $PSScriptRoot
-$BuildDir     = Join-Path $ProjectRoot "build"
-$SrcDir       = Join-Path $ProjectRoot "src"
-$IncDir       = Join-Path $ProjectRoot "include"
-$LdScript     = Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
-$ToolsDir     = Join-Path $ProjectRoot "tools"
-$ToolchainBin = Join-Path $ToolsDir "bin"
-
-# ===== 1. 自动安装工具链 =====================================================
-$GccPath = Join-Path $ToolchainBin "arm-none-eabi-gcc.exe"
-if (-not (Test-Path $GccPath)) {
+# ===== 1. ??????? =====================================================
+$GccPath=Join-Path $ToolchainBin "arm-none-eabi-gcc.exe"
+if(-not(Test-Path $GccPath)){
     Write-Host "ARM GNU Toolchain not found. Installing..." -ForegroundColor Yellow
-    & (Join-Path $ProjectRoot "scripts\install-toolchain.ps1")
-    if (-not (Test-Path $GccPath)) {
-        throw "Toolchain installation failed."
-    }
+    &(Join-Path $ProjectRoot "scripts\install-toolchain.ps1")
+    if(-not(Test-Path $GccPath)){throw "Toolchain installation failed."}}
+$env:PATH="$ToolchainBin;$env:PATH"
+$gccVer=& arm-none-eabi-gcc --version
+if($LASTEXITCODE-ne0){throw "arm-none-eabi-gcc not found after installation."}
+
+# ===== 1b. ?? TivaWare =====================================================
+$TivaWareRoot="D:\Ti\TivaWare_C_Series-2.2.0.295"
+$TivaWareLib=Join-Path $TivaWareRoot "driverlib\gcc\libdriver.a"
+$TivaWareInc=Join-Path $TivaWareRoot "inc"
+$TivaWareFound=Test-Path $TivaWareLib
+
+# ===== 2. ?? SysConfig =====================================================
+&(Join-Path $ProjectRoot "scripts\run-sysconfig.ps1")
+if($LASTEXITCODE-ne0){throw "SysConfig failed."}
+New-Item -ItemType Directory -Force -Path $BuildDir|Out-Null
+
+# ===== 3. ???? ===========================================================
+$CommonFlags=@(
+    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=soft"
+    "-DTM4C123GH6PM","-DPART_TM4C123GH6PM"
+    "-I$IncDir","-I$SrcDir\generated"
+    "-std=c11","-Wall","-Wextra","-Wpedantic"
+    "-ffunction-sections","-fdata-sections","-Os","-g3"
+)
+$LinkFlags=@(
+    "-mcpu=cortex-m4","-mthumb","-mfloat-abi=soft"
+    "-T$LdScript"
+    "-Wl,--gc-sections","-Wl,-Map=$BuildDir\$Project.map"
+    "-nostartfiles","-specs=nosys.specs"
+)
+if($TivaWareFound){
+    $CommonFlags+="-I$TivaWareInc"
+    $LinkFlags+="-L$(Join-Path $TivaWareRoot 'driverlib\gcc') -ldriver -lc -lgcc"
+    Write-Host "TivaWare: $TivaWareRoot" -ForegroundColor DarkGray
 }
-$env:PATH = "$ToolchainBin;$env:PATH"
-$gccVer = & arm-none-eabi-gcc --version
-if ($LASTEXITCODE -ne 0) { throw "arm-none-eabi-gcc not found after installation." }
 
-# ===== 2. 运行 SysConfig 配置生成器 ==========================================
-& (Join-Path $ProjectRoot "scripts\run-sysconfig.ps1")
-if ($LASTEXITCODE -ne 0) { throw "SysConfig code generation failed." }
-
-New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
-
-# ===== 3. 编译标志 ===========================================================
-$CommonFlags = @(
-    "-mcpu=cortex-m4",
-    "-mthumb",
-    "-mfloat-abi=soft",
-    "-DTM4C123GH6PM",
-    "-DPART_TM4C123GH6PM",
-    "-I$IncDir",
-    "-I$SrcDir\generated",
-    "-std=c11",
-    "-Wall", "-Wextra", "-Wpedantic",
-    "-ffunction-sections",
-    "-fdata-sections",
-    "-Os",
-    "-g3"
+# ===== 4. ????? =========================================================
+$Sources=@(
+    (Join-Path $SrcDir "startup_tm4c123gh6pm.c")
+    (Join-Path $SrcDir "main.c")
+    (Join-Path $SrcDir "syscalls.c")
+    (Join-Path $SrcDir "systick.c"), (Join-Path $SrcDir "generated\tm4c123_board.c")
 )
-
-# ===== 4. 编译所有源文件 =====================================================
-$Sources = @(
-    (Join-Path $SrcDir "startup_tm4c123gh6pm.c"),
-    (Join-Path $SrcDir "main.c"),
-    (Join-Path $SrcDir "syscalls.c"),
-    (Join-Path $SrcDir "systick.c"),
-    (Join-Path $SrcDir "generated\tm4c123_board.c")
-)
-
+if($TivaWareFound){
+    $Sources+=(Join-Path $SrcDir "generated\ti_drivers_config.c")
+}
 Write-Host "Compiling..." -ForegroundColor Cyan
-
-$Objects = @()
-foreach ($Source in $Sources) {
-    $Object = Join-Path $BuildDir (([IO.Path]::GetFileNameWithoutExtension($Source)) + ".o")
+$Objects=@()
+foreach($Source in $Sources){
+    $Object=Join-Path $BuildDir (([IO.Path]::GetFileNameWithoutExtension($Source))+".o")
     Write-Host "  $([IO.Path]::GetFileName($Source))" -ForegroundColor Gray
     & arm-none-eabi-gcc @CommonFlags -c $Source -o $Object
-    if ($LASTEXITCODE -ne 0) { throw "Compilation failed: $Source" }
-    $Objects += $Object
+    if($LASTEXITCODE-ne0){throw "Compilation failed: $Source"}
+    $Objects+=$Object
 }
 
-# ===== 5. 链接 ===============================================================
-$Elf = Join-Path $BuildDir "$Project.elf"
-$Bin = Join-Path $BuildDir "$Project.bin"
-$Map = Join-Path $BuildDir "$Project.map"
-
-$LinkFlags = @(
-    "-mcpu=cortex-m4",
-    "-mthumb",
-    "-mfloat-abi=soft",
-    "-T$LdScript",
-    "-Wl,--gc-sections",
-    "-Wl,-Map=$Map",
-    "-nostartfiles",
-    "-specs=nosys.specs"
-)
-
+# ===== 5. ?? ===============================================================
+$Elf=Join-Path $BuildDir "$Project.elf"
+$Bin=Join-Path $BuildDir "$Project.bin"
+$Map=Join-Path $BuildDir "$Project.map"
 Write-Host "Linking..." -ForegroundColor Cyan
 & arm-none-eabi-gcc @Objects @LinkFlags -o $Elf
-if ($LASTEXITCODE -ne 0) { throw "Link failed" }
-
+if($LASTEXITCODE-ne0){throw "Link failed"}
 & arm-none-eabi-objcopy -O binary $Elf $Bin
 & arm-none-eabi-size $Elf
-
-Write-Host "`nOutput files:" -ForegroundColor Green
-Write-Host "  $Elf"
-Write-Host "  $Bin"
-Write-Host "  $Map"
+Write-Host "`nOutput:" -ForegroundColor Green
+Write-Host "  $Elf`n  $Bin`n  $Map"
