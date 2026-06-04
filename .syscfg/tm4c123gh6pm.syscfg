@@ -1,1 +1,21 @@
-// @cliArgs -d TM4C123GH6PM
+/**
+ * These arguments were used when this file was generated. They will be automatically applied on subsequent loads
+ * via the GUI or CLI. Run CLI with '--help' for additional information on how to override these arguments.
+ * @cliArgs --device "TM4C123x" --part "TM4C123GH6PM" --package "64 Pin QFP|16x16"
+ * @v2CliArgs --device "TM4C123GH6PM" --package "LQFP (PM)"
+ * @versions {"tool":"1.27.1+4634"}
+ */
+
+/**
+ * These are the peripherals and settings in this configuration
+ */
+const GPIO1   = scripting.addPeripheral("GPIO");
+GPIO1["0"].io = "output";
+GPIO1.$name   = "MyGPIO1";
+
+/**
+ * Pinmux solution for unlocked pins/peripherals. This ensures that minor changes to the automatic solver in a future
+ * version of the tool will not impact the pinmux you originally saw.  These lines can be completely deleted in order to
+ * re-solve from scratch.
+ */
+GPIO1["0"].$suggestSolution = "PB6";
