@@ -1,138 +1,138 @@
-# TM4C123GH6PMI GPIO ?????
+# TM4C123GH6PMI GPIO 分配表
 
-## ??????
+## 引脚映射
 
-| ?? | ?? | ?? | ???? |
+| 引脚 | 功能 | 方向 | 备注说明 |
 |------|------|------|----------|
-| PA0 | BT_RX | ?? |  |
-| PA1 | BT_TX | ?? |  |
-| PA2 | M1_IN1 | ?? | Motor 1 direction |
-| PA3 | M1_IN2 | ?? | Motor 1 direction |
-| PA4 | M2_IN1 | ?? | Motor 2 direction |
-| PA5 | M2_IN2 | ?? | Motor 2 direction |
-| PA6 | LINE1 | ?? | line sensor 1 |
-| PA7 | LINE2 | ?? | line sensor 2 |
-| PB0 | M3_PWM | ?? | Timer2A T2CCP0 |
-| PB1 | M4_PWM | ?? | Timer2B T2CCP1 |
-| PB2 | I2C_SCL | ?? | I2C0 SCL (IMU+OLED) |
-| PB3 | I2C_SDA | ?? | I2C0 SDA (IMU+OLED) |
-| PB4 | BTN_UP | ?? | ????? |
-| PB5 | BTN_OK | ?? | ???? |
-| PB6 | M1_PWM | ?? | Timer0A T0CCP0, I2C5SCL |
-| PB7 | M2_PWM | ?? | Timer0B T0CCP1, I2C5SDA |
-| PC0 | M4_ENCA | ?? | Timer4A capture, SWCLK |
-| PC1 | M4_ENCB | ?? | Timer4B capture, SWDIO |
-| PC4 | M3_IN1 | ?? | Motor 3 direction |
-| PC5 | BTN_DN | ?? | ???? |
-| PC6 | LINE3 | ?? | line sensor 3 |
-| PC7 | M3_IN2 | ?? | Motor 3 direction |
-| PD0 | M4_IN1 | ?? | Motor 4 direction |
-| PD1 | M4_IN2 | ?? | Motor 4 direction |
-| PD2 | M1_ENCA | ?? | WTimer3A capture |
-| PD3 | M1_ENCB | ?? | WTimer3B capture |
-| PD4 | M2_ENCA | ?? | WTimer4A capture |
-| PD5 | M2_ENCB | ?? | WTimer4B capture |
-| PD6 | M3_ENCA | ?? | WTimer5A capture |
-| PD7 | M3_ENCB | ?? | WTimer5B capture |
-| PE0 | BAT_ADC | ?? | ADC0 AIN0 battery |
-| PE1 | DBG_TX | ?? |  |
-| PE2 | LINE4 | ?? | line sensor 4 |
-| PE3 | BUZZER | ?? | buzzer PWM |
-| PE4 | ULTRA_TRIG | ?? | HC-SR04 trigger |
-| PE5 | ULTRA_ECHO | ?? | HC-SR04 echo interrupt |
-| PF4 | RGB_LED | ?? | WS2812 single-bus RGB LED |
+| PA0 | BT_RX | 输入 |  |
+| PA1 | BT_TX | 输出 |  |
+| PA2 | M1_IN1 | 输出 | Motor 1 direction |
+| PA3 | M1_IN2 | 输出 | Motor 1 direction |
+| PA4 | M2_IN1 | 输出 | Motor 2 direction |
+| PA5 | M2_IN2 | 输出 | Motor 2 direction |
+| PA6 | LINE1 | 输入 | line sensor 1 |
+| PA7 | LINE2 | 输入 | line sensor 2 |
+| PB0 | M3_PWM | 输出 | Timer2A T2CCP0 |
+| PB1 | M4_PWM | 输出 | Timer2B T2CCP1 |
+| PB2 | I2C_SCL | 输出 | I2C0 SCL (IMU+OLED) |
+| PB3 | I2C_SDA | 输出 | I2C0 SDA (IMU+OLED) |
+| PB4 | BTN_UP | 输入 | 上键 |
+| PB5 | BTN_OK | 输入 | 确认键 |
+| PB6 | M1_PWM | 输出 | Timer0A T0CCP0, I2C5SCL |
+| PB7 | M2_PWM | 输出 | Timer0B T0CCP1, I2C5SDA |
+| PC0 | M4_ENCA | 输入 | Timer4A capture, SWCLK |
+| PC1 | M4_ENCB | 输入 | Timer4B capture, SWDIO |
+| PC4 | M3_IN1 | 输出 | Motor 3 direction |
+| PC5 | BTN_DN | 输入 | 下键 |
+| PC6 | LINE3 | 输入 | line sensor 3 |
+| PC7 | M3_IN2 | 输出 | Motor 3 direction |
+| PD0 | M4_IN1 | 输出 | Motor 4 direction |
+| PD1 | M4_IN2 | 输出 | Motor 4 direction |
+| PD2 | M1_ENCA | 输入 | WTimer3A capture |
+| PD3 | M1_ENCB | 输入 | WTimer3B capture |
+| PD4 | M2_ENCA | 输入 | WTimer4A capture |
+| PD5 | M2_ENCB | 输入 | WTimer4B capture |
+| PD6 | M3_ENCA | 输入 | WTimer5A capture |
+| PD7 | M3_ENCB | 输入 | WTimer5B capture |
+| PE0 | BAT_ADC | 输入 | ADC0 AIN0 battery |
+| PE1 | DBG_TX | 输出 |  |
+| PE2 | LINE4 | 输入 | line sensor 4 |
+| PE3 | BUZZER | 输出 | buzzer PWM |
+| PE4 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
+| PE5 | ULTRA_ECHO | 输入 | HC-SR04 echo interrupt |
+| PF4 | RGB_LED | 输出 | WS2812 single-bus RGB LED |
 
-## ?????
+## 功能分组
 
-### ?? PWM (4?)
+### 电机 PWM (4 路)
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PB0 | M3_PWM | ?? |
-| PB1 | M4_PWM | ?? |
-| PB6 | M1_PWM | ?? |
-| PB7 | M2_PWM | ?? |
+| PB0 | M3_PWM | 输出 |
+| PB1 | M4_PWM | 输出 |
+| PB6 | M1_PWM | 输出 |
+| PB7 | M2_PWM | 输出 |
 
-### ???? (8?)
+### 方向控制 (8 路)
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PA2 | M1_IN1 | ?? |
-| PA3 | M1_IN2 | ?? |
-| PA4 | M2_IN1 | ?? |
-| PA5 | M2_IN2 | ?? |
-| PA6 | LINE1 | ?? |
-| PA7 | LINE2 | ?? |
-| PC4 | M3_IN1 | ?? |
-| PC6 | LINE3 | ?? |
-| PC7 | M3_IN2 | ?? |
-| PD0 | M4_IN1 | ?? |
-| PD1 | M4_IN2 | ?? |
-| PE2 | LINE4 | ?? |
+| PA2 | M1_IN1 | 输出 |
+| PA3 | M1_IN2 | 输出 |
+| PA4 | M2_IN1 | 输出 |
+| PA5 | M2_IN2 | 输出 |
+| PA6 | LINE1 | 输入 |
+| PA7 | LINE2 | 输入 |
+| PC4 | M3_IN1 | 输出 |
+| PC6 | LINE3 | 输入 |
+| PC7 | M3_IN2 | 输出 |
+| PD0 | M4_IN1 | 输出 |
+| PD1 | M4_IN2 | 输出 |
+| PE2 | LINE4 | 输入 |
 
-### ????? (8?)
+### 编码器输入 (8 路)
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PC0 | M4_ENCA | ?? |
-| PC1 | M4_ENCB | ?? |
-| PD2 | M1_ENCA | ?? |
-| PD3 | M1_ENCB | ?? |
-| PD4 | M2_ENCA | ?? |
-| PD5 | M2_ENCB | ?? |
-| PD6 | M3_ENCA | ?? |
-| PD7 | M3_ENCB | ?? |
+| PC0 | M4_ENCA | 输入 |
+| PC1 | M4_ENCB | 输入 |
+| PD2 | M1_ENCA | 输入 |
+| PD3 | M1_ENCB | 输入 |
+| PD4 | M2_ENCA | 输入 |
+| PD5 | M2_ENCB | 输入 |
+| PD6 | M3_ENCA | 输入 |
+| PD7 | M3_ENCB | 输入 |
 
-### ????
+### 通信接口
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PA0 | BT_RX | ?? |
-| PA1 | BT_TX | ?? |
-| PB2 | I2C_SCL | ?? |
-| PB3 | I2C_SDA | ?? |
-| PE1 | DBG_TX | ?? |
+| PA0 | BT_RX | 输入 |
+| PA1 | BT_TX | 输出 |
+| PB2 | I2C_SCL | 输出 |
+| PB3 | I2C_SDA | 输出 |
+| PE1 | DBG_TX | 输出 |
 
-### ???
+### 传感器
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PA6 | LINE1 | ?? |
-| PA7 | LINE2 | ?? |
-| PC6 | LINE3 | ?? |
-| PE0 | BAT_ADC | ?? |
-| PE2 | LINE4 | ?? |
-| PE4 | ULTRA_TRIG | ?? |
-| PE5 | ULTRA_ECHO | ?? |
+| PA6 | LINE1 | 输入 |
+| PA7 | LINE2 | 输入 |
+| PC6 | LINE3 | 输入 |
+| PE0 | BAT_ADC | 输入 |
+| PE2 | LINE4 | 输入 |
+| PE4 | ULTRA_TRIG | 输出 |
+| PE5 | ULTRA_ECHO | 输入 |
 
-### ????
+### 人机交互
 
-| ?? | ?? | ?? |
+| 引脚 | 功能 | 方向 |
 |------|------|------|
-| PB4 | BTN_UP | ?? |
-| PB5 | BTN_OK | ?? |
-| PC5 | BTN_DN | ?? |
-| PE3 | BUZZER | ?? |
-| PF4 | RGB_LED | ?? |
+| PB4 | BTN_UP | 输入 |
+| PB5 | BTN_OK | 输入 |
+| PC5 | BTN_DN | 输入 |
+| PE3 | BUZZER | 输出 |
+| PF4 | RGB_LED | 输出 |
 
-## ???????? GPIO?
+## 复用功能与备用 GPIO
 
-| ?? | ?? | ?? |
+| 引脚 | 当前功能 | 备用 |
 |------|------|------|
-| PF0 | SSI1RX | SPI ??????? |
-| PF1 | SSI1TX | SPI ??????? |
-| PF2 | SSI1CLK | SPI ????? |
-| PF3 | SSI1FSS | SPI ????? |
-| PE1 | UART7 TX | ?????? |
-| PC2 | Timer5A | M4 ????? A |
-| PC3 | Timer5B | M4 ????? B |
-| PB2 | I2C0 SCL | IMU + OLED ?? |
-| PB3 | I2C0 SDA | IMU + OLED ?? |
-| PA0 | UART0 RX | ???? |
-| PA1 | UART0 TX | ???? |
+| PF0 | SSI1RX | SPI 外设备用 |
+| PF1 | SSI1TX | SPI 外设备用 |
+| PF2 | SSI1CLK | SPI 时钟备用 |
+| PF3 | SSI1FSS | SPI 片选备用 |
+| PE1 | UART7 TX | 调试串口 |
+| PC2 | Timer5A | M4 编码器备用 A |
+| PC3 | Timer5B | M4 编码器备用 B |
+| PB2 | I2C0 SCL | IMU + OLED 共用 |
+| PB3 | I2C0 SDA | IMU + OLED 共用 |
+| PA0 | UART0 RX | 蓝牙接收 |
+| PA1 | UART0 TX | 蓝牙发送 |
 
-## ????
+## 统计
 
-- ?? GPIO: 37 / 43
-- ?? GPIO: 6
-- ??????: PC0, PC1 (SWD ???), PF0~PF3 (SSI1 ?)
+- 已用 GPIO: 37 / 43
+- 空闲 GPIO: 6
+- 调试冲突注意: PC0, PC1 (SWD 复用), PF0~PF3 (SSI1 占用)
