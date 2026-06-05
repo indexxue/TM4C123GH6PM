@@ -52,7 +52,8 @@ $Sources=@(
     (Join-Path $SrcDir "startup_tm4c123gh6pm.c")
     (Join-Path $SrcDir "main.c")
     (Join-Path $SrcDir "syscalls.c")
-    (Join-Path $SrcDir "systick.c")
+    (Join-Path $SrcDir "systick.c"),
+    (Join-Path $SrcDir "generated\pinout.c")
 )
 
 Write-Host "Compiling..." -ForegroundColor Cyan
