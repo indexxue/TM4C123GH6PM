@@ -10,6 +10,18 @@
   "gpio": [
     {
       "port": "A",
+      "pin": 0,
+      "label": "BT_RX",
+      "direction": "input"
+    },
+    {
+      "port": "A",
+      "pin": 1,
+      "label": "BT_TX",
+      "direction": "output"
+    },
+    {
+      "port": "A",
       "pin": 2,
       "label": "M1_IN1",
       "direction": "output",
@@ -81,16 +93,18 @@
     {
       "port": "B",
       "pin": 4,
-      "label": "M3_PWM_ALT",
-      "direction": "output",
-      "_usage": "Timer1A T1CCP0 (spare)"
+      "label": "BTN_UP",
+      "direction": "input",
+      "pull": "up",
+      "_usage": "?????"
     },
     {
       "port": "B",
       "pin": 5,
-      "label": "M4_PWM_ALT",
-      "direction": "output",
-      "_usage": "Timer1B T1CCP1 (spare)"
+      "label": "BTN_OK",
+      "direction": "input",
+      "pull": "up",
+      "_usage": "????"
     },
     {
       "port": "B",
@@ -126,6 +140,14 @@
       "label": "M3_IN1",
       "direction": "output",
       "_usage": "Motor 3 direction"
+    },
+    {
+      "port": "C",
+      "pin": 5,
+      "label": "BTN_DN",
+      "direction": "input",
+      "pull": "up",
+      "_usage": "????"
     },
     {
       "port": "C",
@@ -206,6 +228,12 @@
     },
     {
       "port": "E",
+      "pin": 1,
+      "label": "DBG_TX",
+      "direction": "output"
+    },
+    {
+      "port": "E",
       "pin": 2,
       "label": "LINE4",
       "direction": "input",
@@ -235,27 +263,9 @@
     {
       "port": "F",
       "pin": 4,
-      "label": "STATUS_LED",
+      "label": "RGB_LED",
       "direction": "output",
-      "init": "low"
-    },
-    {
-      "port": "E",
-      "pin": 1,
-      "label": "DBG_TX",
-      "direction": "output"
-    },
-    {
-      "port": "A",
-      "pin": 0,
-      "label": "BT_RX",
-      "direction": "input"
-    },
-    {
-      "port": "A",
-      "pin": 1,
-      "label": "BT_TX",
-      "direction": "output"
+      "_usage": "WS2812 single-bus RGB LED"
     }
   ],
   "pwm": [
