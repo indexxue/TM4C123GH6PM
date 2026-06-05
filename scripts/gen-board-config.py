@@ -43,10 +43,8 @@ def gen_pinout(cfg, out):
 # Call gen_pinout in main()
 old_main = 'print("Generating board config...")'
 new_main = 'print("Generating board config...")'
-gen = gen.replace(old_main, new_main)
-old_gen = 'gen(cfg, Path(a.out)); gen_pinout(cfg, Path(a.out))'
-new_gen = 'gen(cfg, Path(a.out)); gen_pinout(cfg, Path(a.out)); gen_pinout(cfg, Path(a.out))'
-gen = gen.replace(old_gen, new_gen)
+old_gen = 'gen(cfg, Path(a.out)); gen_pinout(cfg, Path(a.out)); '
+new_gen = 'gen(cfg, Path(a.out)); gen_pinout(cfg, Path(a.out)); ; gen_pinout(cfg, Path(a.out)); '
 
 def gen_pinout(cfg, out):
     L = ['/* Auto-generated */', '#include <stdint.h>', '#include <stdbool.h>',
@@ -55,10 +53,9 @@ def gen_pinout(cfg, out):
     L.append('void PinoutSet(void){')
     for p in cfg.get('gpio',[]):
         if p['direction']=='output':
-            L.append('    MAP_GPIOPinTypeGPIOOutput(0x%08Xu,1<<%d);' % (0x40004000+(ord(p['port'])-65)*0x1000, p['pin']))
+            L.append('    MAP_GPIOPinTypeGPIOOutput(0x%08Xu,1<<%d);' % ({'A':0x40004000,'B':0x40005000,'C':0x40006000,'D':0x40007000,'E':0x40024000,'F':0x40025000}[p['port']], p['pin']))
     L.append('}')
     (out/'pinout.c').write_text(chr(10).join(L)+chr(10), encoding='utf-8')
     H = ['#ifndef __DRIVERS_PINOUT_H__','#define __DRIVERS_PINOUT_H__','extern void PinoutSet(void);','#endif']
     (out/'pinout.h').write_text(chr(10).join(H)+chr(10), encoding='utf-8')
     print('  -> pinout.c/h (fallback)')
-

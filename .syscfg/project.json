@@ -1,40 +1,51 @@
 {
   "_format": "tm4c123-sysconfig-v1",
-  "_guide": "Edit this file to configure pins and peripherals, then rebuild.",
-  "project": {
-    "name": "TM4C123GH6PM Project",
-    "mcu": "TM4C123GH6PM",
-    "_clock_note": "16 MHz internal PIOSC default. Change to 80000000 for PLL @ 80 MHz."
-  },
-  "system": {
-    "clock_hz": 16000000
-  },
+  "project": { "name": "TM4C123 Car Project", "mcu": "TM4C123GH6PM" },
+  "system": { "clock_hz": 80000000 },
   "gpio": [
-    {
-      "port": "F", "pin": 1, "label": "LED_RED",
-      "direction": "output", "init": "high",
-      "_usage": "TM4C123G LaunchPad onboard red LED"
-    },
-    {
-      "port": "F", "pin": 2, "label": "LED_BLUE",
-      "direction": "output", "init": "low",
-      "_usage": "TM4C123G LaunchPad onboard blue LED"
-    },
-    {
-      "port": "F", "pin": 3, "label": "LED_GREEN",
-      "direction": "output", "init": "low",
-      "_usage": "TM4C123G LaunchPad onboard green LED"
-    },
-    {
-      "port": "F", "pin": 4, "label": "SW1",
-      "direction": "input", "pull": "up",
-      "_usage": "TM4C123G LaunchPad button SW1 (press = low)"
-    },
-    {
-      "port": "F", "pin": 0, "label": "SW2",
-      "direction": "input", "pull": "up", "commit": "unlock",
-      "_usage": "TM4C123G LaunchPad button SW2 (press = low, needs unlock)"
-    }
-  ],
-  "_next_steps": "Add more GPIO, UART, SPI, or I2C entries above as needed."
+    { "port": "A", "pin": 0, "label": "BT_RX",     "direction": "input",  "_usage": "UART0 RX (Bluetooth)" },
+    { "port": "A", "pin": 1, "label": "BT_TX",     "direction": "output", "_usage": "UART0 TX (Bluetooth)" },
+    { "port": "A", "pin": 2, "label": "M1_IN1",    "direction": "output", "_usage": "Motor 1 direction" },
+    { "port": "A", "pin": 3, "label": "M1_IN2",    "direction": "output", "_usage": "Motor 1 direction" },
+    { "port": "A", "pin": 4, "label": "M2_IN1",    "direction": "output", "_usage": "Motor 2 direction" },
+    { "port": "A", "pin": 5, "label": "M2_IN2",    "direction": "output", "_usage": "Motor 2 direction" },
+    { "port": "A", "pin": 6, "label": "LINE1",     "direction": "input",  "_usage": "line sensor 1" },
+    { "port": "A", "pin": 7, "label": "LINE2",     "direction": "input",  "_usage": "line sensor 2" },
+
+    { "port": "B", "pin": 0, "label": "M3_PWM",    "direction": "output", "_usage": "Timer2A T2CCP0" },
+    { "port": "B", "pin": 1, "label": "M4_PWM",    "direction": "output", "_usage": "Timer2B T2CCP1" },
+    { "port": "B", "pin": 2, "label": "I2C_SCL",   "direction": "input",  "_usage": "I2C0 SCL (IMU+OLED)" },
+    { "port": "B", "pin": 3, "label": "I2C_SDA",   "direction": "input",  "_usage": "I2C0 SDA (IMU+OLED)" },
+    { "port": "B", "pin": 4, "label": "M3_PWM_ALT","direction": "output", "_usage": "Timer1A T1CCP0 (spare)" },
+    { "port": "B", "pin": 5, "label": "M4_PWM_ALT","direction": "output", "_usage": "Timer1B T1CCP1 (spare)" },
+    { "port": "B", "pin": 6, "label": "M1_PWM",    "direction": "output", "_usage": "Timer0A T0CCP0, I2C5SCL" },
+    { "port": "B", "pin": 7, "label": "M2_PWM",    "direction": "output", "_usage": "Timer0B T0CCP1, I2C5SDA" },
+
+    { "port": "C", "pin": 0, "label": "M4_ENCA",   "direction": "input",  "_usage": "Timer4A capture, SWCLK" },
+    { "port": "C", "pin": 1, "label": "M4_ENCB",   "direction": "input",  "_usage": "Timer4B capture, SWDIO" },
+    { "port": "C", "pin": 4, "label": "M3_IN1",    "direction": "output", "_usage": "Motor 3 direction" },
+    { "port": "C", "pin": 6, "label": "LINE3",     "direction": "input",  "_usage": "line sensor 3" },
+    { "port": "C", "pin": 7, "label": "M3_IN2",    "direction": "output", "_usage": "Motor 3 direction" },
+
+    { "port": "D", "pin": 0, "label": "M4_IN1",    "direction": "output", "_usage": "Motor 4 direction" },
+    { "port": "D", "pin": 1, "label": "M4_IN2",    "direction": "output", "_usage": "Motor 4 direction" },
+    { "port": "D", "pin": 2, "label": "M1_ENCA",   "direction": "input",  "_usage": "WTimer3A capture" },
+    { "port": "D", "pin": 3, "label": "M1_ENCB",   "direction": "input",  "_usage": "WTimer3B capture" },
+    { "port": "D", "pin": 4, "label": "M2_ENCA",   "direction": "input",  "_usage": "WTimer4A capture" },
+    { "port": "D", "pin": 5, "label": "M2_ENCB",   "direction": "input",  "_usage": "WTimer4B capture" },
+    { "port": "D", "pin": 6, "label": "M3_ENCA",   "direction": "input",  "_usage": "WTimer5A capture" },
+    { "port": "D", "pin": 7, "label": "M3_ENCB",   "direction": "input",  "_usage": "WTimer5B capture" },
+
+    { "port": "E", "pin": 0, "label": "BAT_ADC",   "direction": "input",  "_usage": "ADC0 AIN0 battery" },
+    { "port": "E", "pin": 2, "label": "LINE4",     "direction": "input",  "_usage": "line sensor 4" },
+    { "port": "E", "pin": 3, "label": "BUZZER",    "direction": "output", "_usage": "buzzer PWM" },
+    { "port": "E", "pin": 4, "label": "ULTRA_TRIG","direction": "output", "_usage": "HC-SR04 trigger" },
+    { "port": "E", "pin": 5, "label": "ULTRA_ECHO","direction": "input",  "_usage": "HC-SR04 echo interrupt" },
+
+    { "port": "F", "pin": 0, "label": "SW2",       "direction": "input",  "pull": "up", "commit": "unlock" },
+    { "port": "F", "pin": 1, "label": "LED_RED",   "direction": "output", "init": "low" },
+    { "port": "F", "pin": 2, "label": "LED_BLUE",  "direction": "output", "init": "low" },
+    { "port": "F", "pin": 3, "label": "LED_GREEN", "direction": "output", "init": "low" },
+    { "port": "F", "pin": 4, "label": "SW1",       "direction": "input",  "pull": "up" }
+  ]
 }

@@ -22,6 +22,11 @@ if($LASTEXITCODE-ne0){throw "arm-none-eabi-gcc not found."}
 
 &(Join-Path $ProjectRoot "scripts\run-sysconfig.ps1")
 if($LASTEXITCODE-ne0){throw "SysConfig failed."}
+# Also run Python generator for car_config.c/h (additional to SysConfig CLI)
+& python (Join-Path $ProjectRoot "scripts\gen-board-config.py")
+
+# Generate car peripheral config (Motor/Encoder/UART/I2C/ADC)
+& python (Join-Path $ProjectRoot "scripts\gen-car-config.py")
 New-Item -ItemType Directory -Force -Path $BuildDir|Out-Null
 
 $CommonFlags=@(
@@ -54,6 +59,7 @@ $Sources=@(
     (Join-Path $SrcDir "syscalls.c")
     (Join-Path $SrcDir "systick.c"),
     (Join-Path $SrcDir "generated\pinout.c")
+    (Join-Path $SrcDir "generated\car_config.c")
 )
 
 Write-Host "Compiling..." -ForegroundColor Cyan
