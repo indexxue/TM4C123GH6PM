@@ -1,4 +1,5 @@
 /**
+ * Auto-generated from project.json
  * @cliArgs --device "TM4C123x" --part "TM4C123GH6PM" --package "64 Pin QFP|16x16"
  * @v2CliArgs --device "TM4C123GH6PM" --package "LQFP (PM)"
  * @versions {"tool":"1.27.1+4634"}
