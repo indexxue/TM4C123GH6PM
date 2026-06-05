@@ -4,199 +4,177 @@
  * @versions {"tool":"1.27.1+4634"}
  */
 
-const G1 = scripting.addPeripheral("GPIO");
-G1["0"].io = "input";
-G1.$name = "BT_RX";
-G1["0"].$suggestSolution = "PA0";
+const GPIO1 = scripting.addPeripheral("GPIO");
+GPIO1["0"].io = "input";
+GPIO1.$name = "BT_RX";
+GPIO1["0"].$suggestSolution = "PA0";
 
-const G2 = scripting.addPeripheral("GPIO");
-G2["0"].io = "output";
-G2.$name = "BT_TX";
-G2["0"].$suggestSolution = "PA1";
+const GPIO2 = scripting.addPeripheral("GPIO");
+GPIO2["0"].io = "output";
+GPIO2.$name = "BT_TX";
+GPIO2["0"].$suggestSolution = "PA1";
 
-const G3 = scripting.addPeripheral("GPIO");
-G3["0"].io = "output";
-G3.$name = "M1_IN1";
-G3["0"].$suggestSolution = "PA2";
+const GPIO3 = scripting.addPeripheral("GPIO");
+GPIO3["0"].io = "output";
+GPIO3.$name = "M1_IN1";
+GPIO3["0"].$suggestSolution = "PA2";
 
-const G4 = scripting.addPeripheral("GPIO");
-G4["0"].io = "output";
-G4.$name = "M1_IN2";
-G4["0"].$suggestSolution = "PA3";
+const GPIO4 = scripting.addPeripheral("GPIO");
+GPIO4["0"].io = "output";
+GPIO4.$name = "M1_IN2";
+GPIO4["0"].$suggestSolution = "PA3";
 
-const G5 = scripting.addPeripheral("GPIO");
-G5["0"].io = "output";
-G5.$name = "M2_IN1";
-G5["0"].$suggestSolution = "PA4";
+const GPIO5 = scripting.addPeripheral("GPIO");
+GPIO5["0"].io = "output";
+GPIO5.$name = "M2_IN1";
+GPIO5["0"].$suggestSolution = "PA4";
 
-const G6 = scripting.addPeripheral("GPIO");
-G6["0"].io = "output";
-G6.$name = "M2_IN2";
-G6["0"].$suggestSolution = "PA5";
+const GPIO6 = scripting.addPeripheral("GPIO");
+GPIO6["0"].io = "output";
+GPIO6.$name = "M2_IN2";
+GPIO6["0"].$suggestSolution = "PA5";
 
-const G7 = scripting.addPeripheral("GPIO");
-G7["0"].io = "input";
-G7.$name = "LINE1";
-G7["0"].$suggestSolution = "PA6";
+const GPIO7 = scripting.addPeripheral("GPIO");
+GPIO7["0"].io = "input";
+GPIO7.$name = "LINE1";
+GPIO7["0"].$suggestSolution = "PA6";
 
-const G8 = scripting.addPeripheral("GPIO");
-G8["0"].io = "input";
-G8.$name = "LINE2";
-G8["0"].$suggestSolution = "PA7";
+const GPIO8 = scripting.addPeripheral("GPIO");
+GPIO8["0"].io = "input";
+GPIO8.$name = "LINE2";
+GPIO8["0"].$suggestSolution = "PA7";
 
-const G9 = scripting.addPeripheral("GPIO");
-G9["0"].io = "output";
-G9.$name = "M3_PWM";
-G9["0"].$suggestSolution = "PB0";
+const GPIO9 = scripting.addPeripheral("GPIO");
+GPIO9["0"].io = "output";
+GPIO9.$name = "M3_PWM";
+GPIO9["0"].$suggestSolution = "PB0";
 
-const G10 = scripting.addPeripheral("GPIO");
-G10["0"].io = "output";
-G10.$name = "M4_PWM";
-G10["0"].$suggestSolution = "PB1";
+const GPIO10 = scripting.addPeripheral("GPIO");
+GPIO10["0"].io = "output";
+GPIO10.$name = "M4_PWM";
+GPIO10["0"].$suggestSolution = "PB1";
 
-const G11 = scripting.addPeripheral("GPIO");
-G11["0"].io = "input";
-G11.$name = "I2C_SCL";
-G11["0"].$suggestSolution = "PB2";
+const GPIO11 = scripting.addPeripheral("GPIO");
+GPIO11["0"].io = "input";
+GPIO11.$name = "I2C_SCL";
+GPIO11["0"].$suggestSolution = "PB2";
 
-const G12 = scripting.addPeripheral("GPIO");
-G12["0"].io = "input";
-G12.$name = "I2C_SDA";
-G12["0"].$suggestSolution = "PB3";
+const GPIO12 = scripting.addPeripheral("GPIO");
+GPIO12["0"].io = "input";
+GPIO12.$name = "I2C_SDA";
+GPIO12["0"].$suggestSolution = "PB3";
 
-const G13 = scripting.addPeripheral("GPIO");
-G13["0"].io = "output";
-G13.$name = "M3_PWM_ALT";
-G13["0"].$suggestSolution = "PB4";
+const GPIO13 = scripting.addPeripheral("GPIO");
+GPIO13["0"].io = "output";
+GPIO13.$name = "M3_PWM_ALT";
+GPIO13["0"].$suggestSolution = "PB4";
 
-const G14 = scripting.addPeripheral("GPIO");
-G14["0"].io = "output";
-G14.$name = "M4_PWM_ALT";
-G14["0"].$suggestSolution = "PB5";
+const GPIO14 = scripting.addPeripheral("GPIO");
+GPIO14["0"].io = "output";
+GPIO14.$name = "M4_PWM_ALT";
+GPIO14["0"].$suggestSolution = "PB5";
 
-const G15 = scripting.addPeripheral("GPIO");
-G15["0"].io = "output";
-G15.$name = "M1_PWM";
-G15["0"].$suggestSolution = "PB6";
+const GPIO15 = scripting.addPeripheral("GPIO");
+GPIO15["0"].io = "output";
+GPIO15.$name = "M1_PWM";
+GPIO15["0"].$suggestSolution = "PB6";
 
-const G16 = scripting.addPeripheral("GPIO");
-G16["0"].io = "output";
-G16.$name = "M2_PWM";
-G16["0"].$suggestSolution = "PB7";
+const GPIO16 = scripting.addPeripheral("GPIO");
+GPIO16["0"].io = "output";
+GPIO16.$name = "M2_PWM";
+GPIO16["0"].$suggestSolution = "PB7";
 
-const G17 = scripting.addPeripheral("GPIO");
-G17["0"].io = "input";
-G17.$name = "M4_ENCA";
-G17["0"].$suggestSolution = "PC0";
+const GPIO17 = scripting.addPeripheral("GPIO");
+GPIO17["0"].io = "input";
+GPIO17.$name = "M4_ENCA";
+GPIO17["0"].$suggestSolution = "PC0";
 
-const G18 = scripting.addPeripheral("GPIO");
-G18["0"].io = "input";
-G18.$name = "M4_ENCB";
-G18["0"].$suggestSolution = "PC1";
+const GPIO18 = scripting.addPeripheral("GPIO");
+GPIO18["0"].io = "input";
+GPIO18.$name = "M4_ENCB";
+GPIO18["0"].$suggestSolution = "PC1";
 
-const G19 = scripting.addPeripheral("GPIO");
-G19["0"].io = "output";
-G19.$name = "M3_IN1";
-G19["0"].$suggestSolution = "PC4";
+const GPIO19 = scripting.addPeripheral("GPIO");
+GPIO19["0"].io = "output";
+GPIO19.$name = "M3_IN1";
+GPIO19["0"].$suggestSolution = "PC4";
 
-const G20 = scripting.addPeripheral("GPIO");
-G20["0"].io = "input";
-G20.$name = "LINE3";
-G20["0"].$suggestSolution = "PC6";
+const GPIO20 = scripting.addPeripheral("GPIO");
+GPIO20["0"].io = "input";
+GPIO20.$name = "LINE3";
+GPIO20["0"].$suggestSolution = "PC6";
 
-const G21 = scripting.addPeripheral("GPIO");
-G21["0"].io = "output";
-G21.$name = "M3_IN2";
-G21["0"].$suggestSolution = "PC7";
+const GPIO21 = scripting.addPeripheral("GPIO");
+GPIO21["0"].io = "output";
+GPIO21.$name = "M3_IN2";
+GPIO21["0"].$suggestSolution = "PC7";
 
-const G22 = scripting.addPeripheral("GPIO");
-G22["0"].io = "output";
-G22.$name = "M4_IN1";
-G22["0"].$suggestSolution = "PD0";
+const GPIO22 = scripting.addPeripheral("GPIO");
+GPIO22["0"].io = "output";
+GPIO22.$name = "M4_IN1";
+GPIO22["0"].$suggestSolution = "PD0";
 
-const G23 = scripting.addPeripheral("GPIO");
-G23["0"].io = "output";
-G23.$name = "M4_IN2";
-G23["0"].$suggestSolution = "PD1";
+const GPIO23 = scripting.addPeripheral("GPIO");
+GPIO23["0"].io = "output";
+GPIO23.$name = "M4_IN2";
+GPIO23["0"].$suggestSolution = "PD1";
 
-const G24 = scripting.addPeripheral("GPIO");
-G24["0"].io = "input";
-G24.$name = "M1_ENCA";
-G24["0"].$suggestSolution = "PD2";
+const GPIO24 = scripting.addPeripheral("GPIO");
+GPIO24["0"].io = "input";
+GPIO24.$name = "M1_ENCA";
+GPIO24["0"].$suggestSolution = "PD2";
 
-const G25 = scripting.addPeripheral("GPIO");
-G25["0"].io = "input";
-G25.$name = "M1_ENCB";
-G25["0"].$suggestSolution = "PD3";
+const GPIO25 = scripting.addPeripheral("GPIO");
+GPIO25["0"].io = "input";
+GPIO25.$name = "M1_ENCB";
+GPIO25["0"].$suggestSolution = "PD3";
 
-const G26 = scripting.addPeripheral("GPIO");
-G26["0"].io = "input";
-G26.$name = "M2_ENCA";
-G26["0"].$suggestSolution = "PD4";
+const GPIO26 = scripting.addPeripheral("GPIO");
+GPIO26["0"].io = "input";
+GPIO26.$name = "M2_ENCA";
+GPIO26["0"].$suggestSolution = "PD4";
 
-const G27 = scripting.addPeripheral("GPIO");
-G27["0"].io = "input";
-G27.$name = "M2_ENCB";
-G27["0"].$suggestSolution = "PD5";
+const GPIO27 = scripting.addPeripheral("GPIO");
+GPIO27["0"].io = "input";
+GPIO27.$name = "M2_ENCB";
+GPIO27["0"].$suggestSolution = "PD5";
 
-const G28 = scripting.addPeripheral("GPIO");
-G28["0"].io = "input";
-G28.$name = "M3_ENCA";
-G28["0"].$suggestSolution = "PD6";
+const GPIO28 = scripting.addPeripheral("GPIO");
+GPIO28["0"].io = "input";
+GPIO28.$name = "M3_ENCA";
+GPIO28["0"].$suggestSolution = "PD6";
 
-const G29 = scripting.addPeripheral("GPIO");
-G29["0"].io = "input";
-G29.$name = "M3_ENCB";
-G29["0"].$suggestSolution = "PD7";
+const GPIO29 = scripting.addPeripheral("GPIO");
+GPIO29["0"].io = "input";
+GPIO29.$name = "M3_ENCB";
+GPIO29["0"].$suggestSolution = "PD7";
 
-const G30 = scripting.addPeripheral("GPIO");
-G30["0"].io = "input";
-G30.$name = "BAT_ADC";
-G30["0"].$suggestSolution = "PE0";
+const GPIO30 = scripting.addPeripheral("GPIO");
+GPIO30["0"].io = "input";
+GPIO30.$name = "BAT_ADC";
+GPIO30["0"].$suggestSolution = "PE0";
 
-const G31 = scripting.addPeripheral("GPIO");
-G31["0"].io = "input";
-G31.$name = "LINE4";
-G31["0"].$suggestSolution = "PE2";
+const GPIO31 = scripting.addPeripheral("GPIO");
+GPIO31["0"].io = "input";
+GPIO31.$name = "LINE4";
+GPIO31["0"].$suggestSolution = "PE2";
 
-const G32 = scripting.addPeripheral("GPIO");
-G32["0"].io = "output";
-G32.$name = "BUZZER";
-G32["0"].$suggestSolution = "PE3";
+const GPIO32 = scripting.addPeripheral("GPIO");
+GPIO32["0"].io = "output";
+GPIO32.$name = "BUZZER";
+GPIO32["0"].$suggestSolution = "PE3";
 
-const G33 = scripting.addPeripheral("GPIO");
-G33["0"].io = "output";
-G33.$name = "ULTRA_TRIG";
-G33["0"].$suggestSolution = "PE4";
+const GPIO33 = scripting.addPeripheral("GPIO");
+GPIO33["0"].io = "output";
+GPIO33.$name = "ULTRA_TRIG";
+GPIO33["0"].$suggestSolution = "PE4";
 
-const G34 = scripting.addPeripheral("GPIO");
-G34["0"].io = "input";
-G34.$name = "ULTRA_ECHO";
-G34["0"].$suggestSolution = "PE5";
+const GPIO34 = scripting.addPeripheral("GPIO");
+GPIO34["0"].io = "input";
+GPIO34.$name = "ULTRA_ECHO";
+GPIO34["0"].$suggestSolution = "PE5";
 
-const G35 = scripting.addPeripheral("GPIO");
-G35["0"].io = "input";
-G35["0"].pull = "up";
-G35.$name = "SW2";
-G35["0"].$suggestSolution = "PF0";
-
-const G36 = scripting.addPeripheral("GPIO");
-G36["0"].io = "output";
-G36.$name = "LED_RED";
-G36["0"].$suggestSolution = "PF1";
-
-const G37 = scripting.addPeripheral("GPIO");
-G37["0"].io = "output";
-G37.$name = "LED_BLUE";
-G37["0"].$suggestSolution = "PF2";
-
-const G38 = scripting.addPeripheral("GPIO");
-G38["0"].io = "output";
-G38.$name = "LED_GREEN";
-G38["0"].$suggestSolution = "PF3";
-
-const G39 = scripting.addPeripheral("GPIO");
-G39["0"].io = "input";
-G39["0"].pull = "up";
-G39.$name = "SW1";
-G39["0"].$suggestSolution = "PF4";
+const GPIO35 = scripting.addPeripheral("GPIO");
+GPIO35["0"].io = "output";
+GPIO35.$name = "STATUS_LED";
+GPIO35["0"].$suggestSolution = "PF1";

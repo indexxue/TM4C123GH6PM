@@ -62,6 +62,9 @@ int main(void)
     Encoder_Init();     /* 编码器捕获 */
     UART_Init();        /* 蓝牙 */
     I2C_Init();         /* IMU + OLED */
+    SSI_Init();         /* Magnetometer */
+    UART_Debug_Init();  /* Debug serial (TX only) */
+    DMA_Init();         /* uDMA */
     ADC_Init();         /* 电池检测 */
 
     /* 指示灯：红灯亮表示系统就绪 */
