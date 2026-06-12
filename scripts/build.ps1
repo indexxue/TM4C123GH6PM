@@ -4,6 +4,10 @@ $ProjectRoot=Split-Path -Parent $PSScriptRoot
 $BuildDir=Join-Path $ProjectRoot "build"
 $SrcDir=Join-Path $ProjectRoot "src"
 $IncDir=Join-Path $ProjectRoot "include"
+$CommonDir=Join-Path $ProjectRoot "Common"
+$CommonInc=Join-Path $CommonDir "inc"
+$CommonSrc=Join-Path $CommonDir "src"
+$CbbWs2812=Join-Path $ProjectRoot "cbb\ws2812b"
 $LdScript=Join-Path $ProjectRoot "ld\tm4c123gh6pm.ld"
 $ToolsDir=Join-Path $ProjectRoot "tools"
 $ToolchainBin=Join-Path $ToolsDir "bin"
@@ -35,7 +39,7 @@ New-Item -ItemType Directory -Force -Path $BuildDir|Out-Null
 $CommonFlags=@(
     "-mcpu=cortex-m4","-mthumb","-mfloat-abi=hard","-mfpu=fpv4-sp-d16"
     "-DTM4C123GH6PM","-DPART_TM4C123GH6PM"
-    "-I$IncDir","-I$SrcDir\generated"
+    "-I$IncDir","-I$CommonInc","-I$CbbWs2812"
     "-I$FreeRTOSRoot\include"
     "-I$FreeRTOSPort"
     "-std=c11","-Wall","-Wextra","-Wpedantic"
@@ -60,11 +64,20 @@ if($TivaWareFound){
 $Sources=@(
     (Join-Path $SrcDir "startup_tm4c123gh6pm.c")
     (Join-Path $SrcDir "main.c")
-    (Join-Path $SrcDir "app_tasks.c")
+    (Join-Path $SrcDir "init.c")
+    (Join-Path $SrcDir "app.c")
     (Join-Path $SrcDir "freertos_hooks.c")
     (Join-Path $SrcDir "syscalls.c")
-    (Join-Path $SrcDir "generated\pinout.c")
-    (Join-Path $SrcDir "generated\car_config.c")
+    (Join-Path $CommonSrc "pinout.c")
+    (Join-Path $CommonSrc "peripheral.c")
+    (Join-Path $CommonSrc "type.c")
+    (Join-Path $CommonSrc "log.c")
+    (Join-Path $CommonSrc "cmd.c")
+    (Join-Path $CommonSrc "battery.c")
+    (Join-Path $CommonSrc "button.c")
+    (Join-Path $CommonSrc "flexible_button.c")
+    (Join-Path $CommonSrc "led_scene.c")
+    (Join-Path $CbbWs2812 "ws2812b.c")
     (Join-Path $FreeRTOSRoot "tasks.c")
     (Join-Path $FreeRTOSRoot "queue.c")
     (Join-Path $FreeRTOSRoot "list.c")

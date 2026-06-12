@@ -5,8 +5,8 @@
             "compileCommands": "${workspaceFolder}/compile_commands.json",
             "includePath": [
                 "${workspaceFolder}/include",
-                "${workspaceFolder}/src",
-                "${workspaceFolder}/src/generated",
+                "${workspaceFolder}/Common/inc",
+                "${workspaceFolder}/cbb/ws2812b",
                 "D:/Ti/TivaWare_C_Series-2.2.0.295",
                 "D:/Ti/TivaWare_C_Series-2.2.0.295/inc",
                 "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include",

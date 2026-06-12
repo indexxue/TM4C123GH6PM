@@ -9,6 +9,9 @@ ROOT       := $(CURDIR)
 BUILD_DIR  := $(ROOT)/build
 SRC_DIR    := $(ROOT)/src
 INC_DIR    := $(ROOT)/include
+COMMON_INC := $(ROOT)/Common/inc
+COMMON_SRC := $(ROOT)/Common/src
+CBB_WS2812 := $(ROOT)/cbb/ws2812b
 LD_DIR     := $(ROOT)/ld
 SCRIPT_DIR := $(ROOT)/scripts
 
@@ -20,7 +23,7 @@ FREERTOS_PORT := $(FREERTOS_ROOT)/portable/GCC/ARM_CM4F
 
 CPU_FLAGS  := -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 DEFINES    := -D$(MCU) -DPART_TM4C123GH6PM
-INCLUDES   := -I$(INC_DIR) -I$(SRC_DIR)/generated \
+INCLUDES   := -I$(INC_DIR) -I$(COMMON_INC) -I$(CBB_WS2812) \
               -I$(FREERTOS_ROOT)/include -I$(FREERTOS_PORT) \
               -I$(TIVAWARE_ROOT) -I$(TIVAWARE_ROOT)/inc
 
@@ -35,11 +38,20 @@ LDFLAGS += $(CPU_FLAGS) -T$(LD_SCRIPT) \
 
 APP_SOURCES := $(SRC_DIR)/startup_tm4c123gh6pm.c \
                $(SRC_DIR)/main.c \
-               $(SRC_DIR)/app_tasks.c \
+               $(SRC_DIR)/init.c \
+               $(SRC_DIR)/app.c \
                $(SRC_DIR)/freertos_hooks.c \
                $(SRC_DIR)/syscalls.c \
-               $(SRC_DIR)/generated/pinout.c \
-               $(SRC_DIR)/generated/car_config.c
+               $(COMMON_SRC)/pinout.c \
+               $(COMMON_SRC)/peripheral.c \
+               $(COMMON_SRC)/type.c \
+               $(COMMON_SRC)/log.c \
+               $(COMMON_SRC)/cmd.c \
+               $(COMMON_SRC)/battery.c \
+               $(COMMON_SRC)/button.c \
+               $(COMMON_SRC)/flexible_button.c \
+               $(COMMON_SRC)/led_scene.c \
+               $(CBB_WS2812)/ws2812b.c
 
 RTOS_SOURCES := $(FREERTOS_ROOT)/tasks.c \
                 $(FREERTOS_ROOT)/queue.c \
@@ -50,7 +62,7 @@ RTOS_SOURCES := $(FREERTOS_ROOT)/tasks.c \
 SOURCES := $(APP_SOURCES) $(RTOS_SOURCES)
 
 OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(notdir $(SOURCES)))
-VPATH := $(SRC_DIR) $(SRC_DIR)/generated $(FREERTOS_ROOT) $(FREERTOS_PORT) $(FREERTOS_ROOT)/portable/MemMang
+VPATH := $(SRC_DIR) $(COMMON_SRC) $(CBB_WS2812) $(FREERTOS_ROOT) $(FREERTOS_PORT) $(FREERTOS_ROOT)/portable/MemMang
 
 .PHONY: all clean rebuild install-toolchain
 

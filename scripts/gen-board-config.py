@@ -1,5 +1,5 @@
 
-def gen_pinout(cfg, out):
+def gen_pinout(cfg, out, inc):
     L = ['/* Auto-generated pinout by gen-board-config.py */']
     L.append('#include <stdint.h>')
     L.append('#include <stdbool.h>')
@@ -31,14 +31,14 @@ def gen_pinout(cfg, out):
                 L.append('    HWREG(GPIO_PORT' + port + '_BASE+GPIO_O_PUR)|=' + mask + ';')
     L.append('}')
     (out / "pinout.c").write_text("\n".join(L), encoding="utf-8")
-    print('  -> pinout.c')
-    
-    # Also generate pinout.h
-    H = ['#ifndef __DRIVERS_PINOUT_H__', '#define __DRIVERS_PINOUT_H__']
+    print('  -> Common/src/pinout.c')
+
+    inc.mkdir(parents=True, exist_ok=True)
+    H = ['#ifndef PINOUT_H', '#define PINOUT_H']
     H.append('extern void PinoutSet(void);')
     H.append('#endif')
-    (out / "pinout.h").write_text("\n".join(H), encoding="utf-8")
-    print('  -> pinout.h')
+    (inc / "pinout.h").write_text("\n".join(H), encoding="utf-8")
+    print('  -> Common/inc/pinout.h')
 
 
 if __name__ == "__main__":
@@ -46,11 +46,16 @@ if __name__ == "__main__":
     from pathlib import Path
     ap = argparse.ArgumentParser()
     ap.add_argument("--cfg", default=str(Path(__file__).resolve().parent.parent / ".syscfg" / "project.json"))
-    ap.add_argument("--out", default=str(Path(__file__).resolve().parent.parent / "src" / "generated"))
+    root = Path(__file__).resolve().parent.parent
+    ap.add_argument("--out", default=str(root / "Common" / "src"))
+    ap.add_argument("--inc", default=str(root / "Common" / "inc"))
     a = ap.parse_args()
     cfg_path = Path(a.cfg)
     if not cfg_path.exists(): print("[SKIP]"); exit(0)
     cfg = json.loads(cfg_path.read_text(encoding="utf-8-sig"))
-    Path(a.out).mkdir(parents=True, exist_ok=True)
+    out = Path(a.out)
+    inc = Path(a.inc)
+    out.mkdir(parents=True, exist_ok=True)
+    inc.mkdir(parents=True, exist_ok=True)
     print("Generating board config...")
-    gen_pinout(cfg, Path(a.out))
+    gen_pinout(cfg, out, inc)

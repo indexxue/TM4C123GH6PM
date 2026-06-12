@@ -2,61 +2,106 @@
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/tm4c123-project/src/startup_tm4c123gh6pm.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/startup_tm4c123gh6pm.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/startup_tm4c123gh6pm.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/tm4c123-project/src/main.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/main.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/main.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
-        "file": "D:/Ti/tm4c123-project/src/app_tasks.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/app_tasks.c\""
+        "file": "D:/Ti/tm4c123-project/src/init.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/init.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/src/app.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/app.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/tm4c123-project/src/freertos_hooks.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/freertos_hooks.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/freertos_hooks.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/tm4c123-project/src/syscalls.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/syscalls.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/syscalls.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
-        "file": "D:/Ti/tm4c123-project/src/generated/pinout.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/generated/pinout.c\""
+        "file": "D:/Ti/tm4c123-project/Common/src/pinout.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/pinout.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
-        "file": "D:/Ti/tm4c123-project/src/generated/car_config.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/src/generated/car_config.c\""
+        "file": "D:/Ti/tm4c123-project/Common/src/peripheral.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/peripheral.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/type.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/type.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/log.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/log.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/cmd.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/cmd.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/battery.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/battery.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/button.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/button.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/flexible_button.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/flexible_button.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/Common/src/led_scene.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/Common/src/led_scene.c\""
+    },
+    {
+        "directory": "D:/Ti/tm4c123-project",
+        "file": "D:/Ti/tm4c123-project/cbb/ws2812b/ws2812b.c",
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/tm4c123-project/cbb/ws2812b/ws2812b.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/tasks.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/tasks.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/tasks.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/queue.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/queue.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/queue.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/list.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/list.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/list.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F/port.c\""
     },
     {
         "directory": "D:/Ti/tm4c123-project",
         "file": "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/MemMang/heap_4.c",
-        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/src/generated -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/MemMang/heap_4.c\""
+        "command": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16 -DTM4C123GH6PM -DPART_TM4C123GH6PM -std=c11 -Wall -Wextra -Wpedantic -ffunction-sections -fdata-sections -Os -g3 -ID:/Ti/tm4c123-project/include -ID:/Ti/tm4c123-project/Common/inc -ID:/Ti/tm4c123-project/cbb/ws2812b -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include -ID:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F -ID:/Ti/TivaWare_C_Series-2.2.0.295 -ID:/Ti/TivaWare_C_Series-2.2.0.295/inc -c \"D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/MemMang/heap_4.c\""
     }
 ]

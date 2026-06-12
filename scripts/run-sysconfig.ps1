@@ -3,7 +3,7 @@ $ErrorActionPreference="Stop"
 $ProjectRoot=Split-Path -Parent $PSScriptRoot
 $SysCfgTool="D:\Ti\sysconfig_1.27.1\sysconfig_cli.bat"
 $SysCfgFile=Join-Path $ProjectRoot ".syscfg\tm4c123gh6pm.syscfg"
-$OutputDir=Join-Path $ProjectRoot "src\generated"
+$OutputDir=Join-Path $ProjectRoot "Common\src"
 $FallbackPy=Join-Path $ProjectRoot "scripts\gen-board-config.py"
 
 # Try using SysConfig CLI (product.json auto-detected from device data)

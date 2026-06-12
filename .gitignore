@@ -6,8 +6,9 @@ build/
 tools/
 downloads/
 
-# Generated board config (.h 保留给 IDE 索引与跳转，仅忽略 .c)
-src/generated/*.c
+# Generated board/peripheral config (regenerated on build)
+Common/src/pinout.c
+Common/src/peripheral.c
 
 # IDE / Editor
 .vs/

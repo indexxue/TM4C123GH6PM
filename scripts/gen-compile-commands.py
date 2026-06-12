@@ -7,11 +7,13 @@ ROOT = Path(__file__).resolve().parent.parent
 TIVAWARE = Path(r"D:/Ti/TivaWare_C_Series-2.2.0.295")
 FREERTOS = TIVAWARE / "third_party/FreeRTOS/Source"
 FREERTOS_PORT = FREERTOS / "portable/GCC/ARM_CM4F"
+CBB_WS2812 = ROOT / "cbb/ws2812b"
 GCC = ROOT / "tools/bin/arm-none-eabi-gcc.exe"
 
 INCLUDES = [
     ROOT / "include",
-    ROOT / "src/generated",
+    ROOT / "Common/inc",
+    CBB_WS2812,
     FREERTOS / "include",
     FREERTOS_PORT,
     TIVAWARE,
@@ -30,11 +32,20 @@ for inc in INCLUDES:
 SOURCES = [
     ROOT / "src/startup_tm4c123gh6pm.c",
     ROOT / "src/main.c",
-    ROOT / "src/app_tasks.c",
+    ROOT / "src/init.c",
+    ROOT / "src/app.c",
     ROOT / "src/freertos_hooks.c",
     ROOT / "src/syscalls.c",
-    ROOT / "src/generated/pinout.c",
-    ROOT / "src/generated/car_config.c",
+    ROOT / "Common/src/pinout.c",
+    ROOT / "Common/src/peripheral.c",
+    ROOT / "Common/src/type.c",
+    ROOT / "Common/src/log.c",
+    ROOT / "Common/src/cmd.c",
+    ROOT / "Common/src/battery.c",
+    ROOT / "Common/src/button.c",
+    ROOT / "Common/src/flexible_button.c",
+    ROOT / "Common/src/led_scene.c",
+    CBB_WS2812 / "ws2812b.c",
     FREERTOS / "tasks.c",
     FREERTOS / "queue.c",
     FREERTOS / "list.c",
