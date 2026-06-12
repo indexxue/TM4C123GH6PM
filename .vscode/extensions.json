@@ -1,0 +1,8 @@
+{
+    "recommendations": [
+        "ms-vscode.cpptools"
+    ],
+    "unwantedRecommendations": [
+        "llvm-vs-code-extensions.vscode-clangd"
+    ]
+}

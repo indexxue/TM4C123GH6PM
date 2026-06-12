@@ -22,6 +22,8 @@
 | PB7 | M2_PWM | 输出 | Timer0B T0CCP1, I2C5SDA |
 | PC0 | M4_ENCA | 输入 | Timer4A capture, SWCLK |
 | PC1 | M4_ENCB | 输入 | Timer4B capture, SWDIO |
+| PC2 | LINE5 | 输入 | line sensor 5 |
+| PC3 | LINE6 | 输入 | line sensor 6 |
 | PC4 | M3_IN1 | 输出 | Motor 3 direction |
 | PC5 | BTN_DN | 输入 | 下键 |
 | PC6 | LINE3 | 输入 | line sensor 3 |
@@ -76,6 +78,8 @@
 |------|------|------|
 | PC0 | M4_ENCA | 输入 |
 | PC1 | M4_ENCB | 输入 |
+| PC2 | LINE5 | 输入 | line sensor 5 |
+| PC3 | LINE6 | 输入 | line sensor 6 |
 | PD2 | M1_ENCA | 输入 |
 | PD3 | M1_ENCB | 输入 |
 | PD4 | M2_ENCA | 输入 |
@@ -124,8 +128,6 @@
 | PF2 | SSI1CLK | SPI 时钟备用 |
 | PF3 | SSI1FSS | SPI 片选备用 |
 | PE1 | UART7 TX | 调试串口 |
-| PC2 | Timer5A | M4 编码器备用 A |
-| PC3 | Timer5B | M4 编码器备用 B |
 | PB2 | I2C0 SCL | IMU + OLED 共用 |
 | PB3 | I2C0 SDA | IMU + OLED 共用 |
 | PA0 | UART0 RX | 蓝牙接收 |
@@ -133,6 +135,6 @@
 
 ## 统计
 
-- 已用 GPIO: 37 / 43
-- 空闲 GPIO: 6
+- 已用 GPIO: 39 / 43
+- 空闲 GPIO: 4
 - 调试冲突注意: PC0, PC1 (SWD 复用), PF0~PF3 (SSI1 占用)

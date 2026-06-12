@@ -1,4 +1,4 @@
-﻿{
+{
     "editor.renderWhitespace": "boundary",
     "editor.rulers": [100],
     "files.associations": {
@@ -10,5 +10,12 @@
         "build/": true
     },
     "terminal.integrated.defaultProfile.windows": "PowerShell",
-    "C_Cpp.default.configurationProvider": "ms-vscode.cpptools"
+    "C_Cpp.default.compileCommands": "${workspaceFolder}/compile_commands.json",
+    "C_Cpp.default.compilerPath": "D:/Ti/tm4c123-project/tools/bin/arm-none-eabi-gcc.exe",
+    "C_Cpp.default.intelliSenseMode": "gcc-arm",
+    "C_Cpp.default.cStandard": "c11",
+    "C_Cpp.errorSquiggles": "enabled",
+    "C_Cpp.intelliSenseEngine": "default",
+    "C_Cpp.exclusionPolicy": "checkFiles",
+    "clangd.enable": false
 }

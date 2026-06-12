@@ -1,0 +1,106 @@
+---
+description: TM4C123 四轴小车项目上下文 — 每次对话必读
+alwaysApply: true
+---
+
+# TM4C123 四轴小车项目上下文
+
+## 项目是什么
+
+- **目标**：基于 **TM4C123GH6PM**（Cortex-M4F @ 80 MHz）的 **FreeRTOS** 四轴 MG513 电机小车底盘固件
+- **开发板参考**：EK-TM4C123GXL LaunchPad（板载 LED/SW 在 PF0~PF4）
+- **实际硬件**：自定义 PCB，39/43 GPIO 已分配（电机、编码器、蓝牙、IMU、OLED、循迹、超声波等）
+- **仓库**：https://github.com/indexxue/TM4C123GH6PM
+
+## 技术栈
+
+| 组件 | 路径/版本 |
+|------|-----------|
+| 语言 | C11，4 空格缩进 |
+| SDK | TivaWare C Series 2.2.0.295（`D:\Ti\TivaWare_C_Series-2.2.0.295`） |
+| RTOS | FreeRTOS v8.2.3（`TivaWare/third_party/FreeRTOS`，GCC ARM_CM4F 移植） |
+| 外设 API | TivaWare DriverLib（`driverlib/*.h`） |
+| 板级配置 | SysConfig CLI + `.syscfg/project.json` |
+| 工具链 | arm-none-eabi-gcc（首次构建自动下载到 `tools/`） |
+| IDE | Cursor / VS Code，`Ctrl+Shift+B` 触发编译 |
+
+## 目录结构
+
+```
+src/main.c              # 硬件初始化 + 启动调度器
+src/app_tasks.c         # FreeRTOS 任务（control 50Hz、heartbeat）
+include/FreeRTOSConfig.h
+src/startup_*.c         # 启动代码
+src/systick.c           # SysTick
+src/generated/          # 构建生成，禁止手改、禁止提交
+include/                  # 公共头文件（gpio.h 等）
+.syscfg/project.json      # 引脚与外设配置源（改引脚优先改这里）
+.syscfg/*.syscfg         # SysConfig 图形配置
+scripts/build.ps1         # 主编译脚本
+scripts/gen-board-config.py   # 从 JSON 生成 pinout.c/h
+scripts/gen-car-config.py     # 从 JSON 生成 car_config.c/h（Motor/Encoder/UART 等）
+ld/tm4c123gh6pm.ld        # 链接脚本
+docs/                     # 设计文档（见下方索引）
+build/                    # 编译产物（.elf / .bin），不提交
+```
+
+## 构建流程
+
+```powershell
+.\build.cmd                  # 或 .\scripts\build.ps1
+.\scripts\flash-uniflash.ps1 -Image build\tm4c123-project.bin
+```
+
+构建顺序：`run-sysconfig.ps1` → `gen-board-config.py` → `gen-car-config.py` → gcc 编译链接。
+
+## 配置与代码生成（重要）
+
+- **单一配置源**：`.syscfg/project.json`（GPIO 标签、PWM、编码器、UART、I2C、ADC、SSI、DMA）
+- **生成文件**：`src/generated/pinout.c/h`（GPIO 初始化）、`car_config.c/h`（外设 Init 函数）
+- **禁止**在 `main.c` 硬编码引脚；改引脚后重新编译即可
+- `main.c` 调用：`PinoutSet()` → `Motor_Init()` / `Encoder_Init()` / `UART_Init()` / `I2C_Init()` / `SSI_Init()` / `UART_Debug_Init()` / `DMA_Init()` / `ADC_Init()`
+
+## 外设分配摘要
+
+| 功能 | 接口 | 引脚/模块 |
+|------|------|-----------|
+| 4 路电机 PWM | Timer0/2 | PB6/PB7, PB0/PB1 @ 10 kHz |
+| 方向控制 | GPIO | PA2~5, PC4/7, PD0/1 |
+| 编码器 | WTimer3~5 + Timer4 | PD2~7, PC0/1（M4 与 SWD 冲突注意） |
+| 蓝牙 | UART0 | PA0/PA1 @ 115200 |
+| 调试串口 | UART7 TX | PE1 |
+| IMU + OLED | I2C0 | PB2/PB3 @ 400 kHz |
+| 磁力计 | SSI1 | PF0~PF3 |
+| 电池电压 | ADC0 + DMA | PE0 |
+| 循迹 | GPIO | PA6/7, PC2/3/6, PE2（6 路） |
+| 超声波 | GPIO | PE4 Trig, PE5 Echo |
+| 按键 | GPIO 上拉 | PB4/5, PC5 |
+| RGB LED | GPIO | PF4 (WS2812) |
+
+完整引脚表见 `docs/gpio-allocation.md`。
+
+## 当前开发状态
+
+`main.c` 主循环 50 Hz，**尚未实现**：
+- 蓝牙指令读取、IMU 姿态、编码器测速、PID 控制、电机 PWM 输出
+
+心跳：板载红灯 PF1 闪烁。
+
+## 开发约束
+
+- **不要提交**：`build/`、`tools/`、`downloads/`、`src/generated/`
+- **不要手改** `src/generated/` 下的文件
+- 提交前本地编译通过；提交信息简短中文/英文，说明做了什么/为什么
+- Makefile 使用 `-mfloat-abi=soft`；`build.ps1` 使用 `hard` + FPU（以 PowerShell 脚本为准）
+
+## 文档索引
+
+| 文档 | 内容 |
+|------|------|
+| `docs/project-overview.md` | 本文档完整版 |
+| `docs/gpio-allocation.md` | GPIO 引脚分配表 |
+| `docs/resource-allocation-pro.md` | 外设/定时器/DMA/中断规划 |
+| `docs/car-chassis-reference.md` | 底盘开发参考与 TivaWare API 示例 |
+| `docs/chip-selection.md` | MCU 选型分析 |
+| `docs/peripheral-selection.md` | 外设模块选型（TB6612、MPU6050 等） |
+| `README.md` | 快速上手：编译、烧录、推送 |

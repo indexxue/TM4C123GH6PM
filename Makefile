@@ -4,7 +4,6 @@ PREFIX   ?= arm-none-eabi-
 CC       := $(PREFIX)gcc
 OBJCOPY  := $(PREFIX)objcopy
 SIZE     := $(PREFIX)size
-OBJDUMP  := $(PREFIX)objdump
 
 ROOT       := $(CURDIR)
 BUILD_DIR  := $(ROOT)/build
@@ -15,17 +14,15 @@ SCRIPT_DIR := $(ROOT)/scripts
 
 LD_SCRIPT  := $(LD_DIR)/tm4c123gh6pm.ld
 
-# --- TivaWare (optional) ---
 TIVAWARE_ROOT ?= D:/Ti/TivaWare_C_Series-2.2.0.295
-ifneq ($(wildcard $(SRC_DIR)/generated/ti_drivers_config.c),)
-    CFLAGS  += -I$(TIVAWARE_ROOT)/inc
-    LDFLAGS += -L$(TIVAWARE_ROOT)/driverlib/gcc -ldriver -lc -lgcc
-    SOURCES += $(SRC_DIR)/generated/ti_drivers_config.c
-endif
+FREERTOS_ROOT := $(TIVAWARE_ROOT)/third_party/FreeRTOS/Source
+FREERTOS_PORT := $(FREERTOS_ROOT)/portable/GCC/ARM_CM4F
 
-CPU_FLAGS  := -mcpu=cortex-m4 -mthumb -mfloat-abi=soft
+CPU_FLAGS  := -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 DEFINES    := -D$(MCU) -DPART_TM4C123GH6PM
-INCLUDES   := -I$(INC_DIR) -I$(SRC_DIR)/generated
+INCLUDES   := -I$(INC_DIR) -I$(SRC_DIR)/generated \
+              -I$(FREERTOS_ROOT)/include -I$(FREERTOS_PORT) \
+              -I$(TIVAWARE_ROOT) -I$(TIVAWARE_ROOT)/inc
 
 CFLAGS += $(CPU_FLAGS) $(DEFINES) $(INCLUDES) \
           -std=c11 -Wall -Wextra -Wpedantic \
@@ -33,16 +30,29 @@ CFLAGS += $(CPU_FLAGS) $(DEFINES) $(INCLUDES) \
 
 LDFLAGS += $(CPU_FLAGS) -T$(LD_SCRIPT) \
            -Wl,--gc-sections -Wl,-Map=$(BUILD_DIR)/$(PROJECT).map \
-           -nostartfiles -specs=nosys.specs
+           -nostartfiles -specs=nosys.specs \
+           -L$(TIVAWARE_ROOT)/driverlib/gcc -ldriver -lc -lgcc
 
-SOURCES += $(SRC_DIR)/startup_tm4c123gh6pm.c \
-           $(SRC_DIR)/main.c \
-           $(SRC_DIR)/syscalls.c \
-           $(SRC_DIR)/systick.c
+APP_SOURCES := $(SRC_DIR)/startup_tm4c123gh6pm.c \
+               $(SRC_DIR)/main.c \
+               $(SRC_DIR)/app_tasks.c \
+               $(SRC_DIR)/freertos_hooks.c \
+               $(SRC_DIR)/syscalls.c \
+               $(SRC_DIR)/generated/pinout.c \
+               $(SRC_DIR)/generated/car_config.c
 
-OBJECTS := $(patsubst $(SRC_DIR)/%.c,$(BUILD_DIR)/%.o,$(SOURCES))
+RTOS_SOURCES := $(FREERTOS_ROOT)/tasks.c \
+                $(FREERTOS_ROOT)/queue.c \
+                $(FREERTOS_ROOT)/list.c \
+                $(FREERTOS_PORT)/port.c \
+                $(FREERTOS_ROOT)/portable/MemMang/heap_4.c
 
-.PHONY: all clean flash rebuild install-toolchain install-sysconfig
+SOURCES := $(APP_SOURCES) $(RTOS_SOURCES)
+
+OBJECTS := $(patsubst %.c,$(BUILD_DIR)/%.o,$(notdir $(SOURCES)))
+VPATH := $(SRC_DIR) $(SRC_DIR)/generated $(FREERTOS_ROOT) $(FREERTOS_PORT) $(FREERTOS_ROOT)/portable/MemMang
+
+.PHONY: all clean rebuild install-toolchain
 
 all: install-toolchain $(BUILD_DIR)/$(PROJECT).elf $(BUILD_DIR)/$(PROJECT).bin
 	$(SIZE) $(BUILD_DIR)/$(PROJECT).elf
@@ -55,7 +65,7 @@ install-toolchain:
 $(BUILD_DIR):
 	@if not exist "$(BUILD_DIR)" mkdir "$(BUILD_DIR)"
 
-$(BUILD_DIR)/%.o: $(SRC_DIR)/%.c | $(BUILD_DIR)
+$(BUILD_DIR)/%.o: %.c | $(BUILD_DIR)
 	$(CC) $(CFLAGS) -c $< -o $@
 
 $(BUILD_DIR)/$(PROJECT).elf: $(OBJECTS)
@@ -68,6 +78,3 @@ rebuild: clean all
 
 clean:
 	@if exist "$(BUILD_DIR)" rmdir /S /Q "$(BUILD_DIR)"
-
-flash: $(BUILD_DIR)/$(PROJECT).bin
-	powershell -ExecutionPolicy Bypass -File $(SCRIPT_DIR)\flash-uniflash.ps1 -Image "$(BUILD_DIR)\$(PROJECT).bin"

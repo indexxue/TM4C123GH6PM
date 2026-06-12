@@ -95,7 +95,7 @@ for s in cfg.get("ssi", []):
     L.append("void SSI_Init(void) {")
     L.append("    SysCtlPeripheralEnable(SYSCTL_PERIPH_%s);" % s["module"])
     L.append("    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);")
-    L.append("    SSIConfigSetExpClk(%s_BASE, SysCtlClockGet(), %d, SSI_FRF_MOTO_MODE_0, SSI_MODE_MASTER, %d, 8);" % (s["module"], s["speed"], s["speed"]/2))
+    L.append("    SSIConfigSetExpClk(%s_BASE, SysCtlClockGet(), SSI_FRF_MOTO_MODE_0, SSI_MODE_MASTER, %d, 8);" % (s["module"], s["speed"]))
     L.append("    SSIEnable(%s_BASE);" % s["module"])
     L.append("}")
     L.append("")

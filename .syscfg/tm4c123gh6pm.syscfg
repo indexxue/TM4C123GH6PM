@@ -189,3 +189,12 @@ const GPIO37 = scripting.addPeripheral("GPIO");
 GPIO37["0"].io = "output";
 GPIO37.$name = "RGB_LED";
 GPIO37["0"].$suggestSolution = "PF4";
+const GPIO38 = scripting.addPeripheral("GPIO");
+GPIO38["0"].io = "input";
+GPIO38.$name = "LINE5";
+GPIO38["0"].$suggestSolution = "PC2";
+
+const GPIO39 = scripting.addPeripheral("GPIO");
+GPIO39["0"].io = "input";
+GPIO39.$name = "LINE6";
+GPIO39["0"].$suggestSolution = "PC3";

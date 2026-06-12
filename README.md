@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-基于 **TM4C123GH6PM**（Cortex-M4F）的裸机 C 工程，目标板为 **EK-TM4C123GXL LaunchPad**。
+基于 **TM4C123GH6PM**（Cortex-M4F）的 C 工程，运行 **FreeRTOS v8.2.3**（TivaWare 自带），目标板为 **EK-TM4C123GXL LaunchPad**。
 
 在 Cursor / VS Code 中开发，用 PowerShell 脚本构建，集成 **SysConfig** 板级配置与 **TivaWare DriverLib**。工具链首次编译时自动下载，源码纳入 Git，编译产物与生成文件不提交。
 
@@ -64,7 +64,8 @@ git config --global --add safe.directory D:/Ti/tm4c123-project
 
 | 路径 | 说明 |
 |------|------|
-| `src/` | 应用与运行时源码（`main.c`、启动代码等） |
+| `src/` | 应用与运行时源码（`main.c`、`app_tasks.c`、启动代码等） |
+| `include/FreeRTOSConfig.h` | FreeRTOS 内核配置 |
 | `include/` | 公共头文件 |
 | `.syscfg/` | 板级配置（SysConfig / JSON），修改后需重新编译 |
 | `scripts/` | 构建、烧录、工具安装脚本 |

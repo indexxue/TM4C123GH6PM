@@ -266,6 +266,20 @@
       "label": "RGB_LED",
       "direction": "output",
       "_usage": "WS2812 single-bus RGB LED"
+    },
+    {
+      "port": "C",
+      "pin": 2,
+      "label": "LINE5",
+      "direction": "input",
+      "_usage": "line sensor 5"
+    },
+    {
+      "port": "C",
+      "pin": 3,
+      "label": "LINE6",
+      "direction": "input",
+      "_usage": "line sensor 6"
     }
   ],
   "pwm": [
@@ -316,12 +330,6 @@
       "timer": "WTIMER5",
       "pin_a": "PD6",
       "pin_b": "PD7"
-    },
-    {
-      "name": "M4",
-      "timer": "TIMER5",
-      "pin_a": "PC2",
-      "pin_b": "PC3"
     }
   ],
   "uart": [

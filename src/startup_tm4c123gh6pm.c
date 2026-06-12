@@ -11,15 +11,17 @@ int main(void);
 void Reset_Handler(void);
 void Default_Handler(void);
 
+/* FreeRTOS Cortex-M4F port handlers */
+void vPortSVCHandler(void);
+void xPortPendSVHandler(void);
+void xPortSysTickHandler(void);
+
 void NMI_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void HardFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void MemManage_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void BusFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void UsageFault_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void SVC_Handler(void) __attribute__((weak, alias("Default_Handler")));
 void DebugMon_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void PendSV_Handler(void) __attribute__((weak, alias("Default_Handler")));
-void SysTick_Handler(void) __attribute__((weak, alias("Default_Handler")));
 
 __attribute__((section(".isr_vector")))
 void (* const g_pfnVectors[])(void) = {
@@ -34,11 +36,11 @@ void (* const g_pfnVectors[])(void) = {
     0,
     0,
     0,
-    SVC_Handler,
+    vPortSVCHandler,
     DebugMon_Handler,
     0,
-    PendSV_Handler,
-    SysTick_Handler,
+    xPortPendSVHandler,
+    xPortSysTickHandler,
 };
 
 void Reset_Handler(void)

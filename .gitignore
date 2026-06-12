@@ -6,8 +6,8 @@ build/
 tools/
 downloads/
 
-# Generated board config
-src/generated/
+# Generated board config (.h 保留给 IDE 索引与跳转，仅忽略 .c)
+src/generated/*.c
 
 # IDE / Editor
 .vs/
