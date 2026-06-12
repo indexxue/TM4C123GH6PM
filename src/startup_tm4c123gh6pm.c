@@ -25,7 +25,7 @@ void DebugMon_Handler(void) __attribute__((weak, alias("Default_Handler")));
 
 __attribute__((section(".isr_vector")))
 void (* const g_pfnVectors[])(void) = {
-    (void (*)(void))(&_estack),
+    (void (*)(void))(uintptr_t)&_estack,
     Reset_Handler,
     NMI_Handler,
     HardFault_Handler,

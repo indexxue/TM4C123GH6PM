@@ -6,9 +6,8 @@ build/
 tools/
 downloads/
 
-# Generated board/peripheral config (regenerated on build)
-Common/src/pinout.c
-Common/src/peripheral.c
+# Legacy IDE DB at repo root (use build/ide-compile-db.json)
+compile_commands.json
 
 # IDE / Editor
 .vs/

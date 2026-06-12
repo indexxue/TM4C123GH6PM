@@ -70,17 +70,15 @@
 | NVS | — | 运行时初始化 | `ota_meta` 首次写入 |
 
 ```powershell
-# 日常开发（单镜像 @ 0x0，默认）
-.\scripts\build.ps1
-.\scripts\build.ps1 -Target standalone
+# 构建
+.\scripts\build.ps1                  # standalone
+.\scripts\build.ps1 -Target all      # bootloader + app + factory
 
-# OTA 分区产物
-.\scripts\build.ps1 -Target all
-# → build/bootloader.bin, build/app.bin, build/factory.bin
-
-.\scripts\flash-uniflash.ps1 -Image build\bootloader.bin  -Offset 0x00000000
-.\scripts\flash-uniflash.ps1 -Image build\app.bin          -Offset 0x00004000
-# 厂测（可选）：.\scripts\flash-uniflash.ps1 -Image build\factory.bin -Offset 0x00021000
+# 烧录（自动匹配偏移）
+.\flash.cmd                          # standalone @ 0x0
+.\flash.cmd -Target prod             # Boot + APP_A
+.\flash.cmd -Target app              # 仅 APP_A（须已有 Boot）
+.\flash.cmd -Target all              # Boot + APP_A + 厂测
 ```
 
 ---

@@ -1,0 +1,11 @@
+{
+  "module": "uart_debug",
+  "uart_debug": [
+    {
+      "name": "Debug",
+      "module": "UART7",
+      "tx": "PE1",
+      "baud": 115200
+    }
+  ]
+}

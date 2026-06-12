@@ -8,7 +8,7 @@
 #include "log.h"
 #include "nvs.h"
 #include "ota_meta.h"
-#include "peripheral.h"
+#include "board.h"
 
 #include "FreeRTOS.h"
 #include "semphr.h"

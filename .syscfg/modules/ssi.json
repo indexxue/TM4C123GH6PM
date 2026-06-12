@@ -1,0 +1,15 @@
+{
+  "module": "ssi",
+  "ssi": [
+    {
+      "name": "Magnetometer",
+      "module": "SSI1",
+      "clk": "PF2",
+      "fss": "PF3",
+      "rx": "PF0",
+      "tx": "PF1",
+      "mode": "master",
+      "speed": 1000000
+    }
+  ]
+}

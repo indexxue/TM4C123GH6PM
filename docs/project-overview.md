@@ -60,6 +60,8 @@ tm4c123-project/
 
 ## 3. 构建与烧录
 
+> **最新、完整的编译说明**见 **[build.md](build.md)**。本节仅保留概览。
+
 ### 前提
 
 - Windows + PowerShell
@@ -81,18 +83,7 @@ tm4c123-project/
 
 ### 构建流水线
 
-```mermaid
-flowchart LR
-    A[".syscfg/project.json"] --> B["run-sysconfig.ps1"]
-    B --> C["gen-board-config.py"]
-    A --> D["gen-car-config.py"]
-    C --> E["src/generated/pinout.c"]
-    D --> F["src/generated/car_config.c"]
-    E --> G["arm-none-eabi-gcc"]
-    F --> G
-    H["src/main.c 等"] --> G
-    G --> I["build/tm4c123-project.elf/.bin"]
-```
+见 [build.md §4](build.md#4-构建流水线)。
 
 ### 输出产物
 

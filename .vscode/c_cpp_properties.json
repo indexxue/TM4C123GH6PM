@@ -2,7 +2,7 @@
     "configurations": [
         {
             "name": "TM4C123GH6PM (ARM Cortex-M4F)",
-            "compileCommands": "${workspaceFolder}/compile_commands.json",
+            "compileCommands": "${workspaceFolder}/build/ide-compile-db.json",
             "includePath": [
                 "${workspaceFolder}/include",
                 "${workspaceFolder}/Common/inc",

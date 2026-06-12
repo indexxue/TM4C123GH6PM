@@ -1,12 +1,9 @@
 /**
- * \file    init.c
- * \brief   时钟、引脚、外设与 Common 模块初始化
- *
- * 功能模块：motor / encoder / line（各含 GPIO + 外设）
- * 板级外设：board.c（UART / I2C / ADC / SSI / DMA 等 MCU 驱动）
+ * @file    factory_init.c
+ * @brief   厂测固件板级与外设初始化
  */
 
-#include "init.h"
+#include "factory.h"
 
 #include "motor.h"
 #include "encoder.h"
@@ -15,17 +12,17 @@
 #include "log.h"
 #include "cmd.h"
 #include "ota_meta.h"
+#include "flash_layout.h"
 
 #include "driverlib/sysctl.h"
 
-/** 系统时钟 80 MHz（16 MHz 晶振 + PLL），须最先执行。 */
 static void Clock_Init(void)
 {
     SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL |
                    SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
 }
 
-void Board_Init(void)
+void Factory_Board_Init(void)
 {
     Clock_Init();
     Motor_Init();
@@ -36,4 +33,7 @@ void Board_Init(void)
     (void)log_init(NULL);
     (void)ota_init();
     (void)cmd_uart_line_service_start();
+
+    LOG_INFO("factory: init @ 0x%08lX (APP_B storage)",
+             (unsigned long)FLASH_APP_B_BASE);
 }

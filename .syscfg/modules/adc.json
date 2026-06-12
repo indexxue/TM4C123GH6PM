@@ -1,0 +1,11 @@
+{
+  "module": "adc",
+  "adc": [
+    {
+      "name": "Battery",
+      "module": "ADC0",
+      "channel": 0,
+      "pin": "PE0"
+    }
+  ]
+}

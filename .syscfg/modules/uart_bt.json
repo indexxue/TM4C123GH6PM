@@ -1,0 +1,12 @@
+{
+  "module": "uart_bt",
+  "uart": [
+    {
+      "name": "Bluetooth",
+      "module": "UART0",
+      "tx": "PA1",
+      "rx": "PA0",
+      "baud": 115200
+    }
+  ]
+}

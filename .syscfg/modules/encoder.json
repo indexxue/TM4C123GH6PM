@@ -1,0 +1,9 @@
+{
+  "module": "encoder",
+  "encoder": [
+    { "name": "M1", "timer": "WTIMER3", "pin_a": "PD2", "pin_b": "PD3" },
+    { "name": "M2", "timer": "WTIMER4", "pin_a": "PD4", "pin_b": "PD5" },
+    { "name": "M3", "timer": "WTIMER5", "pin_a": "PD6", "pin_b": "PD7" },
+    { "name": "M4", "timer": "TIMER4", "pin_a": "PC0", "pin_b": "PC1" }
+  ]
+}

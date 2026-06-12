@@ -42,7 +42,7 @@
 | M3 | BL staging 激活 | APP_B→APP_A 拷贝、`pending_verify`、回滚 | 5～7 天 | 待做 |
 | M4 | APP 侧 OTA 写 staging | 只写 APP_B、meta READY、确认启动 | 5～7 天 | 待做 |
 | M5 | 升级协议与工具 | UART/YModem 或自定义帧 + PC 脚本 | 5～7 天 | 待做 |
-| M6 | 厂测切换 | `ftmenter`/`ftmexit`、`factory.ld` | 3～5 天 | 部分（仅 `factory.ld` 构建） |
+| M6 | 厂测切换 | `ftmenter`/`ftmexit`、`factory/` 工程 | 3～5 天 | 部分（`factory.ld` + `factory/` 工程） |
 | M7 | 联调与产测 | 端到端 OTA、厂测往返、断电、回滚 | 5～7 天 | 待做 |
 
 **合计（单人兼职）**：约 **7～10 周**；与主 APP 并行建议 **11～13 周**。
@@ -181,7 +181,7 @@
 
 | # | 任务 | 产出 | 状态 |
 |---|------|------|------|
-| 6.1 | `factory.ld` 链 `0x00021000` | `build/factory.bin` | ✅（M0 已构建） |
+| 6.1 | `factory.ld` + `factory/` 独立工程 | `build/factory.bin` | ✅ |
 | 6.2 | `ftmenter`：校验 APP_B 厂测镜像 → `OTA_READY` → 复位 | Boot 搬运 B→A | 待做（依赖 M3） |
 | 6.3 | `ftmexit` | 将量产包写入 APP_B 后走激活链，或 ST-Link 重烧 `app.bin` @ APP_A | 待做 |
 | 6.4 | `ota_is_busy()` 互斥 | OTA 进行中拒绝 `ftmenter` | 待做（依赖 M4） |
@@ -236,6 +236,12 @@ ld/tm4c123gh6pm.ld              ✅  APP_STANDALONE，默认
 bootloader/
     bootloader.c                ✅  启动、跳转、boot_ota_meta_read
     bootloader.h                ✅
+factory/
+    factory_main.c              ✅  厂测入口
+    factory_init.c              ✅  板级初始化
+    factory_app.c               ✅  厂测任务
+    factory.h                   ✅
+    README.md                   ✅
 Common/inc/ota_meta.h           ✅
 Common/src/ota_meta.c           ✅
 Common/inc/nvs.h                ✅

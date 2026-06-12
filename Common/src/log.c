@@ -13,7 +13,7 @@
 #include "task.h"
 #include "semphr.h"
 
-#include "peripheral.h"
+#include "board.h"
 
 #define LOG_BUFFER_SIZE 256
 
