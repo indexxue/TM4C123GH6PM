@@ -6,6 +6,8 @@
 #include "cmd.h"
 
 #include "log.h"
+#include "nvs.h"
+#include "ota_meta.h"
 #include "peripheral.h"
 
 #include "FreeRTOS.h"
@@ -19,6 +21,7 @@
 
 #include <ctype.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 static cmd_write_fn s_write_fn;
@@ -331,6 +334,49 @@ static void cmd_i2c(int argc, const char *argv[])
     cmd_reply_ok("i2c", buf);
 }
 
+static void cmd_otmeta(int argc, const char *argv[])
+{
+    ota_meta_t meta;
+    char buf[CMD_STATUS_BUF_SIZE];
+
+    (void)argc;
+    (void)argv;
+
+    (void)ota_meta_read(&meta);
+    (void)snprintf(buf, sizeof(buf), "state=%s seq=%lu sz=%lu crc=0x%08lX ver=%.16s",
+                   ota_state_to_str((ota_state_t)meta.state), (unsigned long)meta.seq,
+                   (unsigned long)meta.image_size, (unsigned long)meta.image_crc32, meta.version);
+    cmd_reply_ok("otmeta", buf);
+}
+
+static void cmd_nvs(int argc, const char *argv[])
+{
+    char buf[CMD_STATUS_BUF_SIZE];
+
+    if ((argc == 4) && (strcmp(argv[1], "set") == 0)) {
+        uint32_t val = (uint32_t)strtoul(argv[3], NULL, 0);
+        if (nvs_set_u32(argv[2], "val", val) == STATUS_OK) {
+            cmd_reply_ok("nvs", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    if ((argc == 3) && (strcmp(argv[1], "get") == 0)) {
+        uint32_t val = 0U;
+        if (nvs_get_u32(argv[2], "val", &val) == STATUS_OK) {
+            (void)snprintf(buf, sizeof(buf), "%lu", (unsigned long)val);
+            cmd_reply_ok("nvs", buf);
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    cmd_reply_ng();
+}
+
 void cmd_register_defaults(void)
 {
     (void)cmd_register("reboot", cmd_reboot, "software reset");
@@ -338,6 +384,8 @@ void cmd_register_defaults(void)
     (void)cmd_register("version", cmd_version, "firmware version string");
     (void)cmd_register("led", cmd_led, "led r on|off (PF1 red)");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
+    (void)cmd_register("otmeta", cmd_otmeta, "dump ota_meta from NVS");
+    (void)cmd_register("nvs", cmd_nvs, "nvs get|set <ns> [value]");
 }
 
 #define CMD_READER_STACK_WORDS (1024U)

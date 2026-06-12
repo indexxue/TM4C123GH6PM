@@ -12,6 +12,7 @@
 #include "peripheral.h"
 #include "log.h"
 #include "cmd.h"
+#include "ota_meta.h"
 
 #include "driverlib/sysctl.h"
 
@@ -37,5 +38,6 @@ void Board_Init(void)
     ADC_Init();
 
     (void)log_init(NULL);
+    (void)ota_init();
     (void)cmd_uart_line_service_start();
 }
