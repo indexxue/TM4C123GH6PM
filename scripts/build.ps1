@@ -102,6 +102,7 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "cmd.c"),
         (Join-Path $CommonSrc "battery.c"),
         (Join-Path $CommonSrc "button.c"),
+        (Join-Path $CommonSrc "buzzer.c"),
         (Join-Path $CommonSrc "flexible_button.c"),
         (Join-Path $CommonSrc "crc32.c"),
         (Join-Path $CommonSrc "nvs.c")

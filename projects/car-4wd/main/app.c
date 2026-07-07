@@ -7,6 +7,7 @@
 
 #include "board.h"
 #include "button.h"
+#include "buzzer.h"
 #include "cmd.h"
 #include "device_profile.h"
 #include "event.h"
@@ -52,6 +53,9 @@ static void heartbeat_timer_cb(TimerHandle_t timer)
 
 static void app_user_init(void)
 {
+    buzzer_init();
+    buzzer_chirp(2U, BUZZER_DEFAULT_ON_MS, BUZZER_DEFAULT_GAP_MS);
+
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         s_heartbeat_timer = xTimerCreate("hb_tmr",
                                          pdMS_TO_TICKS(APP_HEARTBEAT_PERIOD_MS),
@@ -98,10 +102,14 @@ static void app_on_input(void)
 
 static void app_button_notify(btn_id_e id, const char *name, btn_permission_e permission, btn_event_e event)
 {
-    (void)id;
-    (void)name;
     (void)permission;
-    (void)event;
+
+    if (event != BTN_EVENT_NONE) {
+        LOG_INFO("button id=%d(%s) name=%s event=%s",
+                 (int)id, button_id_to_str(id),
+                 (name != NULL) ? name : "NULL",
+                 button_event_to_str(event));
+    }
     event_set(EVT_ID_BUTTON);
 }
 

@@ -89,10 +89,14 @@ static void app_on_input(void)
 
 static void app_button_notify(btn_id_e id, const char *name, btn_permission_e permission, btn_event_e event)
 {
-    (void)id;
-    (void)name;
     (void)permission;
-    (void)event;
+
+    if (event != BTN_EVENT_NONE) {
+        LOG_INFO("button id=%d(%s) name=%s event=%s",
+                 (int)id, button_id_to_str(id),
+                 (name != NULL) ? name : "NULL",
+                 button_event_to_str(event));
+    }
     event_set(EVT_ID_BUTTON);
 }
 

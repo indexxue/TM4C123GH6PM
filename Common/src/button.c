@@ -3,26 +3,32 @@
 #include "flexible_button.h"
 #include "log.h"
 
+#include "board.h"
+#include "bsp_adc.h"
+
 #include "inc/hw_memmap.h"
-#include "driverlib/gpio.h"
 
 #include <string.h>
 
 #define BTN_NUM 3
 
-#define BTN_UP_PORT  GPIO_PORTB_BASE
-#define BTN_UP_PIN   GPIO_PIN_4
-#define BTN_OK_PORT  GPIO_PORTB_BASE
-#define BTN_OK_PIN   GPIO_PIN_5
-#define BTN_DN_PORT  GPIO_PORTC_BASE
-#define BTN_DN_PIN   GPIO_PIN_5
+/* PE2 / ADC1 AIN1：10k 上拉至 3.3V，按键电阻 10k / 5.1k / 1k 至 GND */
+#define BTN_ADC_RAW_RELEASE_MIN   2800U
+#define BTN_ADC_RAW_THRESH_UP_OK  1650U
+#define BTN_ADC_RAW_THRESH_OK_DN   900U
+#define BTN_ADC_RAW_THRESH_DN_MIN  250U
+
+static const bsp_adc_channel_t s_button_adc_channel = { 1U, 0U };
+static const bsp_adc_config_t s_button_adc_cfg = {
+    .base = ADC1_BASE,
+    .sequence = 0U,
+    .channels = &s_button_adc_channel,
+    .channel_count = 1U,
+};
 
 typedef struct {
     btn_id_e id;
     const char *name;
-    uint32_t port;
-    uint8_t pin;
-    uint8_t active_level;
     uint16_t permission;
     flex_button_t flex;
 } button_list_t;
@@ -31,6 +37,7 @@ typedef struct {
     uint8_t num;
     button_list_t *list;
     btn_notify_t notify;
+    bool adc_ready;
 } button_item_t;
 
 static button_list_t s_button_list[BTN_NUM];
@@ -38,17 +45,48 @@ static button_item_t self = {0};
 
 static btn_id_e last_button_id = BTN_ID_MAX_NUMBER;
 static btn_event_e last_button_event = BTN_EVENT_NONE;
+static btn_id_e s_adc_pressed_id = BTN_ID_MAX_NUMBER;
+static uint32_t s_adc_last_raw = 0U;
 
-static uint8_t button_read_level(uint32_t port, uint8_t pin)
+static btn_id_e button_adc_decode(uint32_t raw)
 {
-    return (GPIOPinRead(port, pin) != 0U) ? 1U : 0U;
+    if (raw >= BTN_ADC_RAW_RELEASE_MIN) {
+        return BTN_ID_MAX_NUMBER;
+    }
+    if (raw >= BTN_ADC_RAW_THRESH_UP_OK) {
+        return BTN_ID_UP;
+    }
+    if (raw >= BTN_ADC_RAW_THRESH_OK_DN) {
+        return BTN_ID_OK;
+    }
+    if (raw >= BTN_ADC_RAW_THRESH_DN_MIN) {
+        return BTN_ID_DN;
+    }
+    return BTN_ID_MAX_NUMBER;
+}
+
+static void button_adc_sample(void)
+{
+    uint32_t raw;
+
+    if (!self.adc_ready) {
+        return;
+    }
+
+    if (!bsp_adc_sample_one(&s_button_adc_cfg, &raw)) {
+        return;
+    }
+
+    s_adc_last_raw = raw;
+    s_adc_pressed_id = button_adc_decode(raw);
 }
 
 static uint8_t button_flex_read(void *flex)
 {
     flex_button_t *btn = (flex_button_t *)flex;
     button_list_t *list = (button_list_t *)btn->user_data;
-    return button_read_level(list->port, list->pin);
+
+    return (s_adc_pressed_id == list->id) ? 1U : 0U;
 }
 
 static void button_flex_event_callback(void *arg)
@@ -99,7 +137,7 @@ static void button_flex_init(button_list_t *list)
     (void)memset(&list->flex, 0, sizeof(flex_button_t));
     list->flex.usr_button_read = button_flex_read;
     list->flex.cb = button_flex_event_callback;
-    list->flex.pressed_logic_level = (list->active_level ? 1u : 0u);
+    list->flex.pressed_logic_level = 1U;
     list->flex.debounce_tick = FLEX_MS_TO_SCAN_CNT(80);
     list->flex.max_multiple_clicks_interval = FLEX_MS_TO_SCAN_CNT(600);
     list->flex.short_press_start_tick = FLEX_MS_TO_SCAN_CNT(2000);
@@ -113,23 +151,14 @@ static void button_config(void)
 {
     s_button_list[0].id = BTN_ID_UP;
     s_button_list[0].name = "UP";
-    s_button_list[0].port = BTN_UP_PORT;
-    s_button_list[0].pin = BTN_UP_PIN;
-    s_button_list[0].active_level = 0;
     s_button_list[0].permission = (uint16_t)BTN_PERMISSION_UP;
 
     s_button_list[1].id = BTN_ID_OK;
     s_button_list[1].name = "OK";
-    s_button_list[1].port = BTN_OK_PORT;
-    s_button_list[1].pin = BTN_OK_PIN;
-    s_button_list[1].active_level = 0;
     s_button_list[1].permission = (uint16_t)BTN_PERMISSION_CONFIRM;
 
     s_button_list[2].id = BTN_ID_DN;
     s_button_list[2].name = "DN";
-    s_button_list[2].port = BTN_DN_PORT;
-    s_button_list[2].pin = BTN_DN_PIN;
-    s_button_list[2].active_level = 0;
     s_button_list[2].permission = (uint16_t)BTN_PERMISSION_DOWN;
 
     self.num = BTN_NUM;
@@ -139,10 +168,25 @@ static void button_config(void)
 void button_init(btn_notify_t notify)
 {
     uint8_t i;
+    uint32_t raw;
 
     (void)memset(&self, 0, sizeof(button_item_t));
     button_config();
     self.notify = notify;
+
+    if (!bsp_adc_init(&s_button_adc_cfg)) {
+        LOG_ERROR("button: ADC1 AIN1 init failed (PE2)");
+        return;
+    }
+
+    self.adc_ready = true;
+    if (bsp_adc_sample_one(&s_button_adc_cfg, &raw)) {
+        s_adc_last_raw = raw;
+        s_adc_pressed_id = button_adc_decode(raw);
+        LOG_INFO("button: ADC1 AIN1 @ PE2 ready, idle raw=%lu", (unsigned long)raw);
+    } else {
+        LOG_WARN("button: ADC1 AIN1 @ PE2 init ok, first sample failed");
+    }
 
     for (i = 0U; i < BTN_NUM; i++) {
         button_flex_init(&s_button_list[i]);
@@ -154,6 +198,7 @@ void button_schedule(void)
     if (self.list == NULL || self.num == 0U) {
         return;
     }
+    button_adc_sample();
     (void)flex_button_scan();
 }
 
@@ -161,6 +206,7 @@ void button_deinit(void)
 {
     self.list = NULL;
     self.num = 0;
+    self.adc_ready = false;
     (void)memset(&self, 0, sizeof(button_item_t));
 }
 
@@ -239,12 +285,33 @@ uint8_t button_get_level(btn_id_e id)
         return 0xFFU;
     }
 
+    button_adc_sample();
     for (i = 0U; i < self.num; i++) {
         button_list_t *p = &self.list[i];
         if (p->id == id) {
-            return button_read_level(p->port, p->pin);
+            return (s_adc_pressed_id == p->id) ? 1U : 0U;
         }
     }
 
     return 0xFFU;
+}
+
+bool button_adc_raw_get(uint32_t *raw)
+{
+    if ((raw == NULL) || !self.adc_ready) {
+        return false;
+    }
+
+    if (!bsp_adc_sample_one(&s_button_adc_cfg, raw)) {
+        return false;
+    }
+
+    s_adc_last_raw = *raw;
+    s_adc_pressed_id = button_adc_decode(*raw);
+    return true;
+}
+
+btn_id_e button_adc_pressed_id(void)
+{
+    return s_adc_pressed_id;
 }

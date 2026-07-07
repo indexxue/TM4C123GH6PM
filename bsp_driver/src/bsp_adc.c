@@ -14,8 +14,15 @@
 #include "driverlib/sysctl.h"
 #include "inc/hw_memmap.h"
 
+#include "FreeRTOS.h"
+#include "semphr.h"
+#include "task.h"
+
 #define BSP_ADC_PERIPH_READY_US 100000U
 #define BSP_ADC_SAMPLE_TIMEOUT_US 100000U
+#define BSP_ADC_LOCK_TIMEOUT_MS 50U
+
+static SemaphoreHandle_t s_adc1_mutex;
 
 static uint32_t adc_periph_from_base(uint32_t base)
 {
@@ -27,6 +34,44 @@ static uint32_t adc_periph_from_base(uint32_t base)
     default:
         return 0U;
     }
+}
+
+static void adc1_mutex_init(void)
+{
+    if (s_adc1_mutex == NULL) {
+        s_adc1_mutex = xSemaphoreCreateMutex();
+    }
+}
+
+static bool adc_lock(uint32_t base)
+{
+    if (base != ADC1_BASE) {
+        return true;
+    }
+
+    adc1_mutex_init();
+    if (s_adc1_mutex == NULL) {
+        return true;
+    }
+
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return true;
+    }
+
+    return xSemaphoreTake(s_adc1_mutex, pdMS_TO_TICKS(BSP_ADC_LOCK_TIMEOUT_MS)) == pdTRUE;
+}
+
+static void adc_unlock(uint32_t base)
+{
+    if ((base != ADC1_BASE) || (s_adc1_mutex == NULL)) {
+        return;
+    }
+
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return;
+    }
+
+    (void)xSemaphoreGive(s_adc1_mutex);
 }
 
 static uint32_t adc_ctl_for_channel(uint8_t channel)
@@ -61,18 +106,23 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
         return false;
     }
 
+    if (cfg->base == ADC1_BASE) {
+        adc1_mutex_init();
+    }
+
     SysCtlPeripheralEnable(periph);
     if (!bsp_periph_wait_ready(periph, BSP_ADC_PERIPH_READY_US)) {
         return false;
     }
 
     ADCReferenceSet(cfg->base, ADC_REF_INT);
+    ADCSequenceDisable(cfg->base, cfg->sequence);
     ADCSequenceConfigure(cfg->base, cfg->sequence, ADC_TRIGGER_PROCESSOR, 0);
 
     for (i = 0U; i < cfg->channel_count; i++) {
         uint32_t ctl = adc_ctl_for_channel(cfg->channels[i].channel);
         if (i == (cfg->channel_count - 1U)) {
-            ctl |= ADC_CTL_END;
+            ctl |= ADC_CTL_END | ADC_CTL_IE;
         }
         ADCSequenceStepConfigure(cfg->base, cfg->sequence, cfg->channels[i].step, ctl);
     }
@@ -85,22 +135,31 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
 bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
 {
     bsp_timeout_t timeout;
+    bool ok = false;
 
     if ((cfg == NULL) || (values == NULL) || (count < cfg->channel_count)) {
         return false;
     }
 
+    if (!adc_lock(cfg->base)) {
+        return false;
+    }
+
+    ADCIntClear(cfg->base, cfg->sequence);
     ADCProcessorTrigger(cfg->base, cfg->sequence);
     bsp_timeout_start_us(&timeout, BSP_ADC_SAMPLE_TIMEOUT_US);
     while (!ADCIntStatus(cfg->base, cfg->sequence, false)) {
         if (bsp_timeout_expired(&timeout)) {
+            adc_unlock(cfg->base);
             return false;
         }
     }
 
     ADCIntClear(cfg->base, cfg->sequence);
     ADCSequenceDataGet(cfg->base, cfg->sequence, values);
-    return true;
+    ok = true;
+    adc_unlock(cfg->base);
+    return ok;
 }
 
 bool bsp_adc_sample_one(const bsp_adc_config_t *cfg, uint32_t *value)

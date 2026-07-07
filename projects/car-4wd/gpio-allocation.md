@@ -9,8 +9,8 @@
 | PF4 | M1_IN1 | 输出 | Motor 1 direction |
 | PC7 | M1_IN2 | 输出 | Motor 1 direction |
 | PC4 | M2_IN1 | 输出 | Motor 2 direction |
-| PA0 | M2_IN2 | 输出 | Motor 2 direction |
-| PA1 | M3_IN1 | 输出 | Motor 3 direction |
+| PD4 | M2_IN2 | 输出 | Motor 2 direction |
+| PD5 | M3_IN1 | 输出 | Motor 3 direction |
 | PA6 | M3_IN2 | 输出 | Motor 3 direction |
 | PA7 | M4_IN1 | 输出 | Motor 4 direction |
 | PF0 | M4_IN2 | 输出 | Motor 4 direction |
@@ -30,12 +30,12 @@
 | PD0 | LINE4 | 输入 | ADC1 AIN7 line 4 |
 | PE5 | LINE5 | 输入 | ADC1 AIN8 line 5 |
 | PE4 | LINE6 | 输入 | ADC1 AIN9 line 6 |
-| PD5 | BUZZER | 输出 | buzzer |
+| PB1 | BUZZER | 输出 | buzzer |
 | PC3 | RGB_LED | 输出 | WS2812 |
 | PC2 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
 | PC1 | ULTRA_ECHO | 输入 | HC-SR04 echo |
-| PB0 | BT_RX | 输入 | UART1 RX |
-| PB1 | BT_TX | 输出 | UART1 TX |
+| PA0 | BT_RX | 输入 | UART0 RX |
+| PA1 | BT_TX | 输出 | UART0 TX |
 | PB2 | I2C_SCL | 输入 | I2C0 SCL |
 | PB3 | I2C_SDA | 输入 | I2C0 SDA |
 | PE0 | DBG_RX | 输入 | UART7 RX |
@@ -61,8 +61,8 @@
 | PF4 | M1_IN1 | 输出 |
 | PC7 | M1_IN2 | 输出 |
 | PC4 | M2_IN1 | 输出 |
-| PA0 | M2_IN2 | 输出 |
-| PA1 | M3_IN1 | 输出 |
+| PD4 | M2_IN2 | 输出 |
+| PD5 | M3_IN1 | 输出 |
 | PA6 | M3_IN2 | 输出 |
 | PA7 | M4_IN1 | 输出 |
 | PF0 | M4_IN2 | 输出 |
@@ -80,8 +80,8 @@
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PB0 | BT_RX | 输入 |
-| PB1 | BT_TX | 输出 |
+| PA0 | BT_RX | 输入 |
+| PA1 | BT_TX | 输出 |
 | PB2 | I2C_SCL | 输入 |
 | PB3 | I2C_SDA | 输入 |
 | PE0 | DBG_RX | 输入 |
@@ -111,7 +111,7 @@
 | 引脚 | 功能 | 方向 |
 |------|------|------|
 | PE2 | BTN_ADC | 输入 |
-| PD5 | BUZZER | 输出 |
+| PB1 | BUZZER | 输出 |
 | PC3 | RGB_LED | 输出 |
 
 ## 生成代码

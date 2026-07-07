@@ -9,6 +9,7 @@
 #include "log.h"
 #include "nvs.h"
 #include "board.h"
+#include "button.h"
 #include "bsp_adc.h"
 
 #include "FreeRTOS.h"
@@ -359,18 +360,26 @@ static void cmd_motor(int argc, const char *argv[])
 
 static void cmd_adc(int argc, const char *argv[])
 {
-    uint32_t values[8];
+    uint32_t bat_raw = 0U;
+    uint32_t btn_raw = 0U;
     char buf[CMD_STATUS_BUF_SIZE];
 
     (void)argc;
     (void)argv;
 
-    if (!bsp_adc_sample(&BOARD_ADC_CFG, values, BOARD_ADC_CFG.channel_count)) {
+    if (!bsp_adc_sample_one(&BOARD_BATTERY_ADC_CFG, &bat_raw)) {
         cmd_reply_ng();
         return;
     }
 
-    (void)snprintf(buf, sizeof(buf), "bat_raw=%lu", (unsigned long)values[0]);
+    if (!button_adc_raw_get(&btn_raw)) {
+        cmd_reply_ng();
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf), "bat_raw=%lu btn_raw=%lu btn=%s",
+                   (unsigned long)bat_raw, (unsigned long)btn_raw,
+                   button_id_to_str(button_adc_pressed_id()));
     cmd_reply_ok("adc", buf);
 }
 
@@ -381,7 +390,7 @@ void cmd_register_defaults(void)
     (void)cmd_register("version", cmd_version, "firmware version string");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
-    (void)cmd_register("adc", cmd_adc, "adc sample (battery raw)");
+    (void)cmd_register("adc", cmd_adc, "adc sample (bat_raw btn_raw btn_id)");
     (void)cmd_register("nvs", cmd_nvs, "nvs get|set <ns> [value]");
 }
 

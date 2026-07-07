@@ -30,9 +30,10 @@ static void motor_apply_dir(const bsp_gpio_pin_t *in1, const bsp_gpio_pin_t *in2
 }
 
 void Motor_Init(void) {
-    (void)bsp_gpio_port_enable(0x27u);
-    gpio_outputs(GPIO_PORTA_BASE, GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_6 | GPIO_PIN_7);
+    (void)bsp_gpio_port_enable(0x2Fu);
+    gpio_outputs(GPIO_PORTA_BASE, GPIO_PIN_6 | GPIO_PIN_7);
     gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_7);
+    gpio_outputs(GPIO_PORTD_BASE, GPIO_PIN_4 | GPIO_PIN_5);
     gpio_outputs(GPIO_PORTF_BASE, GPIO_PIN_0 | GPIO_PIN_4);
     GPIOPinConfigure(GPIO_PB6_T0CCP0);
     GPIOPinConfigure(GPIO_PB7_T0CCP1);

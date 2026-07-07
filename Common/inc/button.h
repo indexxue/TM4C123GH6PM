@@ -59,6 +59,8 @@ const char *button_id_to_str(btn_id_e id);
 const char *button_event_to_str(btn_event_e event);
 void button_log_notify(btn_id_e id, const char *name, btn_permission_e permission, btn_event_e event);
 uint8_t button_get_level(btn_id_e id);
+bool button_adc_raw_get(uint32_t *raw);
+btn_id_e button_adc_pressed_id(void);
 
 #ifdef __cplusplus
 }

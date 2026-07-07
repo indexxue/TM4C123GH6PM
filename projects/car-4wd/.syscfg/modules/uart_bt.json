@@ -3,9 +3,9 @@
   "uart": [
     {
       "name": "Bluetooth",
-      "module": "UART1",
-      "tx": "PB1",
-      "rx": "PB0",
+      "module": "UART0",
+      "tx": "PA1",
+      "rx": "PA0",
       "baud": 115200
     }
   ]
