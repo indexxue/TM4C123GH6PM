@@ -64,6 +64,12 @@ bool bsp_uart_init(const bsp_uart_config_t *cfg)
                         UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE);
     UARTFIFOEnable(cfg->base);
     UARTEnable(cfg->base);
+
+    if (cfg->base == UART7_BASE) {
+        s_debug_uart_base = UART7_BASE;
+        s_debug_uart_ready = true;
+    }
+
     return true;
 }
 

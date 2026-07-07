@@ -1,35 +1,51 @@
 ﻿/**
  * \file    syscalls.c
  * \brief   裸机 newlib 系统调用存根
- *
- * 此文件提供 CMSIS / newlib 在裸机场景下所需的系统调用。
- * 默认实现空操作，可配合调试器或 UART 输出重写 _write / _read。
  */
 
 #include <errno.h>
-#include <sys/stat.h>
 #include <stdint.h>
+#include <sys/stat.h>
 
 #undef errno
 extern int errno;
 
-/* 堆空间起始 (由链接脚本定义) */
 extern uint32_t _ebss;
+extern uint32_t _estack;
 
-/* ---------------------------------------------------------------------------
- * _sbrk – 堆空间分配 (malloc / free 依赖)
- * -------------------------------------------------------------------------*/
+#define MAIN_STACK_RESERVE 2048U
+
+static uint8_t *s_heap_end;
+
 void *_sbrk(int incr)
 {
-    static uint32_t *heap_limit = (uint32_t *)&_ebss;
-    uint32_t *prev = heap_limit;
-    heap_limit += incr;
-    return (void *)prev;
+    uint8_t *prev;
+    uint8_t *limit;
+
+    if (s_heap_end == NULL) {
+        s_heap_end = (uint8_t *)&_ebss;
+    }
+
+    if (incr < 0) {
+        s_heap_end += incr;
+        return (void *)(s_heap_end - incr);
+    }
+
+    prev = s_heap_end;
+    {
+        uintptr_t stack_top = (uintptr_t)&_estack;
+
+        limit = (uint8_t *)(stack_top - (uintptr_t)MAIN_STACK_RESERVE);
+    }
+    if ((s_heap_end + (uint32_t)incr) > limit) {
+        errno = ENOMEM;
+        return (void *)-1;
+    }
+
+    s_heap_end += incr;
+    return prev;
 }
 
-/* ---------------------------------------------------------------------------
- * _write – 输出字符流 (空操作；重定向到 UART 或 Semihosting)
- * -------------------------------------------------------------------------*/
 int _write(int file, char *ptr, int len)
 {
     (void)file;
@@ -37,9 +53,6 @@ int _write(int file, char *ptr, int len)
     return len;
 }
 
-/* ---------------------------------------------------------------------------
- * _read – 输入字符流 (空操作)
- * -------------------------------------------------------------------------*/
 int _read(int file, char *ptr, int len)
 {
     (void)file;
@@ -48,7 +61,6 @@ int _read(int file, char *ptr, int len)
     return 0;
 }
 
-/* ---------- 其余 newlib 必要存根 -----------------------------------------*/
 int _close(int file)                { (void)file; return -1; }
 
 int _fstat(int file, struct stat *st)

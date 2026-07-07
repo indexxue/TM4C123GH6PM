@@ -86,17 +86,20 @@ ADCSequenceEnable(ADC1_BASE, 3);
 
 ## 软件架构
 
-当前工程初始化（`projects/<car>/src/init.c`）：
+当前工程初始化（`Common/src/start.c` → `Start_Init()`，`main/app.c` → `App_Start()`）：
 
 ```
-Board_Init()
-├── Clock_Init()           80 MHz PLL
-├── Motor_Init()           PWM + 方向 GPIO
+Start_Init()
+├── bsp_clock_init()       按 device_profile 选时钟源
+├── bsp_systick_init()
+├── Motor_Init()           PWM + 方向 GPIO（board_mask）
 ├── Encoder_Init()         QEI
-├── Line_Init()            数字巡线（若有）
+├── Line_Init()            数字巡线
 ├── Board_Periph_Init()    UART / I2C / ADC / SSI
-├── log_init()
-├── ota_init()
+└── log_init()
+
+App_Start()
+├── xTaskCreate(PrimaryTask)
 └── cmd_uart_line_service_start()
 ```
 

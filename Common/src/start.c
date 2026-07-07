@@ -8,24 +8,11 @@
 #include "device_profile.h"
 #include "log.h"
 
+#include "board.h"
+
 #include "bsp_sysctl.h"
 #include "bsp_systick.h"
 #include "bsp_uart.h"
-
-#ifndef FIRMWARE_PROFILE_LOG_ONLY
-#define FIRMWARE_PROFILE_LOG_ONLY 0
-#endif
-
-#if !FIRMWARE_PROFILE_LOG_ONLY
-#include "motor.h"
-#include "encoder.h"
-#include "line.h"
-#include "board.h"
-#include "cmd.h"
-#include "ota_meta.h"
-#else
-#include "board.h"
-#endif
 
 static bsp_clock_source_t map_clock_source(device_clock_source_t source)
 {
@@ -73,17 +60,11 @@ void Start_Init(void)
     bsp_systick_init();
 
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
-#if !FIRMWARE_PROFILE_LOG_ONLY
         if (Board_UartDebug_Init()) {
             bsp_uart_debug_puts("\r\n[start] UART7 PE1 ready @ 115200\r\n");
         }
-#else
-        bsp_uart_debug_init(115200U);
-        bsp_uart_debug_puts("\r\n[start] UART7 PE1 ready @ 115200\r\n");
-#endif
     }
 
-#if !FIRMWARE_PROFILE_LOG_ONLY
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         Motor_Init();
     }
@@ -98,7 +79,6 @@ void Start_Init(void)
             bsp_uart_debug_puts("[start] Board_Periph_Init FAILED\r\n");
         }
     }
-#endif
 
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         if (log_init(NULL) != STATUS_OK) {
@@ -106,19 +86,7 @@ void Start_Init(void)
         } else {
             bsp_uart_debug_puts("[start] log_init OK\r\n");
             start_report_clock_hz();
+            LOG_INFO("start: %s booting", profile->name);
         }
     }
-
-#if !FIRMWARE_PROFILE_LOG_ONLY
-    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_OTA)) {
-        (void)ota_init();
-    }
-    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_CMD)) {
-        (void)cmd_uart_line_service_start();
-    }
-
-    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
-        LOG_INFO("start: %s ready", profile->name);
-    }
-#endif
 }

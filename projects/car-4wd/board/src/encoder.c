@@ -3,12 +3,11 @@
 #include <stdint.h>
 #include "bsp_gpio.h"
 #include "bsp_qei.h"
-#include "periph_bind.h"
 #include "driverlib/gpio.h"
 #include "driverlib/pin_map.h"
 #include "driverlib/sysctl.h"
 #include "inc/hw_memmap.h"
-#include "encoder.h"
+#include "board.h"
 
 
 

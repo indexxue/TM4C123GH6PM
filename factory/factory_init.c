@@ -5,13 +5,9 @@
 
 #include "factory.h"
 
-#include "motor.h"
-#include "encoder.h"
-#include "line.h"
 #include "board.h"
 #include "log.h"
 #include "cmd.h"
-#include "ota_meta.h"
 #include "flash_layout.h"
 
 #include "driverlib/sysctl.h"
@@ -31,7 +27,6 @@ void Factory_Board_Init(void)
     Board_Periph_Init();
 
     (void)log_init(NULL);
-    (void)ota_init();
     (void)cmd_uart_line_service_start();
 
     LOG_INFO("factory: init @ 0x%08lX (APP_B storage)",

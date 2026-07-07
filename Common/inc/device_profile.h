@@ -47,14 +47,12 @@ typedef enum {
     (DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER | DEVICE_BOARD_MASK_LINE | DEVICE_BOARD_MASK_PERIPH)
 
 /* -------------------------------------------------------------------------- */
-/* 平台壳层掩码（start.c / app.c：log、cmd、ota、led、button）                   */
+/* 平台壳层掩码（start.c / app.c：log、cmd、button）                   */
 /* -------------------------------------------------------------------------- */
 
 #define DEVICE_PLATFORM_MASK_LOG    (1U << 0)
 #define DEVICE_PLATFORM_MASK_CMD    (1U << 1)
-#define DEVICE_PLATFORM_MASK_OTA    (1U << 2)
-#define DEVICE_PLATFORM_MASK_LED    (1U << 3)
-#define DEVICE_PLATFORM_MASK_BUTTON (1U << 4)
+#define DEVICE_PLATFORM_MASK_BUTTON (1U << 2)
 
 /* -------------------------------------------------------------------------- */
 /* 产品档案                                                                    */

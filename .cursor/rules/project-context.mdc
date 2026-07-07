@@ -66,15 +66,14 @@ docs/                   # 设计文档
 完整说明见 **`docs/build.md`**。
 
 ```powershell
-.\build.cmd                              # 默认 car-4wd log-only
-.\build.cmd -Profile full                # 全外设
-.\build.cmd -CarProject car-2wd -Profile full
+.\build.cmd                              # 默认 car-4wd
+.\build.cmd -CarProject car-2wd
 .\flash-jlink.cmd
 ```
 
 - 配置源：`projects/<car>/.syscfg/`（**勿手改** `projects/<car>/board/src/{motor,encoder,line,board}.c`）
 - 生成：`projects/<car>/board/src/motor.c`、`encoder.c`、`line.c`、`board.c`
-- 初始化：`Common/src/start.c` 按 `device_profile` 的 board_mask 调用 `Motor_Init()` → …
+- 初始化：`projects/<car>/main/main.c` 调用 `Start_Init()`（`Common/src/start.c`）
 
 ## 外设分配摘要
 
@@ -97,9 +96,9 @@ docs/                   # 设计文档
 
 ## 当前开发状态
 
-v1 **log-only** profile：UART7 日志 + 1 Hz 心跳，已对齐 ESP32-S3 分层框架。
+平台层：UART7 日志 + 蓝牙 CMD + 1 Hz 心跳；板级外设 init 已接通。
 
-**尚未实现**（full profile）：蓝牙指令、IMU、编码器测速、PID、电机 PWM。
+**待实现**：IMU、编码器测速、PID、循迹控制等业务逻辑。
 
 ## 开发约束
 

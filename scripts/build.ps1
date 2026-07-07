@@ -23,7 +23,6 @@ $CommonInc = Join-Path $CommonDir "inc"
 $CommonSrc = Join-Path $CommonDir "src"
 $BspInc = Join-Path $ProjectRoot "bsp_driver\inc"
 $BspSrc = Join-Path $ProjectRoot "bsp_driver\src"
-$CbbWs2812 = Join-Path $ProjectRoot "cbb\ws2812b"
 $LdDir = Join-Path $ProjectRoot "ld"
 $ToolsDir = Join-Path $ProjectRoot "tools"
 $ToolchainBin = Join-Path $ToolsDir "bin"
@@ -49,7 +48,7 @@ $env:PATH = "$ToolchainBin;$env:PATH"
 & arm-none-eabi-gcc --version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "arm-none-eabi-gcc not found." }
 
-function Get-ProfileDefines {
+function Get-DeviceDefines {
     $productId = if ($CarProject -eq "car-2wd") { 2 } else { 1 }
     return @("-DDEVICE_PRODUCT_ID=$productId")
 }
@@ -82,6 +81,7 @@ function Get-FreeRtosSources {
         (Join-Path $FreeRTOSRoot "tasks.c"),
         (Join-Path $FreeRTOSRoot "queue.c"),
         (Join-Path $FreeRTOSRoot "list.c"),
+        (Join-Path $FreeRTOSRoot "timers.c"),
         (Join-Path $FreeRTOSPort "port.c"),
         (Join-Path $FreeRTOSRoot "portable\MemMang\heap_4.c")
     )
@@ -92,6 +92,7 @@ function Get-CommonCoreSources {
         (Join-Path $CommonSrc "type.c"),
         (Join-Path $CommonSrc "device_profile.c"),
         (Join-Path $CommonSrc "start.c"),
+        (Join-Path $CommonSrc "event.c"),
         (Join-Path $CommonSrc "log.c")
     )
 }
@@ -102,12 +103,8 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "battery.c"),
         (Join-Path $CommonSrc "button.c"),
         (Join-Path $CommonSrc "flexible_button.c"),
-        (Join-Path $CommonSrc "led_scene.c"),
         (Join-Path $CommonSrc "crc32.c"),
-        (Join-Path $CommonSrc "nvs_flash_ops.c"),
-        (Join-Path $CommonSrc "nvs.c"),
-        (Join-Path $CommonSrc "ota_meta.c"),
-        (Join-Path $CbbWs2812 "ws2812b.c")
+        (Join-Path $CommonSrc "nvs.c")
     )
 }
 
@@ -139,8 +136,7 @@ function Get-FactorySources {
 
 function Get-BootloaderSources {
     return @(
-        (Join-Path $BlDir "bootloader.c"),
-        (Join-Path $CommonSrc "crc32.c")
+        (Join-Path $BlDir "bootloader.c")
     )
 }
 
@@ -167,13 +163,12 @@ function Build-FirmwareTarget {
     $ObjDir = Join-Path $BuildDir "obj\$Name"
     New-Item -ItemType Directory -Force -Path $ObjDir | Out-Null
 
-    $Defines = @("-DTM4C123GH6PM", "-DPART_TM4C123GH6PM") + (Get-ProfileDefines) + $ExtraDefines
+    $Defines = @("-DTM4C123GH6PM", "-DPART_TM4C123GH6PM") + (Get-DeviceDefines) + $ExtraDefines
     $Includes = @(
         "-I$IncDir",
         "-I$BoardInc",
         "-I$BspInc",
         "-I$CommonInc",
-        "-I$CbbWs2812",
         "-I$BlDir",
         "-I$FreeRTOSRoot\include",
         "-I$FreeRTOSPort"
@@ -190,7 +185,7 @@ function Build-FirmwareTarget {
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16",
         "-T$LdScript",
         "-Wl,--gc-sections", "-Wl,-Map=$BuildDir\$Name.map",
-        "-nostartfiles", "-specs=nosys.specs"
+        "-nostartfiles", "-specs=nosys.specs", "-specs=nano.specs"
     )
 
     if ($TivaWareFound) {
@@ -205,10 +200,12 @@ function Build-FirmwareTarget {
 
     $Objects = @()
     foreach ($Source in $Sources) {
-        $Base = [IO.Path]::GetFileNameWithoutExtension($Source)
-        $Object = Join-Path $ObjDir "$Base.o"
-        Write-Host "  $([IO.Path]::GetFileName($Source))" -ForegroundColor Gray
-        & arm-none-eabi-gcc @CommonFlags -c $Source -o $Object
+        $AbsSource = (Resolve-Path -LiteralPath $Source).Path
+        $Rel = $AbsSource.Substring($ProjectRoot.Length).TrimStart('\', '/')
+        $Safe = ($Rel -replace '[\\/]', '_') -replace '\.c$','.o'
+        $Object = Join-Path $ObjDir $Safe
+        Write-Host "  $Rel" -ForegroundColor Gray
+        & arm-none-eabi-gcc @CommonFlags -c $AbsSource -o $Object
         if ($LASTEXITCODE -ne 0) { throw "Compilation failed: $Source" }
         $Objects += $Object
     }

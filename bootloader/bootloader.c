@@ -1,9 +1,11 @@
 /**
  * @file    bootloader.c
- * @brief   TM4C123 Bootloader：启动、调试输出、APP 校验跳转、ota_meta 只读
+ * @brief   TM4C123 Bootloader：校验 APP_A / APP_B 并按 NVS slot 跳转
  */
 
 #include "bootloader.h"
+
+#include "boot_slot.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -12,9 +14,7 @@
 #include <string.h>
 #include <sys/stat.h>
 
-#include "crc32.h"
 #include "flash_layout.h"
-#include "nvs.h"
 
 #include "inc/hw_memmap.h"
 #include "inc/hw_types.h"
@@ -167,7 +167,7 @@ void Default_Handler(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 硬件与调试输出（内部）                                                       */
+/* 硬件与调试输出                                                               */
 /* -------------------------------------------------------------------------- */
 
 static void boot_clock_init(void)
@@ -215,9 +215,33 @@ static void boot_log_puts(const char *s)
     }
 }
 
+static void boot_log_hex32(uint32_t value)
+{
+    static const char hex[] = "0123456789ABCDEF";
+    int shift;
+
+    boot_log_puts("0x");
+    for (shift = 28; shift >= 0; shift -= 4) {
+        boot_log_putc(hex[(value >> (uint32_t)shift) & 0xFU]);
+    }
+}
+
 /* -------------------------------------------------------------------------- */
 /* APP 镜像校验与跳转                                                           */
 /* -------------------------------------------------------------------------- */
+
+static bool boot_app_range_ok(uint32_t app_base, uint32_t *app_end_out)
+{
+    if (app_base == FLASH_APP_A_BASE) {
+        *app_end_out = FLASH_APP_A_END;
+        return true;
+    }
+    if (app_base == FLASH_APP_B_BASE) {
+        *app_end_out = FLASH_APP_B_END;
+        return true;
+    }
+    return false;
+}
 
 bool boot_app_is_valid(uint32_t app_base)
 {
@@ -225,8 +249,9 @@ bool boot_app_is_valid(uint32_t app_base)
     uint32_t sp;
     uint32_t reset;
     uint32_t reset_addr;
+    uint32_t app_end;
 
-    if (app_base != FLASH_APP_A_BASE) {
+    if (!boot_app_range_ok(app_base, &app_end)) {
         return false;
     }
 
@@ -246,7 +271,7 @@ bool boot_app_is_valid(uint32_t app_base)
     }
 
     reset_addr = reset & ~1U;
-    if ((reset_addr < FLASH_APP_A_BASE) || (reset_addr > FLASH_APP_A_END)) {
+    if ((reset_addr < app_base) || (reset_addr > app_end)) {
         return false;
     }
 
@@ -269,99 +294,19 @@ void boot_app_jump(uint32_t app_base)
     }
 }
 
-/* -------------------------------------------------------------------------- */
-/* ota_meta 只读（不链 FreeRTOS / NVS 写路径）                                  */
-/* -------------------------------------------------------------------------- */
-
-static uint32_t boot_meta_compute_crc(const ota_meta_t *meta)
+static uint32_t boot_pick_target(uint32_t preferred_slot)
 {
-    ota_meta_t tmp;
-    size_t crc_len = offsetof(ota_meta_t, crc32);
+    uint32_t preferred_base = boot_slot_target_base(preferred_slot);
+    uint32_t fallback_base =
+        (preferred_base == FLASH_APP_A_BASE) ? FLASH_APP_B_BASE : FLASH_APP_A_BASE;
 
-    memcpy(&tmp, meta, sizeof(tmp));
-    tmp.crc32 = 0U;
-    return crc32_compute(&tmp, crc_len);
-}
-
-static void boot_meta_set_defaults(ota_meta_t *meta)
-{
-    memset(meta, 0, sizeof(*meta));
-    meta->magic = OTA_META_MAGIC;
-    meta->struct_version = OTA_META_STRUCT_VERSION;
-    meta->state = OTA_STATE_IDLE;
-    meta->crc32 = boot_meta_compute_crc(meta);
-}
-
-static bool boot_meta_is_valid(const ota_meta_t *meta)
-{
-    if (meta->magic != OTA_META_MAGIC) {
-        return false;
+    if (boot_app_is_valid(preferred_base)) {
+        return preferred_base;
     }
-    if (meta->struct_version != OTA_META_STRUCT_VERSION) {
-        return false;
+    if (boot_app_is_valid(fallback_base)) {
+        return fallback_base;
     }
-    if (meta->crc32 != boot_meta_compute_crc(meta)) {
-        return false;
-    }
-    if (meta->state > OTA_STATE_CONFIRMED) {
-        return false;
-    }
-    return true;
-}
-
-static uint32_t boot_nvs_page_base(uint32_t page_index)
-{
-    return FLASH_NVS_BASE + (page_index * NVS_PAGE_SIZE);
-}
-
-static bool boot_nvs_page_hdr_valid(uint32_t page_index)
-{
-    const uint32_t *raw = (const uint32_t *)boot_nvs_page_base(page_index);
-
-    if (raw[0] != NVS_PAGE_MAGIC) {
-        return false;
-    }
-    if (raw[1] != NVS_PAGE_VERSION) {
-        return false;
-    }
-    return true;
-}
-
-int boot_ota_meta_read(ota_meta_t *out)
-{
-    uint32_t i;
-    bool found = false;
-    ota_meta_t best;
-
-    if (out == NULL) {
-        return -1;
-    }
-
-    memset(&best, 0, sizeof(best));
-
-    for (i = 0U; i < NVS_PAGE_COUNT; i++) {
-        const ota_meta_t *candidate =
-            (const ota_meta_t *)(boot_nvs_page_base(i) + NVS_OTA_META_OFFSET);
-
-        if (!boot_nvs_page_hdr_valid(i)) {
-            continue;
-        }
-        if (!boot_meta_is_valid(candidate)) {
-            continue;
-        }
-        if ((!found) || (candidate->seq >= best.seq)) {
-            best = *candidate;
-            found = true;
-        }
-    }
-
-    if (!found) {
-        boot_meta_set_defaults(out);
-        return -1;
-    }
-
-    *out = best;
-    return 0;
+    return 0U;
 }
 
 /* -------------------------------------------------------------------------- */
@@ -370,17 +315,28 @@ int boot_ota_meta_read(ota_meta_t *out)
 
 int main(void)
 {
+    uint32_t slot;
+    uint32_t target;
+
     boot_hw_init();
     boot_log_puts("\r\n[boot] TM4C123 start\r\n");
 
-    if (!boot_app_is_valid(FLASH_APP_A_BASE)) {
-        boot_log_puts("[boot] APP_A invalid, halt\r\n");
+    slot = boot_slot_read();
+    target = boot_pick_target(slot);
+
+    if (target == 0U) {
+        boot_log_puts("[boot] APP_A/APP_B invalid, halt\r\n");
         for (;;) {
         }
     }
 
-    boot_log_puts("[boot] jump APP_A @ 0x00004000\r\n");
-    boot_app_jump(FLASH_APP_A_BASE);
+    boot_log_puts("[boot] slot=");
+    boot_log_putc((slot == BOOT_SLOT_B) ? 'B' : 'A');
+    boot_log_puts(" jump ");
+    boot_log_hex32(target);
+    boot_log_puts("\r\n");
+
+    boot_app_jump(target);
 
     for (;;) {
     }

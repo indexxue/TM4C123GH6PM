@@ -3,14 +3,12 @@
 #include <stdint.h>
 #include "bsp_gpio.h"
 #include "bsp_timer.h"
-#include "gpio_pins.h"
-#include "periph_bind.h"
 #include "driverlib/gpio.h"
 #include "driverlib/pin_map.h"
 #include "driverlib/sysctl.h"
 #include "inc/hw_memmap.h"
 #include "driverlib/timer.h"
-#include "motor.h"
+#include "board.h"
 
 static void gpio_outputs(uint32_t port, uint8_t pins)
 {

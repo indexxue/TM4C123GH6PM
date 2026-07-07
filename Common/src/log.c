@@ -5,9 +5,11 @@
 
 #include "log.h"
 
-#include <stdio.h>
-#include <string.h>
 #include <stdarg.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
+#include <string.h>
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -89,6 +91,217 @@ static const char *log_get_filename(const char *filepath)
     return filepath;
 }
 
+static int log_fmt_append_char(char *buf, size_t cap, int pos, char c)
+{
+    if ((pos < 0) || ((size_t)pos >= cap)) {
+        return pos;
+    }
+    buf[pos] = c;
+    return pos + 1;
+}
+
+static int log_fmt_append_str(char *buf, size_t cap, int pos, const char *s)
+{
+    if (s == NULL) {
+        s = "(null)";
+    }
+
+    while (*s != '\0') {
+        pos = log_fmt_append_char(buf, cap, pos, *s++);
+        if ((size_t)pos >= cap) {
+            break;
+        }
+    }
+    return pos;
+}
+
+static int log_fmt_append_uint(char *buf, size_t cap, int pos, uint32_t value, unsigned width,
+                               bool zero_pad)
+{
+    char digits[10];
+    int count = 0;
+    int i;
+
+    if (value == 0U) {
+        digits[count++] = '0';
+    } else {
+        while ((value > 0U) && (count < 10)) {
+            digits[count++] = (char)('0' + (value % 10U));
+            value /= 10U;
+        }
+    }
+
+    while ((count < (int)width) && ((size_t)pos + 1U < cap)) {
+        pos = log_fmt_append_char(buf, cap, pos, zero_pad ? '0' : ' ');
+        if ((size_t)pos >= cap) {
+            return pos;
+        }
+        width--;
+    }
+
+    for (i = count - 1; i >= 0; i--) {
+        pos = log_fmt_append_char(buf, cap, pos, digits[i]);
+        if ((size_t)pos >= cap) {
+            break;
+        }
+    }
+
+    return pos;
+}
+
+static int log_fmt_append_int(char *buf, size_t cap, int pos, int32_t value)
+{
+    if (value < 0) {
+        pos = log_fmt_append_char(buf, cap, pos, '-');
+        return log_fmt_append_uint(buf, cap, pos, (uint32_t)(-(value + 1)) + 1U, 0U, false);
+    }
+    return log_fmt_append_uint(buf, cap, pos, (uint32_t)value, 0U, false);
+}
+
+static int log_fmt_append_hex(char *buf, size_t cap, int pos, uint32_t value, unsigned width,
+                              bool upper)
+{
+    static const char *lower = "0123456789abcdef";
+    static const char *upper_digits = "0123456789ABCDEF";
+    const char *digits = upper ? upper_digits : lower;
+    char tmp[8];
+    int count = 0;
+    int i;
+
+    if (value == 0U) {
+        tmp[count++] = '0';
+    } else {
+        while ((value > 0U) && (count < 8)) {
+            tmp[count++] = digits[value & 0xFU];
+            value >>= 4;
+        }
+    }
+
+    while ((count < (int)width) && ((size_t)pos + 1U < cap)) {
+        pos = log_fmt_append_char(buf, cap, pos, '0');
+        width--;
+    }
+
+    for (i = count - 1; i >= 0; i--) {
+        pos = log_fmt_append_char(buf, cap, pos, tmp[i]);
+        if ((size_t)pos >= cap) {
+            break;
+        }
+    }
+
+    return pos;
+}
+
+static int log_fmt_vsnprintf(char *buf, size_t cap, const char *fmt, va_list args)
+{
+    int pos = 0;
+
+    if ((buf == NULL) || (cap == 0U) || (fmt == NULL)) {
+        return 0;
+    }
+
+    while ((*fmt != '\0') && ((size_t)pos + 1U < cap)) {
+        if (*fmt != '%') {
+            pos = log_fmt_append_char(buf, cap, pos, *fmt++);
+            continue;
+        }
+
+        fmt++;
+        {
+            bool zero_pad = false;
+            unsigned width = 0U;
+            bool long_mod = false;
+
+            if (*fmt == '0') {
+                zero_pad = true;
+                fmt++;
+            }
+
+            while ((*fmt >= '0') && (*fmt <= '9')) {
+                width = (width * 10U) + (unsigned)(*fmt - '0');
+                fmt++;
+            }
+
+            if (*fmt == 'l') {
+                long_mod = true;
+                fmt++;
+            }
+
+            switch (*fmt) {
+            case 's':
+                pos = log_fmt_append_str(buf, cap, pos, va_arg(args, const char *));
+                break;
+            case 'c':
+                pos = log_fmt_append_char(buf, cap, pos, (char)va_arg(args, int));
+                break;
+            case 'u':
+                if (long_mod) {
+                    pos = log_fmt_append_uint(buf, cap, pos, va_arg(args, uint32_t), width,
+                                              zero_pad);
+                } else {
+                    pos = log_fmt_append_uint(buf, cap, pos, va_arg(args, unsigned int), width,
+                                              zero_pad);
+                }
+                break;
+            case 'd':
+                if (long_mod) {
+                    pos = log_fmt_append_int(buf, cap, pos, (int32_t)va_arg(args, int32_t));
+                } else {
+                    pos = log_fmt_append_int(buf, cap, pos, va_arg(args, int));
+                }
+                break;
+            case 'x':
+                if (long_mod) {
+                    pos = log_fmt_append_hex(buf, cap, pos, va_arg(args, uint32_t), width, false);
+                } else {
+                    pos = log_fmt_append_hex(buf, cap, pos, va_arg(args, unsigned int), width,
+                                             false);
+                }
+                break;
+            case 'X':
+                if (long_mod) {
+                    pos = log_fmt_append_hex(buf, cap, pos, va_arg(args, uint32_t), width, true);
+                } else {
+                    pos = log_fmt_append_hex(buf, cap, pos, va_arg(args, unsigned int), width,
+                                             true);
+                }
+                break;
+            case 'p':
+                pos = log_fmt_append_str(buf, cap, pos, "0x");
+                pos = log_fmt_append_hex(buf, cap, pos,
+                                         (uint32_t)(uintptr_t)va_arg(args, void *), 0U, false);
+                break;
+            case '%':
+                pos = log_fmt_append_char(buf, cap, pos, '%');
+                break;
+            default:
+                pos = log_fmt_append_char(buf, cap, pos, '?');
+                break;
+            }
+            fmt++;
+        }
+    }
+
+    if ((size_t)pos < cap) {
+        buf[pos] = '\0';
+    } else if (cap > 0U) {
+        buf[cap - 1U] = '\0';
+    }
+
+    return pos;
+}
+
+static int log_fmt_snprintf(char *buf, size_t cap, const char *fmt, ...)
+{
+    va_list args;
+    int n;
+
+    va_start(args, fmt);
+    n = log_fmt_vsnprintf(buf, cap, fmt, args);
+    va_end(args);
+    return n;
+}
+
 static uint32_t log_get_timestamp_ms(void)
 {
     if (log_scheduler_running == pdFALSE) {
@@ -131,21 +344,16 @@ status_t log_set_file_line(bool enable)
 
 status_t log_init(log_output_func_t output_func)
 {
-    if (log_mutex == NULL) {
-        log_mutex = xSemaphoreCreateMutex();
-        if (log_mutex == NULL) {
-            return STATUS_NO_MEM;
-        }
-    }
-
     log_output_func = output_func;
     log_config.initialized = true;
-
     return STATUS_OK;
 }
 
 void log_notify_scheduler_running(void)
 {
+    if (log_mutex == NULL) {
+        log_mutex = xSemaphoreCreateMutex();
+    }
     log_scheduler_running = pdTRUE;
 }
 
@@ -180,8 +388,8 @@ void log_output(log_level_t level, const char *file, uint16_t line, const char *
 
     if (log_config.timestamp_enable) {
         uint32_t timestamp = log_get_timestamp_ms();
-        int ts_len = snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "[%05lu] ",
-                              (unsigned long)timestamp);
+        int ts_len = log_fmt_snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "[%05lu] ",
+                                  (unsigned long)timestamp);
         if (ts_len > 0 && pos + ts_len < LOG_BUFFER_SIZE) {
             pos += ts_len;
         }
@@ -189,7 +397,7 @@ void log_output(log_level_t level, const char *file, uint16_t line, const char *
 
     {
         const char *level_str = log_level_strings[level];
-        int level_len = snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "[%s] ", level_str);
+        int level_len = log_fmt_snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "[%s] ", level_str);
         if (level_len > 0 && pos + level_len < LOG_BUFFER_SIZE) {
             pos += level_len;
         }
@@ -197,14 +405,14 @@ void log_output(log_level_t level, const char *file, uint16_t line, const char *
 
     if (log_config.file_line_enable && file != NULL) {
         const char *filename = log_get_filename(file);
-        int fl_len = snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "%s:%u ", filename, (unsigned)line);
+        int fl_len = log_fmt_snprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), "%s:%u ", filename, (unsigned)line);
         if (fl_len > 0 && pos + fl_len < LOG_BUFFER_SIZE) {
             pos += fl_len;
         }
     }
 
     va_start(args, fmt);
-    int fmt_len = vsnprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), fmt, args);
+    int fmt_len = log_fmt_vsnprintf(buffer + pos, (size_t)(LOG_BUFFER_SIZE - pos), fmt, args);
     va_end(args);
 
     if (fmt_len > 0 && pos + fmt_len < LOG_BUFFER_SIZE) {

@@ -19,10 +19,10 @@
 
 ```
 projects/
-  car-4wd/     .syscfg/  source/（设备库）  src/（应用）  build/
+  car-4wd/     .syscfg/  board/（设备库）  main/（应用）  build/
   car-2wd/     同上
-Common/        跨工程公共模块（log、nvs、ota…）
-include/       全局头文件
+Common/        跨工程公共模块（log、nvs、ota、start、app…）
+include/       芯片级头文件（FreeRTOSConfig、flash_layout、tm4c123gh6pm）
 scripts/       build.ps1、gen_config.py、flash-*.ps1
 ld/            链接脚本
 bootloader/    Bootloader
@@ -47,13 +47,11 @@ docs/          设计文档
 ## 初始化顺序
 
 ```c
-Motor_Init();
-Encoder_Init();
-Line_Init();
-Board_Periph_Init();
+Start_Init();   /* Common/src/start.c：clock → bsp → board → log */
+App_Start();    /* projects/<car>/main/app.c：业务任务 */
 ```
 
-定义于 `projects/<car>/src/init.c`。
+`Start_Init()` 内部按 `device_profile` 的 `board_mask` 调用 `Motor_Init()`、`Encoder_Init()`、`Line_Init()`、`Board_Periph_Init()`。
 
 ---
 

@@ -25,6 +25,15 @@
 #define NVS_NS_MAX              8U
 #define NVS_BLOB_MAX            128U
 
+typedef enum {
+    NVS_FLASH_ALLOW_NVS = 1U << 0,
+    NVS_FLASH_ALLOW_STAGING = 1U << 1,
+} nvs_flash_allow_t;
+
+status_t nvs_flash_erase(uint32_t address, uint32_t length, nvs_flash_allow_t allow);
+status_t nvs_flash_program(uint32_t address, const void *data, uint32_t length,
+                           nvs_flash_allow_t allow);
+
 status_t nvs_init(void);
 uint32_t nvs_active_page_index(void);
 void nvs_set_active_page_index(uint32_t page_index);

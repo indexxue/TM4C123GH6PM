@@ -1,27 +1,18 @@
 /* Auto-generated board module — edit .syscfg, not this file */
 #include <stdbool.h>
 #include <stdint.h>
+#include "bsp_gpio.h"
+#include "bsp_uart.h"
+#include "bsp_i2c.h"
+#include "bsp_adc.h"
+#include "bsp_dma.h"
+#include "bsp_spi.h"
 #include "driverlib/gpio.h"
 #include "driverlib/pin_map.h"
 #include "driverlib/sysctl.h"
+#include "driverlib/timer.h"
 #include "inc/hw_memmap.h"
-#include "driverlib/uart.h"
-#include "driverlib/i2c.h"
-#include "driverlib/adc.h"
-#include "driverlib/ssi.h"
-#include "driverlib/udma.h"
 #include "board.h"
-
-static void gpio_enable_ports(uint32_t ports)
-{
-    if (ports & (1u << 0)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA); }
-    if (ports & (1u << 1)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB); }
-    if (ports & (1u << 2)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC); }
-    if (ports & (1u << 3)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD); }
-    if (ports & (1u << 4)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE); }
-    if (ports & (1u << 5)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF); }
-    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA)) {}
-}
 
 static void gpio_outputs(uint32_t port, uint8_t pins)
 {
@@ -36,8 +27,79 @@ static void gpio_inputs(uint32_t port, uint8_t pins, bool pullup)
     }
 }
 
-void Board_Periph_Init(void) {
-    gpio_enable_ports(0x1Fu);
+static const bsp_pwm_channel_t board_pwm_channels[] = {
+    { TIMER0_BASE, SYSCTL_PERIPH_TIMER0, TIMER_A, 10000 },
+    { TIMER0_BASE, SYSCTL_PERIPH_TIMER0, TIMER_B, 10000 },
+};
+const bsp_pwm_config_t BOARD_PWM_CFG = {
+    .channels = board_pwm_channels,
+    .channel_count = 2,
+    .clock_hz = 80000000,
+};
+
+static const bsp_qei_channel_t board_qei_channels[] = {
+    { QEI1_BASE, SYSCTL_PERIPH_QEI1 },
+    { QEI0_BASE, SYSCTL_PERIPH_QEI0 },
+};
+const bsp_qei_config_t BOARD_QEI_CFG = {
+    .channels = board_qei_channels,
+    .channel_count = 2,
+};
+
+const bsp_uart_config_t BOARD_UART_BT_CFG = { UART1_BASE, 115200 };
+
+const bsp_uart_config_t BOARD_UART_DEBUG_CFG = { UART7_BASE, 115200 };
+
+const bsp_i2c_config_t BOARD_I2C_CFG = { I2C0_BASE, 400000 };
+
+static const bsp_adc_channel_t board_adc_channels[] = {
+    { 0, 0 },
+    { 1, 1 },
+    { 5, 2 },
+    { 4, 3 },
+    { 7, 4 },
+    { 6, 5 },
+};
+const bsp_adc_config_t BOARD_ADC_CFG = {
+    .base = ADC1_BASE,
+    .sequence = 3,
+    .channels = board_adc_channels,
+    .channel_count = 6,
+};
+
+static const bsp_adc_channel_t board_battery_channel = { 0, 0 };
+const bsp_adc_config_t BOARD_BATTERY_ADC_CFG = {
+    .base = ADC1_BASE,
+    .sequence = 2,
+    .channels = &board_battery_channel,
+    .channel_count = 1,
+};
+
+const bsp_spi_config_t BOARD_SPI_CFG = {
+    .base = SSI0_BASE,
+    .clock_hz = 1000000,
+    .mode = BSP_SPI_MODE_0,
+    .data_bits = 8,
+};
+
+bool Board_UartDebug_Init(void) {
+    if (!bsp_gpio_port_enable(0x10u)) {
+        return false;
+    }
+    GPIOPinConfigure(GPIO_PE0_U7RX);
+    GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_0);
+    GPIOPinConfigure(GPIO_PE1_U7TX);
+    GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_1);
+    if (!bsp_uart_init(&BOARD_UART_DEBUG_CFG)) {
+        return false;
+    }
+    return true;
+}
+
+bool Board_Periph_Init(void) {
+    if (!bsp_gpio_port_enable(0x1Fu)) {
+        return false;
+    }
     gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_0);
     gpio_inputs(GPIO_PORTD_BASE, GPIO_PIN_5, false);
     gpio_outputs(GPIO_PORTE_BASE, GPIO_PIN_4 | GPIO_PIN_5);
@@ -64,56 +126,46 @@ void Board_Periph_Init(void) {
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);
     GPIOPinConfigure(GPIO_PA3_SSI0FSS);
     GPIOPinTypeSSI(GPIO_PORTA_BASE, GPIO_PIN_2 | GPIO_PIN_3 | GPIO_PIN_4 | GPIO_PIN_5);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART1);
-    UARTConfigSetExpClk(UART1_BASE, SysCtlClockGet(), 115200, UART_CONFIG_WLEN_8|UART_CONFIG_STOP_ONE|UART_CONFIG_PAR_NONE);
-    UARTFIFOEnable(UART1_BASE);
-    UARTEnable(UART1_BASE);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UART7);
-    UARTConfigSetExpClk(UART7_BASE, SysCtlClockGet(), 115200, UART_CONFIG_WLEN_8|UART_CONFIG_STOP_ONE|UART_CONFIG_PAR_NONE);
-    UARTFIFOEnable(UART7_BASE);
-    UARTEnable(UART7_BASE);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_I2C0);
-    I2CMasterInitExpClk(I2C0_BASE, SysCtlClockGet(), true);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC1);
-    ADCSequenceConfigure(ADC1_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 0, ADC_CTL_CH0|ADC_CTL_IE);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 1, ADC_CTL_CH1|ADC_CTL_IE);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 2, ADC_CTL_CH5|ADC_CTL_IE);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 3, ADC_CTL_CH4|ADC_CTL_IE);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 4, ADC_CTL_CH7|ADC_CTL_IE);
-    ADCSequenceStepConfigure(ADC1_BASE, 3, 5, ADC_CTL_CH6|ADC_CTL_IE|ADC_CTL_END);
-    ADCSequenceEnable(ADC1_BASE, 3);
-    ADCProcessorTrigger(ADC1_BASE, 3);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_SSI0);
-    SSIConfigSetExpClk(SSI0_BASE, SysCtlClockGet(), SSI_FRF_MOTO_MODE_0, SSI_MODE_MASTER, 1000000, 8);
-    SSIEnable(SSI0_BASE);
-    SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);
+    if (!bsp_dma_init()) {
+        return false;
+    }
+    if (!bsp_uart_init(&BOARD_UART_BT_CFG)) {
+        return false;
+    }
+    if (!bsp_uart_init(&BOARD_UART_DEBUG_CFG)) {
+        return false;
+    }
+    if (!bsp_i2c_init(&BOARD_I2C_CFG)) {
+        return false;
+    }
+    if (!bsp_adc_init(&BOARD_ADC_CFG)) {
+        return false;
+    }
+    if (!bsp_adc_init(&BOARD_BATTERY_ADC_CFG)) {
+        return false;
+    }
+    if (!bsp_spi_init(&BOARD_SPI_CFG)) {
+        return false;
+    }
+    return true;
 }
 
 void UART_Putc(char c) {
-    UARTCharPut(UART1_BASE, c);
+    bsp_uart_putc(UART1_BASE, c);
 }
 void UART_Puts(const char* s) {
-    while (*s) { UARTCharPut(UART1_BASE, *s++); }
+    bsp_uart_puts(UART1_BASE, s);
 }
 int UART_Getc(char *c) {
-    if (UARTCharsAvail(UART1_BASE)) {
-        *c = (char)UARTCharGetNonBlocking(UART1_BASE);
-        return 1;
-    }
-    return 0;
+    return bsp_uart_getc(UART1_BASE, c);
 }
 
 void UART_Debug_Putc(char c) {
-    UARTCharPut(UART7_BASE, c);
+    bsp_uart_putc(UART7_BASE, c);
 }
 void UART_Debug_Puts(const char* s) {
-    while (*s) { UARTCharPut(UART7_BASE, *s++); }
+    bsp_uart_puts(UART7_BASE, s);
 }
 int UART_Debug_Getc(char *c) {
-    if (UARTCharsAvail(UART7_BASE)) {
-        *c = (char)UARTCharGetNonBlocking(UART7_BASE);
-        return 1;
-    }
-    return 0;
+    return bsp_uart_getc(UART7_BASE, c);
 }

@@ -2,15 +2,14 @@
  * \file    main.c
  * \brief   TM4C123GH6PM 小车底盘入口 (FreeRTOS)
  *
- * start.c（Common）负责平台初始化；app.c 负责 FreeRTOS 任务与业务逻辑。
- * 详见 docs/resource-allocation.md
+ * 外设初始化 → App_Start → vTaskStartScheduler
  */
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "start.h"
 #include "app.h"
+#include "start.h"
 
 int main(void)
 {

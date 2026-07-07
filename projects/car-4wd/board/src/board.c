@@ -1,7 +1,6 @@
 /* Auto-generated board module — edit .syscfg, not this file */
 #include <stdbool.h>
 #include <stdint.h>
-#include "periph_bind.h"
 #include "bsp_gpio.h"
 #include "bsp_uart.h"
 #include "bsp_i2c.h"

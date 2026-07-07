@@ -16,7 +16,6 @@ cd TM4C123GH6PM
 git submodule update --init --recursive
 
 .\build.cmd                          # 首次构建自动安装工具链与 TivaWare SDK
-.\build.cmd -Profile full            # 全外设
 .\flash-jlink.cmd                    # J-Link 烧录
 ```
 

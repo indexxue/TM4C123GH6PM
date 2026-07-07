@@ -54,17 +54,16 @@
 ## 3. 日常命令
 
 ```powershell
-# 根目录（默认四轮 log-only）
+# 根目录（默认 car-4wd）
 .\build.cmd
-.\build.cmd -Profile full
-.\build.cmd -CarProject car-2wd -Profile full
+.\build.cmd -CarProject car-2wd
 
 # 进入工程目录
 .\projects\car-4wd\build.cmd
 .\projects\car-2wd\build.cmd
 
 # 多目标
-.\build.cmd -CarProject car-4wd -Target app -Profile full
+.\build.cmd -CarProject car-4wd -Target app
 .\build.cmd -CarProject car-4wd -Target all
 
 # 烧录（J-Link）
@@ -131,22 +130,20 @@ flowchart LR
 
 | 生成文件 | 说明 |
 |----------|------|
-| `source/src/motor.c` | 电机 GPIO + PWM |
-| `source/src/encoder.c` | 编码器 QEI |
-| `source/src/line.c` | 循迹 GPIO（模拟巡线由 ADC 在 board.c 配置） |
-| `source/src/board.c` | UART / I2C / ADC / SSI 等 |
-| `source/inc/gpio_pins.h` | 引脚宏 |
+| `board/src/motor.c` | 电机 GPIO + PWM |
+| `board/src/encoder.c` | 编码器 QEI |
+| `board/src/line.c` | 循迹 GPIO（模拟巡线由 ADC 在 board.c 配置） |
+| `board/src/board.c` | UART / I2C / ADC / SSI 等 |
+| `board/inc/board.h` | 引脚宏、外设绑定、Motor/Encoder/Line/Board API |
 
 引脚设计说明：[syscfg-io-allocation.md](syscfg-io-allocation.md)。  
 自动生成引脚表：`projects/<car>/gpio-allocation.md`。
 
-应用初始化（`projects/<car>/src/init.c`）：
+应用初始化（`Common/src/start.c` 的 `Start_Init()`，由 `projects/<car>/main/main.c` 调用）：
 
 ```c
-Motor_Init();
-Encoder_Init();
-Line_Init();
-Board_Periph_Init();
+Start_Init();   /* clock → Motor/Encoder/Line/Board_Periph → log */
+App_Start();
 ```
 
 单独重新生成：

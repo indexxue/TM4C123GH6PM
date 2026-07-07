@@ -21,12 +21,18 @@
 #define configMAX_PRIORITIES            (5U)
 #define configMINIMAL_STACK_SIZE        (128U)
 #define configMAX_TASK_NAME_LEN         (16U)
-#define configTOTAL_HEAP_SIZE           (16384U)
+/* app_evt + app_tmr + timer service + cmd */
+#define configTOTAL_HEAP_SIZE           (12288U)
+
+#define configUSE_MALLOC_FAILED_HOOK    1
 
 #define configUSE_MUTEXES               1
 #define configUSE_RECURSIVE_MUTEXES     1
 #define configUSE_COUNTING_SEMAPHORES   1
-#define configUSE_TIMERS                0
+#define configUSE_TIMERS                1
+#define configTIMER_TASK_PRIORITY       (4U)
+#define configTIMER_QUEUE_LENGTH        (4U)
+#define configTIMER_TASK_STACK_DEPTH    (256U)
 #define configUSE_CO_ROUTINES           0
 #define configUSE_QUEUE_SETS            0
 

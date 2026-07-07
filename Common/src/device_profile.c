@@ -11,7 +11,6 @@ static const device_product_profile_t s_product_profiles[] = {
         .name = "car-4wd",
         .board_mask = DEVICE_BOARD_MASK_FULL,
         .platform_mask = DEVICE_PLATFORM_MASK_LOG | DEVICE_PLATFORM_MASK_CMD |
-                         DEVICE_PLATFORM_MASK_OTA | DEVICE_PLATFORM_MASK_LED |
                          DEVICE_PLATFORM_MASK_BUTTON,
         .clock_source = DEVICE_CLOCK_MAIN_8MHZ,
     },
@@ -20,7 +19,6 @@ static const device_product_profile_t s_product_profiles[] = {
         .name = "car-2wd",
         .board_mask = DEVICE_BOARD_MASK_FULL,
         .platform_mask = DEVICE_PLATFORM_MASK_LOG | DEVICE_PLATFORM_MASK_CMD |
-                         DEVICE_PLATFORM_MASK_OTA | DEVICE_PLATFORM_MASK_LED |
                          DEVICE_PLATFORM_MASK_BUTTON,
         .clock_source = DEVICE_CLOCK_MAIN_16MHZ,
     },

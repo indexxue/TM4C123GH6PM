@@ -7,8 +7,8 @@
 
 #include <string.h>
 
+#include "board.h"
 #include "bsp_adc.h"
-#include "periph_bind.h"
 
 #include "FreeRTOS.h"
 #include "task.h"

@@ -5,12 +5,10 @@
 
 #include "cmd.h"
 
+#include "app.h"
 #include "log.h"
 #include "nvs.h"
-#include "ota_meta.h"
 #include "board.h"
-#include "motor.h"
-#include "periph_bind.h"
 #include "bsp_adc.h"
 
 #include "FreeRTOS.h"
@@ -18,7 +16,6 @@
 #include "task.h"
 
 #include "inc/hw_memmap.h"
-#include "driverlib/gpio.h"
 #include "driverlib/i2c.h"
 #include "driverlib/sysctl.h"
 
@@ -280,27 +277,6 @@ static void cmd_version(int argc, const char *argv[])
     cmd_reply_ok("version", "tm4c123-car");
 }
 
-static void cmd_led(int argc, const char *argv[])
-{
-    if (argc != 3) {
-        cmd_reply_ng();
-        return;
-    }
-    if (strcmp(argv[1], "r") == 0) {
-        if (strcmp(argv[2], "on") == 0) {
-            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
-            cmd_reply_ok("led", "ok");
-            return;
-        }
-        if (strcmp(argv[2], "off") == 0) {
-            GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, 0);
-            cmd_reply_ok("led", "ok");
-            return;
-        }
-    }
-    cmd_reply_ng();
-}
-
 static void cmd_i2c(int argc, const char *argv[])
 {
     char buf[CMD_STATUS_BUF_SIZE];
@@ -335,21 +311,6 @@ static void cmd_i2c(int argc, const char *argv[])
         buf[sizeof(buf) - 1U] = '\0';
     }
     cmd_reply_ok("i2c", buf);
-}
-
-static void cmd_otmeta(int argc, const char *argv[])
-{
-    ota_meta_t meta;
-    char buf[CMD_STATUS_BUF_SIZE];
-
-    (void)argc;
-    (void)argv;
-
-    (void)ota_meta_read(&meta);
-    (void)snprintf(buf, sizeof(buf), "state=%s seq=%lu sz=%lu crc=0x%08lX ver=%.16s",
-                   ota_state_to_str((ota_state_t)meta.state), (unsigned long)meta.seq,
-                   (unsigned long)meta.image_size, (unsigned long)meta.image_crc32, meta.version);
-    cmd_reply_ok("otmeta", buf);
 }
 
 static void cmd_nvs(int argc, const char *argv[])
@@ -418,11 +379,9 @@ void cmd_register_defaults(void)
     (void)cmd_register("reboot", cmd_reboot, "software reset");
     (void)cmd_register("log", cmd_log, "emit one log line + ok");
     (void)cmd_register("version", cmd_version, "firmware version string");
-    (void)cmd_register("led", cmd_led, "led r on|off (PF1 red)");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
     (void)cmd_register("adc", cmd_adc, "adc sample (battery raw)");
-    (void)cmd_register("otmeta", cmd_otmeta, "dump ota_meta from NVS");
     (void)cmd_register("nvs", cmd_nvs, "nvs get|set <ns> [value]");
 }
 
@@ -470,8 +429,8 @@ status_t cmd_uart_line_service_start(void)
     }
     cmd_init(cmd_write_bt, NULL);
     cmd_register_defaults();
-    if (xTaskCreate(cmd_reader_task, "cmd_bt", CMD_READER_STACK_WORDS, NULL, CMD_READER_PRIORITY, &s_reader_task) !=
-        pdPASS) {
+    if (xTaskCreate(cmd_reader_task, APP_TASK_NAME_CMD, CMD_READER_STACK_WORDS, NULL, CMD_READER_PRIORITY,
+                    &s_reader_task) != pdPASS) {
         LOG_ERROR("cmd: create reader task failed");
         s_reader_task = NULL;
         return STATUS_FAIL;

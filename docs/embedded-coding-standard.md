@@ -18,16 +18,27 @@ bsp_driver/           →  TivaWare DriverLib only
 |------|------|
 | `bsp_driver/` | MCU 外设薄封装，**统一** `bsp_<外设>.{h,c}`（见 §BSP 驱动命名） |
 | `cbb/` | 芯片协议驱动（ws2812b、mpu6050、tb6612…），回调注入 |
-| `Common/` | 跨产品服务：log、nvs、cmd、ota、device_profile、start |
+| `Common/` | 跨产品服务：log、nvs、cmd、ota、device_profile、start、app |
+| `include/` | 芯片级 / 全 target 常量头（见下表），**不放**有 `.c` 配对的模块头 |
 | `projects/<car>/board/` | syscfg 生成的 motor/encoder/line/board |
 | `projects/<car>/main/` | 薄应用：main.c、app.c、FreeRTOS 钩子 |
+
+### `include/` 白名单
+
+| 文件 | 职责 |
+|------|------|
+| `FreeRTOSConfig.h` | RTOS 配置 |
+| `flash_layout.h` | Flash 分区常量 |
+| `tm4c123gh6pm.h` | 寄存器 / HWREG 宏 |
+
+模块头与源文件同层：`Common/inc/start.h` ↔ `Common/src/start.c`，`Common/inc/app.h` ↔ `projects/<car>/main/app.c`。
 
 ## BSP 驱动命名（`bsp_driver/`）
 
 | 规则 | 说明 |
 |------|------|
 | 文件名 | `inc/bsp_<外设>.h` 与 `src/bsp_<外设>.c` 成对出现 |
-| 前缀 | 一律 `bsp_`，避免与 `include/gpio.h`、`driverlib/*.h` 等同名冲突 |
+| 前缀 | 一律 `bsp_`，避免与 `driverlib/*.h` 等同名冲突 |
 | 外设名 | 简短 MCU 模块名：`gpio`、`uart`、`i2c`、`spi`、`adc`、`dac`、`timer`、`qei`、`dma`、`systick`、`sysctl` |
 | 禁止 | 裸名 `clock.h`、`uart.h`、`timer_pwm.h`；PWM 归入 `bsp_timer` |
 | 头 guard | `BSP_DRIVER_<外设>_H` |
@@ -53,15 +64,13 @@ bsp_driver/           →  TivaWare DriverLib only
 
 - 编译期 `-DDEVICE_PRODUCT_ID=...` 选择产品档案
 - `board_mask` 控制 Motor/Encoder/Line/Board_Periph 初始化
-- `platform_mask` 控制 log/cmd/ota/led/button 等平台服务
-- v1 默认：`car-4wd` + `log-only`（仅 UART7 日志心跳）
+- `platform_mask` 控制 log、cmd、button 等平台服务
 
 ## 构建
 
 ```powershell
-.\build.cmd                              # car-4wd log-only（默认）
-.\build.cmd -Profile full                # 全外设
-.\build.cmd -CarProject car-2wd -Profile full
+.\build.cmd
+.\build.cmd -CarProject car-2wd
 .\flash-jlink.cmd
 ```
 

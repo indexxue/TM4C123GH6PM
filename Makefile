@@ -1,3 +1,6 @@
+# Deprecated: use .\build.cmd (scripts/build.ps1) instead.
+# This Makefile targets the removed root src/ layout and is not maintained.
+
 PROJECT  ?= tm4c123-project
 MCU      ?= TM4C123GH6PM
 PREFIX   ?= arm-none-eabi-
@@ -11,7 +14,6 @@ SRC_DIR    := $(ROOT)/src
 INC_DIR    := $(ROOT)/include
 COMMON_INC := $(ROOT)/Common/inc
 COMMON_SRC := $(ROOT)/Common/src
-CBB_WS2812 := $(ROOT)/cbb/ws2812b
 LD_DIR     := $(ROOT)/ld
 SCRIPT_DIR := $(ROOT)/scripts
 
@@ -23,7 +25,7 @@ FREERTOS_PORT := $(FREERTOS_ROOT)/portable/GCC/ARM_CM4F
 
 CPU_FLAGS  := -mcpu=cortex-m4 -mthumb -mfloat-abi=hard -mfpu=fpv4-sp-d16
 DEFINES    := -D$(MCU) -DPART_TM4C123GH6PM
-INCLUDES   := -I$(INC_DIR) -I$(COMMON_INC) -I$(CBB_WS2812) \
+INCLUDES   := -I$(INC_DIR) -I$(COMMON_INC) \
               -I$(FREERTOS_ROOT)/include -I$(FREERTOS_PORT) \
               -I$(TIVAWARE_ROOT) -I$(TIVAWARE_ROOT)/inc
 
@@ -49,9 +51,7 @@ APP_SOURCES := $(SRC_DIR)/startup_tm4c123gh6pm.c \
                $(COMMON_SRC)/cmd.c \
                $(COMMON_SRC)/battery.c \
                $(COMMON_SRC)/button.c \
-               $(COMMON_SRC)/flexible_button.c \
-               $(COMMON_SRC)/led_scene.c \
-               $(CBB_WS2812)/ws2812b.c
+               $(COMMON_SRC)/flexible_button.c
 
 RTOS_SOURCES := $(FREERTOS_ROOT)/tasks.c \
                 $(FREERTOS_ROOT)/queue.c \
