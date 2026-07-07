@@ -1,0 +1,12 @@
+{
+  "module": "i2c",
+  "i2c": [
+    {
+      "name": "IMU_OLED",
+      "module": "I2C0",
+      "scl": "PB2",
+      "sda": "PB3",
+      "speed": 400000
+    }
+  ]
+}

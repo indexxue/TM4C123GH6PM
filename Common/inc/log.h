@@ -49,6 +49,7 @@ status_t log_set_timestamp(bool enable);
 status_t log_set_file_line(bool enable);
 status_t log_init(log_output_func_t output_func);
 status_t log_deinit(void);
+void log_notify_scheduler_running(void);
 void log_output(log_level_t level, const char *file, uint16_t line, const char *fmt, ...);
 
 #if defined(LOG_DETERMINISTIC_BUILD)

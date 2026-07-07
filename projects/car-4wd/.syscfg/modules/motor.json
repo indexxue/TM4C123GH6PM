@@ -1,0 +1,9 @@
+{
+  "module": "motor",
+  "pwm": [
+    { "name": "M1", "timer": "TIMER0", "channel": "A", "pin": "PB6", "frequency": 10000 },
+    { "name": "M2", "timer": "TIMER0", "channel": "B", "pin": "PB7", "frequency": 10000 },
+    { "name": "M3", "timer": "TIMER1", "channel": "A", "pin": "PB4", "frequency": 10000 },
+    { "name": "M4", "timer": "TIMER1", "channel": "B", "pin": "PB5", "frequency": 10000 }
+  ]
+}

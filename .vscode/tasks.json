@@ -1,4 +1,4 @@
-﻿{
+{
     "version": "2.0.0",
     "options": {
         "shell": {
@@ -10,7 +10,7 @@
         {
             "label": "Build",
             "type": "shell",
-            "command": "& { & \"${workspaceRoot}\\scripts\\build.ps1\" }",
+            "command": "& { & \"${workspaceRoot}\\scripts\\build.ps1\" -CarProject car-4wd }",
             "group": {
                 "kind": "build",
                 "isDefault": true
@@ -44,7 +44,7 @@
         {
             "label": "Rebuild",
             "type": "shell",
-            "command": "if (Test-Path \"${workspaceRoot}\\build\") { Remove-Item \"${workspaceRoot}\\build\" -Recurse -Force }; & \"${workspaceRoot}\\scripts\\build.ps1\"",
+            "command": "if (Test-Path \"${workspaceRoot}\\projects\\car-4wd\\build\") { Remove-Item \"${workspaceRoot}\\projects\\car-4wd\\build\" -Recurse -Force }; & \"${workspaceRoot}\\scripts\\build.ps1\" -CarProject car-4wd",
             "group": { "kind": "build", "isDefault": false },
             "presentation": { "echo": true, "reveal": "always" }
         },

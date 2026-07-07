@@ -1,162 +1,145 @@
-# TM4C123GH6PM 芯片资源清单与外设分配方案
+# TM4C123GH6PM 资源分配方案
 
-## 芯片资源概览 (64-pin LQFP 封装)
-
-### 1.1 GPIO 资源
-
-| 端口 | 引脚数 | 可用范围 (PA~PF) |
-|---|---|---|
-| PA   | 8 | PA0 ~ PA7 |
-| PB   | 8 | PB0 ~ PB7 |
-| PC   | 8 | PC0 ~ PC7 |
-| PD   | 8 | PD0 ~ PD7 |
-| PE   | 6 | PE0 ~ PE5 (PE6/PE7 未引出) |
-| PF   |  5 | PF0 ~ PF4 (PF5/PF6/PF7 未引出) |
-| **合计** | **43** | |
-
-### 1.2 片上外设
-
-| 外设 | 数量 | 本项目用途 |
-|---|---|---|
-| Timer (通用定时器) | 6 组 (×2 通道 = 12 路 PWM) | 电机 PWM |
-| WTimer (宽位 32/64b) | 6 组 | 编码器捕获 |
-| UART | 8 组 | 蓝牙、调试 |
-| I2C | 6 组 | IMU、OLED |
-| SSI (SPI) | 4 组 | 备用扩展 |
-| ADC (12-bit) | 2 组 (×8 通道) | 电池、传感器 |
-| QEI (正交编码器) | 2 组 (见 hw_memmap.h，TM4C123 有 QEI 模块) | 2 组硬件 |
-| PWM (专用 PWM 模块) | 2 组 | 备用 (用 Timer PWM) |
-| Comparator | 3 组 | - |
-| CAN | 2 组 | 备用 |
-| USB | 1 组 (OTG) | - |
-| Hibernate | 1 组 | 低功耗待机 |
+> 定时器、DMA、中断优先级与 PCB 设计参考。  
+> **引脚以 [syscfg-io-allocation.md](syscfg-io-allocation.md) 为准**（四轮 / 两轮两套配置）。
 
 ---
 
-## 外设分配方案（四轴 MG513 小车）
+## 一、芯片资源清单
 
-### 2.1 电机驱动 (4 轴 MG513)
+### 1.1 外设模块（64-pin LQFP）
 
-每电机 5 根信号线：方向 ×2 + PWM ×1 + 编码器 ×2
+| 外设 | 数量 | 本项目 |
+|------|------|--------|
+| Timer | 6 组 ×2 通道 | 电机 PWM |
+| Wide Timer | 6 组 | 备用 / 捕获 |
+| UART | 8 组 | 蓝牙 UART1、调试 UART7 |
+| I2C | 6 组 | I2C0（IMU + OLED） |
+| ADC | ADC0 + ADC1 | ADC1：电池、按键、巡线 |
+| QEI | 2 组 | 编码器（每车 2 路） |
+| uDMA | 32 通道 | ADC、UART RX（规划） |
+| SSI | 4 组 | SSI0 磁力计 |
 
-#### 方案 A：Timer PWM + GPIO 编码器捕获
+### 1.2 GPIO（64-pin）
 
-| 电机 | PWM 引脚 | 定时器通道 | 方向 IN1 | 方向 IN2 | 编码器 A | 编码器 B |
-|---|---|---|---|---|---|---|
-| M1 | PB6 | Timer0A (T0CCP0) | PA2 | PA3 | PD0 (GPIO 捕获) | PD1 (GPIO 捕获) |
-| M2 | PB7 | Timer0B (T0CCP1) | PA4 | PA5 | PC5 (GPIO 捕获) | PC6 (GPIO 捕获) |
-| M3 | PB4 | Timer1A (T1CCP0) | PC4 | PC7 | PE0 (GPIO 捕获) | PE1 (GPIO 捕获) |
-| M4 | PB5 | Timer1B (T1CCP1) | PD2 | PD3 | PE2 (GPIO 捕获) | PE3 (GPIO 捕获) |
-
-**资源占用：** 4 PWM + 8 方向 + 8 编码器 = 20 引脚
-
-> ⚠ 关于 QEI：TM4C123GH6PM 在 `hw_memmap.h` 中定义了 `QEI0_BASE`/`QEI1_BASE`，
-> QEI 模块存在但 64-pin 封装引脚有限。若使用 QEI，需确认 pinmux 不冲突。
-> 硬件 QEI 引脚：QD0=PD0/PD1, QD1=PC5/PC6 等，需与上述方案协调。
-
-### 2.2 通信接口
-
-| 功能 | 外设 | 引脚 | 数量 |
-|---|---|---|---|
-| 蓝牙/WiFi | UART0 | PA0 (RX), PA1 (TX) | 2 路 |
-| 调试输出 | 复用 UART0 (或通过 SWO) | |
-| IMU (MPU6050) | I2C0 | PB2 (SCL), PB3 (SDA) | 2 路 |
-| OLED 显示屏 | I2C0 | 共用 (MPU6050 共用 I2C 总线) | 0 路 |
-
-### 2.3 传感器
-
-| 传感器 | 连接方式 | 引脚 | 数量 |
-|---|---|---|---|
-| 超声波 HC-SR04 Trig | GPIO 输出 | PE4 | 1 |
-| 超声波 HC-SR04 Echo | GPIO 输入 + Timer Capture | PE5 (WT0CCP1) | 1 |
-| 循迹传感器 ×4 | GPIO 输入 或 ADC | PA6, PA7 / PC0, PC1 (备选) | 4 |
-| 电池电压 | ADC 输入 | PE0 (AIN0) | 1 |
-
-### 2.4 调试
-
-| 功能 | 引脚 |
-|---|---|
-| SWD/SWCLK (调试) | PC0 (SWCLK), PC1 (SWDIO) — 与编码器冲突 |
-| 复位 | PB7 (NRST) — 与 M2_PWM 冲突 |
+| 端口 | 可用引脚 | 合计 |
+|------|----------|------|
+| PA~PD | 各 8 | 32 |
+| PE | 0~5 | 6 |
+| PF | 0~4 | 5 |
+| **合计** | | **43** |
 
 ---
 
-## 引脚冲突与注意事项
+## 二、当前工程外设占用（摘要）
 
-以下引脚存在复用冲突，设计 PCB 时需特别注意：
+### 四轮 `car-4wd`
 
-| 引脚 | 当前分配 | 冲突功能 | 建议 |
-|---|---|---|---|
-| PB6 | M1_PWM (T0CCP0) | I2C5SCL | 不使用 I2C5 |
-| PB7 | M2_PWM (T0CCP1) | I2C5SDA | 避免 |
-| PB4 | M3_PWM (T1CCP0) | CAN0RX | 不使用 CAN |
-| PB5 | M4_PWM (T1CCP1) | CAN0TX | 避免 |
-| PC0 | 编码器输入 | T4CCP0, SWCLK | 调试 SWD 冲突 |
-| PC1 | 编码器输入 | T4CCP1, SWDIO | 避免 |
-| PE0 | 电池电压 (AIN0) | M3_ENCA, U7RX | 多功能复用 |
-| PE5 | 超声波 Echo | WT0CCP1, U5TX | 优先 GPIO |
+| 资源 | 分配 |
+|------|------|
+| PWM0 | M1~M4 @ PB6/PB7/PB4/PB5（Timer0 + Timer1） |
+| QEI1 | M3 编码器 @ PC5/PC6 |
+| QEI0 | M4 编码器 @ PD6/PD7 |
+| UART1 | 蓝牙 @ PB0/PB1 |
+| UART7 | 调试 @ PE0/PE1 |
+| I2C0 | PB2/PB3 |
+| SSI0 | PA2~PA5 |
+| ADC1 | 电池 AIN0、按键 AIN1、巡线 AIN4~9 |
+
+### 两轮 `car-2wd`
+
+| 资源 | 分配 |
+|------|------|
+| PWM0 | M1/M2 @ PB6/PB7 |
+| QEI1 | M1 @ PC5/PC6 |
+| QEI0 | M2 @ PD6/PD7 |
+| 通信/传感器 | 与四轮相同（I2C、SSI、UART） |
+| ADC1 | 6 路模拟输入，5 路巡线传感器 |
+
+完整引脚表见 [syscfg-io-allocation.md](syscfg-io-allocation.md)。
 
 ---
 
-## 使用 SysConfig 配置
+## 三、中断与 DMA 规划
 
-### 4.1 启动 GUI
+### 3.1 中断优先级（建议）
 
-```powershell
-D:\Ti\sysconfig_1.27.1\sysconfig_gui.bat
-# File → Open → .syscfg/tm4c123gh6pm.syscfg
+| 优先级 | 中断源 | 用途 |
+|--------|--------|------|
+| 0 | SysTick | RTOS 节拍 |
+| 1~2 | QEI / 编码器 | 测速 |
+| 3 | UART1 | 蓝牙收发 |
+| 4 | GPIO（超声波 Echo） | 测距 |
+| 5 | I2C0 | IMU 读取 |
+| 6 | ADC1 | 电池 / 巡线采样 |
+| 7 | 其他 GPIO | 按键等 |
+
+### 3.2 DMA 通道（规划）
+
+| 通道 | 方向 | 说明 |
+|------|------|------|
+| CH0 | ADC1 → RAM | 电池电压周期采样 |
+| CH1 | UART1 RX → RAM | 蓝牙接收环形缓冲 |
+
+### 3.3 PWM 参数
+
+| 参数 | 值 |
+|------|-----|
+| 频率 | 10 kHz |
+| 系统时钟 | 80 MHz |
+| 重装载值 | 8000 |
+| 驱动 | TB6612FNG |
+
+### 3.4 编码器
+
+| 参数 | 值 |
+|------|-----|
+| 接口 | QEI 硬件正交解码 |
+| MG513 分辨率 | 约 390 PPR（四倍频后约 1560 计数/转） |
+| 速度环周期 | 20 ms（50 Hz） |
+
+---
+
+## 四、定时器占用（四轮）
+
+```
+Timer0  A/B → M1/M2 PWM (PB6/PB7)
+Timer1  A/B → M3/M4 PWM (PB4/PB5)
+Timer2~5      空闲（可按需扩展）
+QEI1          M3 编码器 (PC5/PC6)
+QEI0          M4 编码器 (PD6/PD7)
 ```
 
-### 4.2 配置步骤
-
-1. 配置时钟源：OSC0/PB6, OSC1/PB7，16 MHz 晶振
-2. 添加外设并分配 PWM 引脚（Timer CCP 通道）
-3. 配置 UART0（蓝牙）和 I2C0（IMU/OLED）
-4. 分配传感器引脚（GPIO 输入/输出）
-5. 配置 ADC（电池电压）
-6. Ctrl+S 保存
-
-> 保存后运行 `.\scripts\build.ps1` 会自动调用 SysConfig CLI 生成 `pinout.c` 等文件。
+两轮仅占用 Timer0 A/B 与 QEI1/QEI0。
 
 ---
 
-## 常用 TivaWare API 速查
+## 五、PCB 设计要点
 
-以下 API 可直接用于外设驱动开发：
+### 电源拓扑
 
-```c
-// 时钟配置
-SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
-SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF);
-SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOF);
-
-// GPIO
-GPIOPinTypeGPIOOutput(GPIO_PORTF_BASE, GPIO_PIN_1);
-GPIOPinWrite(GPIO_PORTF_BASE, GPIO_PIN_1, GPIO_PIN_1);
-GPIOPinRead(GPIO_PORTF_BASE, GPIO_PIN_4);
-GPIOPadConfigSet(GPIO_PORTF_BASE, GPIO_PIN_4, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
-
-// Timer PWM (电机驱动)
-SysCtlPeripheralEnable(SYSCTL_PERIPH_TIMER0);
-TimerConfigure(TIMER0_BASE, TIMER_CFG_SPLIT_PAIR | TIMER_CFG_A_PWM);
-TimerLoadSet(TIMER0_BASE, TIMER_A, 8000);     // 80MHz / 8000 = 10kHz PWM
-TimerMatchSet(TIMER0_BASE, TIMER_A, 4000);     // 50% duty
-TimerEnable(TIMER0_BASE, TIMER_A);
-
-// UART (蓝牙)
-SysCtlPeripheralEnable(SYSCTL_PERIPH_UART0);
-UARTConfigSetExpClk(UART0_BASE, SysCtlClockGet(), 115200,
-    UART_CONFIG_WLEN_8 | UART_CONFIG_STOP_ONE | UART_CONFIG_PAR_NONE);
-UARTEnable(UART0_BASE);
-UARTCharPut(UART0_BASE, 'A');
-int c = UARTCharGet(UART0_BASE);
-
-// ADC (电池电压)
-SysCtlPeripheralEnable(SYSCTL_PERIPH_ADC0);
-ADCSequenceConfigure(ADC0_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);
-ADCSequenceStepConfigure(ADC0_BASE, 3, 0, ADC_CTL_CH0 | ADC_CTL_IE | ADC_CTL_END);
-ADCSequenceEnable(ADC0_BASE);
-ADCProcessorTrigger(ADC0_BASE, 3);
-while (!ADCIntStatus(ADC0_BASE, 3, false)) {}
-ADCSequenceDataGet(ADC0_BASE, 3, &adc_value);
 ```
+11.1V 电池 → LM2596 5V → 传感器
+                └── AMS1117 3.3V → MCU / 蓝牙 / IMU / OLED
+         └── TB6612 VM → 电机
+         └── 分压 → ADC（电池电压）
+```
+
+### 布线
+
+| 规则 | 说明 |
+|------|------|
+| 电机线 | 远离 MCU 与模拟信号 |
+| I2C | ≤ 10 cm，4.7 kΩ 上拉 |
+| ADC 巡线 | 100 nF 滤波到地 |
+| 去耦 | 每 VCC 引脚 100 nF |
+
+---
+
+## 六、检查清单
+
+- [ ] 引脚与 [syscfg-io-allocation.md](syscfg-io-allocation.md) 一致
+- [ ] I2C0 (PB2/PB3) 无 PWM 冲突
+- [ ] SWD（PC0/PC1）与编码器无冲突（当前四轮 M4 编码器在 PD6/PD7）
+- [ ] 逻辑地与电机地单点共地
+- [ ] TB6612 STBY 上拉使能

@@ -2,9 +2,11 @@
     "configurations": [
         {
             "name": "TM4C123GH6PM (ARM Cortex-M4F)",
-            "compileCommands": "${workspaceFolder}/build/ide-compile-db.json",
+            "compileCommands": "${workspaceFolder}/projects/car-4wd/build/ide-compile-db.json",
             "includePath": [
                 "${workspaceFolder}/include",
+                "${workspaceFolder}/projects/car-4wd/board/inc",
+                "${workspaceFolder}/bsp_driver/inc",
                 "${workspaceFolder}/Common/inc",
                 "${workspaceFolder}/cbb/ws2812b",
                 "D:/Ti/TivaWare_C_Series-2.2.0.295",
@@ -15,6 +17,7 @@
             "defines": [
                 "TM4C123GH6PM",
                 "PART_TM4C123GH6PM",
+                "DEVICE_PRODUCT_ID=1",
                 "__ARM_ARCH_7EM__",
                 "__ARM_FP=4",
                 "__FPU_PRESENT=1"

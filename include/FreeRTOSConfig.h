@@ -21,7 +21,7 @@
 #define configMAX_PRIORITIES            (5U)
 #define configMINIMAL_STACK_SIZE        (128U)
 #define configMAX_TASK_NAME_LEN         (16U)
-#define configTOTAL_HEAP_SIZE           (10240U)
+#define configTOTAL_HEAP_SIZE           (16384U)
 
 #define configUSE_MUTEXES               1
 #define configUSE_RECURSIVE_MUTEXES     1

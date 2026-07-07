@@ -10,19 +10,32 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
-DEFAULT_MANIFEST = ROOT / ".syscfg" / "project.json"
-DEFAULT_SRC = ROOT / "Common" / "src"
-DEFAULT_INC = ROOT / "Common" / "inc"
+CAR_PROJECTS = {
+    "car-4wd": ROOT / "projects" / "car-4wd",
+    "car-2wd": ROOT / "projects" / "car-2wd",
+}
+DEFAULT_CAR_PROJECT = "car-4wd"
 DEFAULT_DOCS = ROOT / "docs"
-IDE_COMPILE_DB = ROOT / "build" / "ide-compile-db.json"
+
+
+def resolve_car_project(car_project: str) -> dict[str, Path]:
+    if car_project not in CAR_PROJECTS:
+        raise SystemExit(f"[ERROR] unknown car project: {car_project}")
+    base = CAR_PROJECTS[car_project]
+    return {
+        "root": base,
+        "manifest": base / ".syscfg" / "project.json",
+        "device_src": base / "board" / "src",
+        "device_inc": base / "board" / "inc",
+        "app_src": base / "main",
+        "build": base / "build",
+        "gpio_doc": base / "gpio-allocation.md",
+        "ide_compile_db": base / "build" / "ide-compile-db.json",
+    }
 
 BOARD_GPIO_GROUPS = ("button", "comm", "sensor", "hmi")
-MOTOR_DIR_LABELS = (
-    "M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2",
-    "M3_IN1", "M3_IN2", "M4_IN1", "M4_IN2",
-)
 BOARD_MUX_LABELS = frozenset(
-    {"BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_TX", "BAT_ADC"}
+    {"BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX", "BAT_ADC", "BTN_ADC"}
 )
 
 INCLUDES_GPIO = [
@@ -35,6 +48,7 @@ INCLUDES_GPIO = [
 ]
 
 INCLUDES_TIMER = INCLUDES_GPIO + ['#include "driverlib/timer.h"']
+INCLUDES_ENCODER = INCLUDES_TIMER + ['#include "driverlib/qei.h"']
 INCLUDES_BOARD = INCLUDES_GPIO + [
     '#include "driverlib/uart.h"',
     '#include "driverlib/i2c.h"',
@@ -172,18 +186,52 @@ def load_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8-sig"))
 
 
-def load_manifest(manifest_path: Path) -> tuple[dict, dict, dict[str, dict]]:
+def load_manifest(
+    manifest_path: Path, variant: str | None = None
+) -> tuple[dict, dict, dict[str, dict], str]:
     cfg_dir = manifest_path.parent
     manifest = load_json(manifest_path)
     if manifest.get("_format") != "tm4c123-sysconfig-v2":
         raise SystemExit("[ERROR] expected tm4c123-sysconfig-v2 manifest")
+
+    if "variants" in manifest:
+        variant = variant or manifest.get("default_variant", "4wd")
+        if variant not in manifest["variants"]:
+            raise SystemExit(f"[ERROR] unknown variant: {variant}")
+        vcfg = manifest["variants"][variant]
+        board = load_json(cfg_dir / manifest["board"])
+        gpio = load_json(cfg_dir / vcfg["gpio"])
+        modules = {
+            load_json(cfg_dir / rel)["module"]: load_json(cfg_dir / rel)
+            for rel in vcfg["modules"]
+        }
+        return board, gpio, modules, variant
+
     board = load_json(cfg_dir / manifest["board"])
     gpio = load_json(cfg_dir / manifest["gpio"])
     modules = {
         load_json(cfg_dir / rel)["module"]: load_json(cfg_dir / rel)
         for rel in manifest["modules"]
     }
-    return board, gpio, modules
+    return board, gpio, modules, "legacy"
+
+
+def pin_label_to_str(pin: dict) -> str:
+    return f"P{pin['port']}{pin['pin']}"
+
+
+def motor_dir_labels(gpio: dict) -> list[str]:
+    labels = pin_label_map(gpio)
+    dirs = [
+        lbl for lbl in labels
+        if lbl.startswith("M") and len(lbl) >= 6 and lbl[1].isdigit() and "_IN" in lbl
+    ]
+    return sorted(dirs, key=lambda s: (int(s[1]), s.endswith("_IN2")))
+
+
+def adc_pin_set(modules: dict[str, dict]) -> set[str]:
+    adc = modules.get("adc", {})
+    return {item["pin"] for item in adc.get("adc", [])}
 
 
 def pin_label_map(gpio: dict) -> dict[str, dict]:
@@ -239,7 +287,8 @@ def write_module(
         ),
         encoding="utf-8",
     )
-    print(f"  -> Common/src/{name}.c")
+    rel = src_dir.relative_to(ROOT) if src_dir.is_relative_to(ROOT) else src_dir
+    print(f"  -> {rel}/{name}.c")
 
 
 def gen_gpio_pins_h(gpio: dict, inc_dir: Path) -> None:
@@ -286,6 +335,41 @@ def emit_timer_pwm_init(pwm_channels: list[dict], clock: int) -> list[str]:
     return lines
 
 
+def emit_qei_init(encoders: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for enc in encoders:
+        qei = enc["qei"]
+        base = f"{qei}_BASE"
+        lines += [
+            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{qei});",
+            f"    QEIConfigure({base}, "
+            "QEI_CONFIG_CAPTURE_A_B|QEI_CONFIG_NO_RESET|QEI_CONFIG_QUADRATURE|QEI_CONFIG_NO_SWAP, 0);",
+            f"    QEIEnable({base});",
+        ]
+    return lines
+
+
+def qei_gpio_mux(pin: str, qei: str, role: str) -> str:
+    port, num = parse_pin(pin)
+    idx = "1" if qei == "QEI1" else "0"
+    suffix = f"PHA{idx}" if role == "a" else f"PHB{idx}"
+    return f"GPIO_P{port}{num}_{suffix}"
+
+
+def add_qei_mux(plan: PinPlanner, enc: dict) -> None:
+    pins_by_port: dict[str, int] = defaultdict(int)
+    for role, key in (("a", "pin_a"), ("b", "pin_b")):
+        pin = enc[key]
+        port, pin_num = parse_pin(pin)
+        plan._ports.add(port)
+        plan.mux_lines.append(f"    GPIOPinConfigure({qei_gpio_mux(pin, enc['qei'], role)});")
+        pins_by_port[port] |= 1 << pin_num
+    for port, mask in sorted(pins_by_port.items()):
+        plan.mux_lines.append(
+            f"    GPIOPinTypeQEI(GPIO_PORT{port}_BASE, {PinPlanner._mask(mask)});"
+        )
+
+
 def emit_timer_capture_init(encoders: list[dict]) -> list[str]:
     lines: list[str] = []
     for enc in encoders:
@@ -308,7 +392,7 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, inc_dir: Path) 
     freq = mod["pwm"][0]["frequency"] if mod.get("pwm") else 10000
     plan = PinPlanner()
 
-    for label in MOTOR_DIR_LABELS:
+    for label in motor_dir_labels(gpio):
         p = labels[label]
         plan.add_pin(p["port"], p["pin"], p["direction"])
 
@@ -335,26 +419,37 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, inc_dir: Path) 
 
 def gen_encoder(gpio: dict, mod: dict, src_dir: Path, inc_dir: Path) -> None:
     plan = PinPlanner()
+    timer_encoders: list[dict] = []
+    qei_encoders: list[dict] = []
     for enc in mod.get("encoder", []):
-        for pin_key, channel in (("pin_a", "A"), ("pin_b", "B")):
-            port, pin = parse_pin(enc[pin_key])
-            mux = timer_ccp_mux(enc[pin_key], enc["timer"], channel)
-            plan.add_mux(mux, port, pin, "timer")
+        if enc.get("interface") == "qei":
+            qei_encoders.append(enc)
+            add_qei_mux(plan, enc)
+        else:
+            timer_encoders.append(enc)
+            for pin_key, channel in (("pin_a", "A"), ("pin_b", "B")):
+                port, pin = parse_pin(enc[pin_key])
+                mux = timer_ccp_mux(enc[pin_key], enc["timer"], channel)
+                plan.add_mux(mux, port, pin, "timer")
 
-    body = [
-        "void Encoder_Init(void) {",
-        *plan.emit_gpio_setup(),
-        *emit_timer_capture_init(mod["encoder"]),
-        "}",
-    ]
-    write_module("encoder", INCLUDES_TIMER, body, ["void Encoder_Init(void);"], src_dir, inc_dir, plan=plan)
+    body = ["void Encoder_Init(void) {"]
+    body += plan.emit_gpio_setup()
+    if timer_encoders:
+        body += emit_timer_capture_init(timer_encoders)
+    if qei_encoders:
+        body += emit_qei_init(qei_encoders)
+    body.append("}")
+    write_module("encoder", INCLUDES_ENCODER, body, ["void Encoder_Init(void);"], src_dir, inc_dir, plan=plan)
 
 
-def gen_line(gpio: dict, src_dir: Path, inc_dir: Path) -> None:
+def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path) -> None:
     labels = pin_label_map(gpio)
+    adc_pins = adc_pin_set(modules)
     plan = PinPlanner()
     for label in gpio["pinout_groups"]["line"]:
         p = labels[label]
+        if pin_label_to_str(p) in adc_pins:
+            continue
         plan.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
 
     body = ["void Line_Init(void) {", *plan.emit_gpio_setup(), "}"]
@@ -400,6 +495,7 @@ def add_i2c_mux(plan: PinPlanner, pin: str, module: str, role: str) -> None:
 
 def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path) -> None:
     labels = pin_label_map(gpio)
+    adc_pins = adc_pin_set(modules)
     plan = PinPlanner()
 
     for group in BOARD_GPIO_GROUPS:
@@ -407,6 +503,8 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
             if label in BOARD_MUX_LABELS:
                 continue
             p = labels[label]
+            if pin_label_to_str(p) in adc_pins:
+                continue
             plan.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
 
     uart = modules.get("uart_bt", {})
@@ -416,6 +514,8 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
 
     dbg = modules.get("uart_debug", {})
     for d in dbg.get("uart_debug", []):
+        if d.get("rx"):
+            add_uart_mux(plan, d["rx"], d["module"], "rx")
         add_uart_mux(plan, d["tx"], d["module"], "tx")
 
     i2c = modules.get("i2c", {})
@@ -471,14 +571,22 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
             f"    I2CMasterInitExpClk({item['module']}_BASE, SysCtlClockGet(), true);",
         ]
 
-    for item in adc.get("adc", []):
+    adc_items = adc.get("adc", [])
+    if adc_items:
+        adc_module = adc_items[0]["module"]
         body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{item['module']});",
-            f"    ADCSequenceConfigure({item['module']}_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);",
-            f"    ADCSequenceStepConfigure({item['module']}_BASE, 3, 0, "
-            f"ADC_CTL_CH{item['channel']}|ADC_CTL_IE|ADC_CTL_END);",
-            f"    ADCSequenceEnable({item['module']}_BASE, 3);",
-            f"    ADCProcessorTrigger({item['module']}_BASE, 3);",
+            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{adc_module});",
+            f"    ADCSequenceConfigure({adc_module}_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);",
+        ]
+        for step, item in enumerate(adc_items):
+            end_flag = "|ADC_CTL_END" if step == len(adc_items) - 1 else ""
+            body.append(
+                f"    ADCSequenceStepConfigure({adc_module}_BASE, 3, {step}, "
+                f"ADC_CTL_CH{item['channel']}{end_flag});"
+            )
+        body += [
+            f"    ADCSequenceEnable({adc_module}_BASE, 3);",
+            f"    ADCProcessorTrigger({adc_module}_BASE, 3);",
         ]
 
     for item in ssi.get("ssi", []):
@@ -549,13 +657,14 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
     write_module("board", INCLUDES_BOARD, body, protos, src_dir, inc_dir, plan=plan)
 
 
-def gen_gpio_allocation_md(gpio: dict, docs_dir: Path) -> None:
+def gen_gpio_allocation_md(gpio: dict, out_path: Path, car_project: str) -> None:
     labels = pin_label_map(gpio)
     pins = gpio.get("pins", [])
+    src = f"`projects/{car_project}/.syscfg/gpio.json`"
     lines = [
         "# TM4C123GH6PMI GPIO 分配表",
         "",
-        "> 自动生成，源：`.syscfg/gpio.json`。编译与生成流程见 [build.md](build.md)。",
+        f"> 自动生成，源：{src}。编译与生成流程见 [build.md](build.md)。",
         "",
         "## 引脚映射",
         "",
@@ -582,7 +691,7 @@ def gen_gpio_allocation_md(gpio: dict, docs_dir: Path) -> None:
         "引脚与外设模块映射见 [build.md §5](build.md#5-板级配置与代码生成)。",
         "",
     ]
-    (docs_dir / "gpio-allocation.md").write_text("\n".join(lines), encoding="utf-8")
+    (out_path).write_text("\n".join(lines), encoding="utf-8")
 
 
 def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
@@ -597,58 +706,71 @@ def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
             path.unlink()
 
 
-def gen_ide_compile_db() -> None:
-    """Emit build/ide-compile-db.json for IDE navigation (see docs/build.md)."""
+def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
+    """Emit per-project build/ide-compile-db.json for IDE navigation."""
     tivaware = Path(r"D:/Ti/TivaWare_C_Series-2.2.0.295")
     freertos = tivaware / "third_party/FreeRTOS/Source"
     freertos_port = freertos / "portable/GCC/ARM_CM4F"
     gcc = ROOT / "tools/bin/arm-none-eabi-gcc.exe"
     gcc_cmd = gcc.as_posix() if gcc.exists() else "arm-none-eabi-gcc"
+    device_src = paths["device_src"]
+    device_inc = paths["device_inc"]
+    app_src = paths["app_src"]
+    ide_db = paths["ide_compile_db"]
+    bsp_inc = ROOT / "bsp_driver" / "inc"
+    bsp_src = ROOT / "bsp_driver" / "src"
 
     includes = [
         ROOT / "include",
-        ROOT / "Common/inc",
+        device_inc,
+        bsp_inc,
+        ROOT / "Common" / "inc",
         ROOT / "cbb/ws2812b",
         freertos / "include",
         freertos_port,
         tivaware,
         tivaware / "inc",
     ]
+    product_id = 2 if car_project == "car-2wd" else 1
+    profile_defines = [f"-DDEVICE_PRODUCT_ID={product_id}"]
     flags = [
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16",
         "-DTM4C123GH6PM", "-DPART_TM4C123GH6PM",
         "-std=c11", "-Wall", "-Wextra", "-Wpedantic",
         "-ffunction-sections", "-fdata-sections", "-Os", "-g3",
-    ] + [f"-I{inc.as_posix()}" for inc in includes]
+    ] + profile_defines + [f"-I{inc.as_posix()}" for inc in includes]
 
     sources = [
-        ROOT / "src/startup_tm4c123gh6pm.c",
-        ROOT / "src/main.c",
-        ROOT / "src/init.c",
-        ROOT / "src/app.c",
-        ROOT / "src/freertos_hooks.c",
-        ROOT / "src/syscalls.c",
-        DEFAULT_SRC / "motor.c",
-        DEFAULT_SRC / "encoder.c",
-        DEFAULT_SRC / "line.c",
-        DEFAULT_SRC / "board.c",
-        DEFAULT_SRC / "type.c",
-        DEFAULT_SRC / "log.c",
-        DEFAULT_SRC / "cmd.c",
-        DEFAULT_SRC / "battery.c",
-        DEFAULT_SRC / "button.c",
-        DEFAULT_SRC / "flexible_button.c",
-        DEFAULT_SRC / "led_scene.c",
-        DEFAULT_SRC / "crc32.c",
-        DEFAULT_SRC / "nvs_flash_ops.c",
-        DEFAULT_SRC / "nvs.c",
-        DEFAULT_SRC / "ota_meta.c",
-        ROOT / "cbb/ws2812b/ws2812b.c",
+        app_src / "startup_tm4c123gh6pm.c",
+        app_src / "main.c",
+        app_src / "app.c",
+        app_src / "freertos_hooks.c",
+        app_src / "syscalls.c",
+        bsp_src / "clock.c",
+        bsp_src / "uart.c",
+        ROOT / "Common/src/type.c",
+        ROOT / "Common/src/device_profile.c",
+        ROOT / "Common/src/start.c",
+        ROOT / "Common/src/log.c",
         freertos / "tasks.c",
         freertos / "queue.c",
         freertos / "list.c",
         freertos_port / "port.c",
         freertos / "portable/MemMang/heap_4.c",
+        device_src / "motor.c",
+        device_src / "encoder.c",
+        device_src / "line.c",
+        device_src / "board.c",
+        ROOT / "Common/src/cmd.c",
+        ROOT / "Common/src/battery.c",
+        ROOT / "Common/src/button.c",
+        ROOT / "Common/src/flexible_button.c",
+        ROOT / "Common/src/led_scene.c",
+        ROOT / "Common/src/crc32.c",
+        ROOT / "Common/src/nvs_flash_ops.c",
+        ROOT / "Common/src/nvs.c",
+        ROOT / "Common/src/ota_meta.c",
+        ROOT / "cbb/ws2812b/ws2812b.c",
     ]
 
     entries = []
@@ -658,44 +780,52 @@ def gen_ide_compile_db() -> None:
         cmd = " ".join([gcc_cmd, *flags, "-c", f'"{src.as_posix()}"'])
         entries.append({"directory": ROOT.as_posix(), "file": src.as_posix(), "command": cmd})
 
-    IDE_COMPILE_DB.parent.mkdir(parents=True, exist_ok=True)
-    IDE_COMPILE_DB.write_text(json.dumps(entries, indent=4) + "\n", encoding="utf-8")
-    print(f"  -> {IDE_COMPILE_DB.relative_to(ROOT)} ({len(entries)} entries)")
+    ide_db.parent.mkdir(parents=True, exist_ok=True)
+    ide_db.write_text(json.dumps(entries, indent=4) + "\n", encoding="utf-8")
+    print(f"  -> {ide_db.relative_to(ROOT)} ({len(entries)} entries)")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--manifest", default=str(DEFAULT_MANIFEST))
-    ap.add_argument("--src", default=str(DEFAULT_SRC))
-    ap.add_argument("--inc", default=str(DEFAULT_INC))
-    ap.add_argument("--docs", default=str(DEFAULT_DOCS))
+    ap.add_argument(
+        "--car-project",
+        choices=sorted(CAR_PROJECTS),
+        default=DEFAULT_CAR_PROJECT,
+        help="car project under projects/ (default: car-4wd)",
+    )
+    ap.add_argument("--manifest", default=None, help="override .syscfg/project.json path")
+    ap.add_argument("--src", default=None, help="override device source output directory")
+    ap.add_argument("--inc", default=None, help="override device include output directory")
     ap.add_argument(
         "--ide-db",
         action="store_true",
-        help="also generate build/ide-compile-db.json (standalone IDE)",
+        help="also generate projects/<car>/build/ide-compile-db.json",
     )
     args = ap.parse_args()
 
-    manifest = Path(args.manifest)
+    paths = resolve_car_project(args.car_project)
+    manifest = Path(args.manifest) if args.manifest else paths["manifest"]
     if not manifest.exists():
-        print("[SKIP] no manifest")
+        print(f"[SKIP] no manifest: {manifest}")
         return
 
-    src_dir, inc_dir, docs_dir = Path(args.src), Path(args.inc), Path(args.docs)
-    for d in (src_dir, inc_dir, docs_dir):
+    src_dir = Path(args.src) if args.src else paths["device_src"]
+    inc_dir = Path(args.inc) if args.inc else paths["device_inc"]
+    for d in (src_dir, inc_dir, paths["build"]):
         d.mkdir(parents=True, exist_ok=True)
 
     print("Generating optimized board modules...")
-    board, gpio, modules = load_manifest(manifest)
+    board, gpio, modules, variant = load_manifest(manifest)
+    print(f"  car-project: {args.car_project}")
     remove_legacy(src_dir, inc_dir)
     gen_gpio_pins_h(gpio, inc_dir)
     gen_motor(gpio, modules["motor"], board, src_dir, inc_dir)
     gen_encoder(gpio, modules["encoder"], src_dir, inc_dir)
-    gen_line(gpio, src_dir, inc_dir)
+    gen_line(gpio, modules, src_dir, inc_dir)
     gen_board(gpio, modules, src_dir, inc_dir)
-    gen_gpio_allocation_md(gpio, docs_dir)
+    gen_gpio_allocation_md(gpio, paths["gpio_doc"], args.car_project)
     if args.ide_db:
-        gen_ide_compile_db()
+        gen_ide_compile_db(paths, args.car_project)
     print("Done.")
 
 

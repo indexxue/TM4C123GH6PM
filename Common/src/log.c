@@ -13,12 +13,13 @@
 #include "task.h"
 #include "semphr.h"
 
-#include "board.h"
+#include "uart.h"
 
 #define LOG_BUFFER_SIZE 256
 
 static SemaphoreHandle_t log_mutex;
 static log_output_func_t log_output_func;
+static volatile BaseType_t log_scheduler_running = pdFALSE;
 static log_config_t log_config = {
     .level = LOG_LEVEL_INFO,
     .color = LOG_COLOR_NONE,
@@ -39,14 +40,14 @@ static const char *log_level_strings[] = {
 
 static void log_lock(void)
 {
-    if (log_mutex != NULL) {
+    if ((log_mutex != NULL) && (log_scheduler_running != pdFALSE)) {
         (void)xSemaphoreTake(log_mutex, portMAX_DELAY);
     }
 }
 
 static void log_unlock(void)
 {
-    if (log_mutex != NULL) {
+    if ((log_mutex != NULL) && (log_scheduler_running != pdFALSE)) {
         (void)xSemaphoreGive(log_mutex);
     }
 }
@@ -59,7 +60,7 @@ static void log_default_output(const char *str, uint16_t len)
         return;
     }
     for (i = 0U; i < len; i++) {
-        UART_Debug_Putc(str[i]);
+        bsp_uart_debug_putc(str[i]);
     }
 }
 
@@ -90,6 +91,9 @@ static const char *log_get_filename(const char *filepath)
 
 static uint32_t log_get_timestamp_ms(void)
 {
+    if (log_scheduler_running == pdFALSE) {
+        return 0U;
+    }
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
 
@@ -138,6 +142,11 @@ status_t log_init(log_output_func_t output_func)
     log_config.initialized = true;
 
     return STATUS_OK;
+}
+
+void log_notify_scheduler_running(void)
+{
+    log_scheduler_running = pdTRUE;
 }
 
 status_t log_deinit(void)

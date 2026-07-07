@@ -2,7 +2,7 @@
 
 ## 项目介绍
 
-基于 **TM4C123GH6PM**（Cortex-M4F @ 80 MHz）的 **FreeRTOS** 四轴小车固件。Cursor / VS Code 开发，PowerShell 构建。
+基于 **TM4C123GH6PM**（Cortex-M4F @ 80 MHz）的 **FreeRTOS** 智能小车固件，含**四轮**与**两轮**两个独立工程。Cursor / VS Code 开发，PowerShell 构建。
 
 仓库：<https://github.com/indexxue/TM4C123GH6PM>
 
@@ -15,20 +15,35 @@
 ```powershell
 git clone git@github.com:indexxue/TM4C123GH6PM.git
 cd TM4C123GH6PM
+git submodule update --init --recursive
 
-.\build.cmd          # 编译
-.\flash.cmd          # 烧录（需 UniFlash）
+.\build.cmd                          # 默认 car-4wd log-only
+.\build.cmd -Profile full            # 全外设
+.\flash-jlink.cmd                    # J-Link 烧录
 ```
 
-编译、多目标构建、代码生成、脚本与排错：**[docs/build.md](docs/build.md)**（编译相关文档的单一来源）。
+编译、多目标构建、代码生成、脚本与排错：**[docs/build.md](docs/build.md)**。
 
 | 常用命令 | 说明 |
 |----------|------|
-| `.\build.cmd` | standalone 开发镜像 |
+| `.\build.cmd` | 四轮 standalone（`projects/car-4wd/build/car-4wd.bin`） |
+| `.\build.cmd -CarProject car-2wd` | 两轮 standalone |
 | `.\build.cmd -Target all` | Boot + APP_A + 厂测 |
-| `.\flash.cmd -Target prod` | 首次量产分区烧录 |
+| `.\projects\car-4wd\build.cmd` | 在工程目录内编译 |
 
-引脚表：[docs/gpio-allocation.md](docs/gpio-allocation.md) · 分区：[PARTITION.md](PARTITION.md)
+引脚：[docs/syscfg-io-allocation.md](docs/syscfg-io-allocation.md) · 分区：[PARTITION.md](PARTITION.md)
+
+---
+
+## 工程结构
+
+```
+bsp_driver/         MCU 外设薄封装
+cbb/                芯片驱动子模块
+projects/car-4wd/   .syscfg/  board/（设备库）  main/（应用）  build/
+projects/car-2wd/   同上
+Common/             公共模块（log、start、device_profile、nvs、ota…）
+```
 
 ---
 
@@ -40,19 +55,8 @@ cd TM4C123GH6PM
 | M1 Bootloader 跳转 APP_A | ✅ |
 | M2 NVS / ota_meta | ✅ |
 | M3～M5 OTA 激活与协议 | 待做 |
-| M6 厂测切换 | 部分（`factory/` 已就绪） |
 
 详见 [docs/ab-ota-dev-plan.md](docs/ab-ota-dev-plan.md)。
-
----
-
-## 推送
-
-```powershell
-git add .
-git commit -m "描述本次改动"
-git push origin main
-```
 
 ---
 
@@ -60,8 +64,10 @@ git push origin main
 
 | 文档 | 内容 |
 |------|------|
-| **[docs/build.md](docs/build.md)** | **编译、构建、烧录、脚本** |
-| [docs/gpio-allocation.md](docs/gpio-allocation.md) | GPIO 引脚分配 |
-| [docs/flash-partition.md](docs/flash-partition.md) | Flash 分区设计 |
-| [docs/project-overview.md](docs/project-overview.md) | 项目总览 |
-| [docs/car-chassis-reference.md](docs/car-chassis-reference.md) | 底盘开发参考 |
+| **[docs/build.md](docs/build.md)** | 编译、构建、烧录 |
+| [docs/syscfg-io-allocation.md](docs/syscfg-io-allocation.md) | 四轮/两轮引脚 |
+| [docs/resource-allocation.md](docs/resource-allocation.md) | 定时器/DMA/中断 |
+| [docs/project-overview.md](docs/project-overview.md) | 项目快照 |
+| [docs/car-chassis-reference.md](docs/car-chassis-reference.md) | TivaWare API 参考 |
+| [docs/flash-partition.md](docs/flash-partition.md) | Flash 分区 |
+

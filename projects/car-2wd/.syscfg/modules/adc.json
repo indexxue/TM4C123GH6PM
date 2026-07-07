@@ -1,0 +1,11 @@
+{
+  "module": "adc",
+  "adc": [
+    { "name": "Battery", "module": "ADC1", "channel": 0, "pin": "PE3", "role": "battery" },
+    { "name": "Button", "module": "ADC1", "channel": 1, "pin": "PE2", "role": "button" },
+    { "name": "Line3", "module": "ADC1", "channel": 5, "pin": "PD2", "role": "line" },
+    { "name": "Line4", "module": "ADC1", "channel": 4, "pin": "PD3", "role": "line" },
+    { "name": "Line5", "module": "ADC1", "channel": 7, "pin": "PD0", "role": "line" },
+    { "name": "ExtraButton", "module": "ADC1", "channel": 6, "pin": "PD1", "role": "button" }
+  ]
+}

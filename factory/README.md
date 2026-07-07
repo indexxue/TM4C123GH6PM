@@ -21,7 +21,7 @@
 | `factory_app.c` | 厂测任务（灯效、心跳日志） |
 | `factory.h` | 公共接口 |
 
-与量产 APP 共用 `Common/`、`src/startup_*.c`、`src/freertos_hooks.c` 等；**不**链 `src/main.c` / `src/init.c` / `src/app.c`。
+与量产 APP 共用 `Common/`、`projects/<car>/src/startup_*.c`、`freertos_hooks.c` 等；**不**链 `main.c` / `init.c` / `app.c`。
 
 ## 构建与烧录
 
