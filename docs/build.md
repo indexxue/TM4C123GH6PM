@@ -10,11 +10,17 @@
 
 | 组件 | 默认路径 | 说明 |
 |------|----------|------|
-| TivaWare C Series 2.2.0.295 | `D:\Ti\TivaWare_C_Series-2.2.0.295` | DriverLib、FreeRTOS、头文件 |
+| TivaWare C Series 2.2.0.295 | `sdk/TivaWare_C_Series-2.2.0.295` | 首次构建自动安装（不提交 Git） |
 | ARM GNU Toolchain | `tools/bin/arm-none-eabi-gcc.exe` | 首次构建由 `install-toolchain.ps1` 自动下载 |
 | UniFlash 9.2.0 | `D:\Ti\uniflash_9.2.0\dslite.bat` | 烧录（需 `TM4C123GH6PM.ccxml`） |
 
-一次性安装：
+首次构建时 `build.ps1` 会依次确保工具链与 TivaWare SDK 就绪。SDK 安装顺序：
+
+1. 已存在于 `sdk/TivaWare_C_Series-2.2.0.295`
+2. 从本机旧路径 `D:\Ti\TivaWare_C_Series-2.2.0.295` 复制
+3. 从 `downloads/SW-TM4C-2.2.0.295.exe` 解压
+
+若无法自动安装，从 [TI 官网](https://www.ti.com/tool/SW-TM4C) 下载后执行：
 
 ```powershell
 .\scripts\install-tivaware.ps1 -InstallerPath D:\Downloads\SW-TM4C-2.2.0.295.exe
@@ -224,7 +230,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | 路径 | 提交 |
 |------|------|
 | `projects/*/build/` | 否 |
-| `tools/`、`downloads/` | 否 |
+| `tools/`、`downloads/`、`sdk/` | 否 |
 | `projects/*/source/src/{motor,encoder,line,board}.c` | 是（与 gen 保持一致） |
 | `projects/*/gpio-allocation.md` | 是（自动生成） |
 
@@ -235,7 +241,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | 现象 | 处理 |
 |------|------|
 | `arm-none-eabi-gcc not found` | 让 build 自动装工具链 |
-| `FreeRTOS not found` | 安装 TivaWare |
+| `FreeRTOS not found` / SDK 缺失 | 运行 `.\build.cmd` 自动安装，或手动 `.\scripts\install-tivaware.ps1` |
 | 改引脚不生效 | 改 `projects/<car>/.syscfg/` 后重新编译 |
 | 编译了错误的车型 | 检查 `-CarProject` 参数 |
 

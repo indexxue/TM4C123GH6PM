@@ -16,4 +16,5 @@
 #define M4_PWM_CH TIMER_B
 
 void Motor_Init(void);
+void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);
 #endif

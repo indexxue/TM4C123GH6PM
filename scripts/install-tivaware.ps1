@@ -1,65 +1,106 @@
 <#
 .SYNOPSIS
-    安装 TivaWare C Series SDK (SW-TM4C)。
+    安装 TivaWare C Series SDK 到项目本地 sdk/ 目录。
 .DESCRIPTION
-    TivaWare 需要从 TI 官网下载（需 TI 账号登录）。
-    当前预期路径:
-      D:\Ti\TivaWare_C_Series-2.2.0.295\docs\sw\sysconfig\products.json
+    首次构建时由 build.ps1 自动调用。安装顺序：
+      1. 已存在于 sdk/TivaWare_C_Series-2.2.0.295
+      2. 从本机旧路径 D:\Ti\TivaWare_C_Series-2.2.0.295 复制（迁移）
+      3. 从 downloads/SW-TM4C-2.2.0.295.exe 解压
+      4. -InstallerPath 指定的安装包
 
-    下载地址:
+    TI 安装包需 myTI 账号下载：
       https://www.ti.com/tool/SW-TM4C
-
-    下载后运行此脚本完成部署：
-      .\scripts\install-tivaware.ps1 -InstallerPath D:\Downloads\SW-TM4C-2.2.0.295.exe
 #>
 param(
-    [string]$InstallerPath = "",
-    [string]$TargetDir = "D:\Ti\TivaWare_C_Series-2.2.0.295"
+    [string]$InstallerPath = ""
 )
 
 $ErrorActionPreference = "Stop"
 
-# 检查是否已安装
-if (Test-Path (Join-Path $TargetDir "docs\sw\sysconfig\products.json")) {
+. (Join-Path $PSScriptRoot "sdk-path.ps1")
+
+$Marker = $Script:TivaWareLib
+$TargetDir = $Script:TivaWareRoot
+$DownloadsDir = Join-Path $Script:ProjectRoot "downloads"
+$DefaultInstaller = Join-Path $DownloadsDir "SW-TM4C-$($Script:TivaWareVersion).exe"
+
+function Install-FromExe {
+    param(
+        [string]$ExePath,
+        [string]$DestDir
+    )
+
+    if (-not (Test-Path $ExePath)) {
+        throw "Installer not found: $ExePath"
+    }
+
+    Write-Host "Extracting TivaWare from $ExePath ..." -ForegroundColor Cyan
+    $tempDir = Join-Path $Script:SdkDir "_tivaware_temp"
+    if (Test-Path $tempDir) {
+        Remove-Item $tempDir -Recurse -Force
+    }
+    New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
+
+    Start-Process -FilePath $ExePath -ArgumentList "/S", "/D=$tempDir" -Wait -NoNewWindow
+
+    $extracted = Get-ChildItem $tempDir -Filter "*TivaWare*" -Directory | Select-Object -First 1
+    if ($extracted) {
+        if (Test-Path $DestDir) {
+            Remove-Item $DestDir -Recurse -Force
+        }
+        Move-Item $extracted.FullName $DestDir -Force
+    } else {
+        New-Item -ItemType Directory -Force -Path $DestDir | Out-Null
+        Get-ChildItem $tempDir | Move-Item -Destination $DestDir -Force
+    }
+
+    Remove-Item $tempDir -Recurse -Force
+}
+
+if (Test-TivaWareInstalled) {
     Write-Host "TivaWare already installed at $TargetDir" -ForegroundColor Green
     exit 0
 }
 
+New-Item -ItemType Directory -Force -Path $Script:SdkDir, $DownloadsDir | Out-Null
+
+if (Test-TivaWareInstalled -Root $Script:LegacyTivaWareRoot) {
+    Write-Host "Copying TivaWare from $($Script:LegacyTivaWareRoot) ..." -ForegroundColor Cyan
+    Copy-Item $Script:LegacyTivaWareRoot $TargetDir -Recurse -Force
+    Write-Host "TivaWare installed at $TargetDir" -ForegroundColor Green
+    exit 0
+}
+
 if ([string]::IsNullOrEmpty($InstallerPath)) {
-    Write-Host @"
+    $InstallerPath = $DefaultInstaller
+}
 
-TivaWare C Series 需要手动下载。
+if (Test-Path $InstallerPath) {
+    Install-FromExe -ExePath $InstallerPath -DestDir $TargetDir
+    if (Test-TivaWareInstalled) {
+        Write-Host "TivaWare installed at $TargetDir" -ForegroundColor Green
+        exit 0
+    }
+    throw "Installer finished but SDK marker not found at $Marker"
+}
 
-1. 打开: https://www.ti.com/tool/SW-TM4C
-2. 登录 myTI 账号，下载 SW-TM4C-2.2.0.295.exe (~200 MB)
-3. 运行此脚本:
-   .\scripts\install-tivaware.ps1 -InstallerPath D:\path\to\SW-TM4C-2.2.0.295.exe
+Write-Host @"
+
+TivaWare C Series SDK 未找到，且无法自动下载（需 TI myTI 账号）。
+
+请任选一种方式：
+
+1. 将已下载的安装包放到：
+     $DefaultInstaller
+   然后重新运行 .\build.cmd
+
+2. 手动指定安装包路径：
+     .\scripts\install-tivaware.ps1 -InstallerPath D:\path\to\SW-TM4C-$($Script:TivaWareVersion).exe
+
+3. 若本机已有全局安装，确保存在：
+     $($Script:LegacyTivaWareRoot)
+
+下载地址: https://www.ti.com/tool/SW-TM4C
 
 "@ -ForegroundColor Yellow
-    exit 1
-}
-
-if (-not (Test-Path $InstallerPath)) {
-    throw "Installer not found: $InstallerPath"
-}
-
-Write-Host "Installing TivaWare to $TargetDir ..." -ForegroundColor Cyan
-$tempDir = Join-Path (Split-Path $TargetDir -Parent) "_tivaware_temp"
-New-Item -ItemType Directory -Force -Path $tempDir | Out-Null
-
-# SW-TM4C 是自解压 exe，可用 7z 或静默解压
-Start-Process -FilePath $InstallerPath -ArgumentList "/S", "/D=$tempDir" -Wait -NoNewWindow
-
-# 找到解压后的目录
-$extracted = Get-ChildItem $tempDir -Filter "*TivaWare*" -Directory | Select-Object -First 1
-if ($extracted) {
-    Move-Item $extracted.FullName $TargetDir -Force
-} else {
-    # 尝试直接移动
-    New-Item -ItemType Directory -Force -Path $TargetDir | Out-Null
-    Get-ChildItem $tempDir | Move-Item -Destination $TargetDir -Force
-}
-Remove-Item $tempDir -Recurse -Force
-
-Write-Host "TivaWare installed." -ForegroundColor Green
-Write-Host "Product JSON: $(Join-Path $TargetDir 'docs\sw\sysconfig\products.json')"
+exit 1

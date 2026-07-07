@@ -9,10 +9,10 @@
                 "${workspaceFolder}/bsp_driver/inc",
                 "${workspaceFolder}/Common/inc",
                 "${workspaceFolder}/cbb/ws2812b",
-                "D:/Ti/TivaWare_C_Series-2.2.0.295",
-                "D:/Ti/TivaWare_C_Series-2.2.0.295/inc",
-                "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include",
-                "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F"
+                "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295",
+                "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295/inc",
+                "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/include",
+                "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source/portable/GCC/ARM_CM4F"
             ],
             "defines": [
                 "TM4C123GH6PM",
@@ -34,8 +34,8 @@
             "browse": {
                 "path": [
                     "${workspaceFolder}",
-                    "D:/Ti/TivaWare_C_Series-2.2.0.295",
-                    "D:/Ti/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source"
+                    "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295",
+                    "${workspaceFolder}/sdk/TivaWare_C_Series-2.2.0.295/third_party/FreeRTOS/Source"
                 ],
                 "limitSymbolsToIncludedHeaders": false
             }

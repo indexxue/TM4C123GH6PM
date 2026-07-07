@@ -123,7 +123,7 @@ control task
 
 | 文档 | 路径 |
 |------|------|
-| DriverLib 用户指南 | `TivaWare_C_Series-2.2.0.295/docs/SW-TM4C-DRL-UG-2.2.0.295.pdf` |
+| DriverLib 用户指南 | `sdk/TivaWare_C_Series-2.2.0.295/docs/SW-TM4C-DRL-UG-2.2.0.295.pdf` |
 | TM4C123 数据手册 | https://www.ti.com/lit/ds/symlink/tm4c123gh6pm.pdf |
 | 技术参考手册 | https://www.ti.com/lit/ug/spmu298/spmu298.pdf |
 

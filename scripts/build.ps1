@@ -27,10 +27,12 @@ $CbbWs2812 = Join-Path $ProjectRoot "cbb\ws2812b"
 $LdDir = Join-Path $ProjectRoot "ld"
 $ToolsDir = Join-Path $ProjectRoot "tools"
 $ToolchainBin = Join-Path $ToolsDir "bin"
-$TivaWareRoot = "D:\Ti\TivaWare_C_Series-2.2.0.295"
-$TivaWareLib = Join-Path $TivaWareRoot "driverlib\gcc\libdriver.a"
+. (Join-Path $PSScriptRoot "sdk-path.ps1")
+Ensure-TivaWare
+$TivaWareRoot = $Script:TivaWareRoot
+$TivaWareLib = $Script:TivaWareLib
 $TivaWareFound = Test-Path $TivaWareLib
-$FreeRTOSRoot = Join-Path $TivaWareRoot "third_party\FreeRTOS\Source"
+$FreeRTOSRoot = $Script:FreeRTOSRoot
 $FreeRTOSPort = Join-Path $FreeRTOSRoot "portable\GCC\ARM_CM4F"
 $GenConfig = Join-Path $ProjectRoot "scripts\gen_config.py"
 $CheckSize = Join-Path $ProjectRoot "scripts\check-image-size.py"
@@ -47,10 +49,6 @@ $env:PATH = "$ToolchainBin;$env:PATH"
 & arm-none-eabi-gcc --version | Out-Null
 if ($LASTEXITCODE -ne 0) { throw "arm-none-eabi-gcc not found." }
 
-if (-not (Test-Path (Join-Path $FreeRTOSRoot "tasks.c"))) {
-    throw "FreeRTOS not found at $FreeRTOSRoot (install TivaWare C Series)."
-}
-
 function Get-ProfileDefines {
     $productId = if ($CarProject -eq "car-2wd") { 2 } else { 1 }
     return @("-DDEVICE_PRODUCT_ID=$productId")
@@ -58,8 +56,18 @@ function Get-ProfileDefines {
 
 function Get-BspSources {
     return @(
-        (Join-Path $BspSrc "clock.c"),
-        (Join-Path $BspSrc "uart.c")
+        (Join-Path $BspSrc "bsp_sysctl.c"),
+        (Join-Path $BspSrc "bsp_gpio.c"),
+        (Join-Path $BspSrc "bsp_systick.c"),
+        (Join-Path $BspSrc "bsp_uart.c"),
+        (Join-Path $BspSrc "bsp_i2c.c"),
+        (Join-Path $BspSrc "bsp_adc.c"),
+        (Join-Path $BspSrc "bsp_timer.c"),
+        (Join-Path $BspSrc "bsp_qei.c"),
+        (Join-Path $BspSrc "bsp_dma.c"),
+        (Join-Path $BspSrc "bsp_spi.c"),
+        (Join-Path $BspSrc "bsp_dac.c"),
+        (Join-Path $BspSrc "bsp_bus_lock.c")
     )
 }
 

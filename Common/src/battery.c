@@ -1,22 +1,18 @@
 /**
  * @file battery.c
- * @brief TM4C123 ADC0 电池电压采样（PE0 / AIN0，分压比 2）
+ * @brief TM4C123 电池电压采样（ADC1 AIN0 @ PE3，分压比 2）
  */
 
 #include "battery.h"
 
-#include <stdbool.h>
 #include <string.h>
 
-#include "inc/hw_memmap.h"
-#include "driverlib/adc.h"
-#include "driverlib/sysctl.h"
+#include "bsp_adc.h"
+#include "periph_bind.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-#define BATTERY_ADC_BASE ADC0_BASE
-#define BATTERY_ADC_SEQ 3U
 #define BATTERY_SAMPLE_CNT (8U)
 #define BATTERY_DIVIDER_RATIO (2U)
 #define BATTERY_MV_EMPTY (3300U)
@@ -43,11 +39,10 @@ static uint32_t battery_read_adc_raw(void)
 {
     uint32_t value = 0U;
 
-    ADCProcessorTrigger(BATTERY_ADC_BASE, BATTERY_ADC_SEQ);
-    while (!ADCIntStatus(BATTERY_ADC_BASE, BATTERY_ADC_SEQ, false)) {
+    if (!bsp_adc_sample_one(&BOARD_BATTERY_ADC_CFG, &value)) {
+        return 0U;
     }
-    ADCIntClear(BATTERY_ADC_BASE, BATTERY_ADC_SEQ);
-    ADCSequenceDataGet(BATTERY_ADC_BASE, BATTERY_ADC_SEQ, &value);
+
     return value;
 }
 
@@ -82,6 +77,10 @@ static uint32_t battery_voltage_sample_hw(battery_voltage_t *voltage)
 
     for (uint16_t i = 0U; i < BATTERY_SAMPLE_CNT; i++) {
         uint32_t raw = battery_read_adc_raw();
+        if (raw == 0U) {
+            return 0U;
+        }
+
         sum += raw;
         if (count == 0U) {
             min_raw = max_raw = raw;

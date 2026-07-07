@@ -7,6 +7,10 @@ projects/*/build/
 tools/
 downloads/
 
+# TivaWare SDK (installed on first build; see sdk/README.md)
+sdk/*
+!sdk/README.md
+
 # Legacy IDE DB at repo root (use build/ide-compile-db.json)
 compile_commands.json
 

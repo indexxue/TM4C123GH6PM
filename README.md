@@ -10,17 +10,17 @@
 
 ## 快速上手
 
-**前提**：安装 [TivaWare C Series 2.2.0.295](https://www.ti.com/tool/SW-TM4C)（默认 `D:\Ti\TivaWare_C_Series-2.2.0.295`）。
-
 ```powershell
 git clone git@github.com:indexxue/TM4C123GH6PM.git
 cd TM4C123GH6PM
 git submodule update --init --recursive
 
-.\build.cmd                          # 默认 car-4wd log-only
+.\build.cmd                          # 首次构建自动安装工具链与 TivaWare SDK
 .\build.cmd -Profile full            # 全外设
 .\flash-jlink.cmd                    # J-Link 烧录
 ```
+
+首次编译会自动下载 ARM 工具链到 `tools/`，并将 TivaWare SDK 安装到 `sdk/`（不提交 Git）。若本机无 SDK，需从 [TI 官网](https://www.ti.com/tool/SW-TM4C) 下载安装包放到 `downloads/`。详见 [docs/build.md](docs/build.md)。
 
 编译、多目标构建、代码生成、脚本与排错：**[docs/build.md](docs/build.md)**。
 

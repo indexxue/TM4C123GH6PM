@@ -18,6 +18,7 @@
 #if !FIRMWARE_PROFILE_LOG_ONLY
 #include "cmd.h"
 #include "led_scene.h"
+#include "motor.h"
 #endif
 
 #define TASK_PRIO_PRIMARY   (3U)
@@ -74,6 +75,16 @@ static void PrimaryTask(void *pvParameters)
             led_scene_run(LED_SCENE_ID_BOOTUP);
             LOG_INFO("led_scene: bootup started");
         }
+    }
+
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
+        LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
+        Motor_SetSpeed(1U, 100);
+        Motor_SetSpeed(2U, 100);
+        vTaskDelay(pdMS_TO_TICKS(3000U));
+        Motor_SetSpeed(1U, 0);
+        Motor_SetSpeed(2U, 0);
+        LOG_INFO("app: motor demo done");
     }
 #endif
 

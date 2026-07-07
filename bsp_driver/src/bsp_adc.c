@@ -1,0 +1,120 @@
+/**
+ * @file bsp_adc.c
+ * @brief TM4C123 ADC 处理器触发序列采样
+ */
+
+#include "bsp_adc.h"
+
+#include "bsp_systick.h"
+#include "bsp_sysctl.h"
+
+#include "bsp_config.h"
+
+#include "driverlib/adc.h"
+#include "driverlib/sysctl.h"
+#include "inc/hw_memmap.h"
+
+#define BSP_ADC_PERIPH_READY_US 100000U
+#define BSP_ADC_SAMPLE_TIMEOUT_US 100000U
+
+static uint32_t adc_periph_from_base(uint32_t base)
+{
+    switch (base) {
+    case ADC0_BASE:
+        return SYSCTL_PERIPH_ADC0;
+    case ADC1_BASE:
+        return SYSCTL_PERIPH_ADC1;
+    default:
+        return 0U;
+    }
+}
+
+static uint32_t adc_ctl_for_channel(uint8_t channel)
+{
+    static const uint32_t ctl_table[] = {
+        ADC_CTL_CH0,  ADC_CTL_CH1,  ADC_CTL_CH2,  ADC_CTL_CH3,
+        ADC_CTL_CH4,  ADC_CTL_CH5,  ADC_CTL_CH6,  ADC_CTL_CH7,
+        ADC_CTL_CH8,  ADC_CTL_CH9,  ADC_CTL_CH10, ADC_CTL_CH11,
+        ADC_CTL_CH12, ADC_CTL_CH13, ADC_CTL_CH14, ADC_CTL_CH15,
+        ADC_CTL_CH16, ADC_CTL_CH17, ADC_CTL_CH18, ADC_CTL_CH19,
+        ADC_CTL_CH20, ADC_CTL_CH21, ADC_CTL_CH22, ADC_CTL_CH23,
+    };
+
+    if (channel >= (sizeof(ctl_table) / sizeof(ctl_table[0]))) {
+        return ADC_CTL_CH0;
+    }
+
+    return ctl_table[channel];
+}
+
+bool bsp_adc_init(const bsp_adc_config_t *cfg)
+{
+    uint32_t periph;
+    size_t i;
+
+    if ((cfg == NULL) || (cfg->base == 0U) || (cfg->channels == NULL) || (cfg->channel_count == 0U)) {
+        return false;
+    }
+
+    periph = adc_periph_from_base(cfg->base);
+    if (periph == 0U) {
+        return false;
+    }
+
+    SysCtlPeripheralEnable(periph);
+    if (!bsp_periph_wait_ready(periph, BSP_ADC_PERIPH_READY_US)) {
+        return false;
+    }
+
+    ADCReferenceSet(cfg->base, ADC_REF_INT);
+    ADCSequenceConfigure(cfg->base, cfg->sequence, ADC_TRIGGER_PROCESSOR, 0);
+
+    for (i = 0U; i < cfg->channel_count; i++) {
+        uint32_t ctl = adc_ctl_for_channel(cfg->channels[i].channel);
+        if (i == (cfg->channel_count - 1U)) {
+            ctl |= ADC_CTL_END;
+        }
+        ADCSequenceStepConfigure(cfg->base, cfg->sequence, cfg->channels[i].step, ctl);
+    }
+
+    ADCSequenceEnable(cfg->base, cfg->sequence);
+    ADCIntClear(cfg->base, cfg->sequence);
+    return true;
+}
+
+bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
+{
+    bsp_timeout_t timeout;
+
+    if ((cfg == NULL) || (values == NULL) || (count < cfg->channel_count)) {
+        return false;
+    }
+
+    ADCProcessorTrigger(cfg->base, cfg->sequence);
+    bsp_timeout_start_us(&timeout, BSP_ADC_SAMPLE_TIMEOUT_US);
+    while (!ADCIntStatus(cfg->base, cfg->sequence, false)) {
+        if (bsp_timeout_expired(&timeout)) {
+            return false;
+        }
+    }
+
+    ADCIntClear(cfg->base, cfg->sequence);
+    ADCSequenceDataGet(cfg->base, cfg->sequence, values);
+    return true;
+}
+
+bool bsp_adc_sample_one(const bsp_adc_config_t *cfg, uint32_t *value)
+{
+    uint32_t samples[4];
+
+    if ((cfg == NULL) || (value == NULL)) {
+        return false;
+    }
+
+    if (!bsp_adc_sample(cfg, samples, cfg->channel_count)) {
+        return false;
+    }
+
+    *value = samples[0];
+    return true;
+}

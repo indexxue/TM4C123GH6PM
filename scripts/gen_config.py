@@ -10,6 +10,13 @@ from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
+TIVAWARE_VERSION = "2.2.0.295"
+
+
+def tivaware_root() -> Path:
+    return ROOT / "sdk" / f"TivaWare_C_Series-{TIVAWARE_VERSION}"
+
+
 CAR_PROJECTS = {
     "car-4wd": ROOT / "projects" / "car-4wd",
     "car-2wd": ROOT / "projects" / "car-2wd",
@@ -49,30 +56,65 @@ INCLUDES_GPIO = [
 
 INCLUDES_TIMER = INCLUDES_GPIO + ['#include "driverlib/timer.h"']
 INCLUDES_ENCODER = INCLUDES_TIMER + ['#include "driverlib/qei.h"']
+INCLUDES_BOARD_BSP = [
+    "#include <stdbool.h>",
+    "#include <stdint.h>",
+    '#include "periph_bind.h"',
+    '#include "bsp_gpio.h"',
+    '#include "bsp_uart.h"',
+    '#include "bsp_i2c.h"',
+    '#include "bsp_adc.h"',
+    '#include "bsp_dma.h"',
+    '#include "bsp_spi.h"',
+    "#include \"driverlib/gpio.h\"",
+    '#include "driverlib/pin_map.h"',
+    '#include "driverlib/sysctl.h"',
+    '#include "driverlib/timer.h"',
+    '#include "inc/hw_memmap.h"',
+]
+INCLUDES_MOTOR_BSP = [
+    "#include <stdbool.h>",
+    "#include <stdint.h>",
+    '#include "bsp_gpio.h"',
+    '#include "bsp_timer.h"',
+    '#include "gpio_pins.h"',
+    '#include "periph_bind.h"',
+    '#include "driverlib/gpio.h"',
+    '#include "driverlib/pin_map.h"',
+    '#include "driverlib/sysctl.h"',
+    '#include "inc/hw_memmap.h"',
+    '#include "driverlib/timer.h"',
+]
+INCLUDES_ENCODER_BSP = [
+    "#include <stdbool.h>",
+    "#include <stdint.h>",
+    '#include "bsp_gpio.h"',
+    '#include "bsp_qei.h"',
+    '#include "periph_bind.h"',
+    '#include "driverlib/gpio.h"',
+    '#include "driverlib/pin_map.h"',
+    '#include "driverlib/sysctl.h"',
+    '#include "inc/hw_memmap.h"',
+]
 INCLUDES_BOARD = INCLUDES_GPIO + [
     '#include "driverlib/uart.h"',
     '#include "driverlib/i2c.h"',
     '#include "driverlib/adc.h"',
-    '#include "driverlib/ssi.h"',
     '#include "driverlib/udma.h"',
 ]
 
-def gpio_helpers(plan: PinPlanner) -> str:
-    parts = [
-        "static void gpio_enable_ports(uint32_t ports)",
-        "{",
-        "    if (ports & (1u << 0)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOA); }",
-        "    if (ports & (1u << 1)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB); }",
-        "    if (ports & (1u << 2)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOC); }",
-        "    if (ports & (1u << 3)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOD); }",
-        "    if (ports & (1u << 4)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOE); }",
-        "    if (ports & (1u << 5)) { SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOF); }",
-        "    while (!SysCtlPeripheralReady(SYSCTL_PERIPH_GPIOA)) {}",
-        "}",
+def emit_init_guard(call: str) -> list[str]:
+    return [
+        f"    if (!{call}) {{",
+        "        return false;",
+        "    }",
     ]
+
+
+def gpio_helpers(plan: PinPlanner) -> str:
+    parts: list[str] = []
     if any(plan.outputs.values()):
         parts += [
-            "",
             "static void gpio_outputs(uint32_t port, uint8_t pins)",
             "{",
             "    GPIOPinTypeGPIOOutput(port, pins);",
@@ -149,11 +191,15 @@ class PinPlanner:
     def port_mask(self) -> int:
         return sum(1 << self.PORT_BIT[p] for p in self._ports)
 
-    def emit_gpio_setup(self) -> list[str]:
+    def emit_gpio_setup(self, guarded: bool = False) -> list[str]:
         lines: list[str] = []
         if not self._ports:
             return lines
-        lines.append(f"    gpio_enable_ports(0x{self.port_mask():02X}u);")
+        enable = f"bsp_gpio_port_enable(0x{self.port_mask():02X}u)"
+        if guarded:
+            lines.extend(emit_init_guard(enable))
+        else:
+            lines.append(f"    (void){enable};")
         for port in sorted(self._ports):
             base = f"GPIO_PORT{port}_BASE"
             out_m = self.outputs[port]
@@ -400,7 +446,43 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, inc_dir: Path) 
         port, pin = parse_pin(ch["pin"])
         plan.add_mux(timer_ccp_mux(ch["pin"], ch["timer"], ch["channel"]), port, pin, "timer")
 
-    body = ["void Motor_Init(void) {", *plan.emit_gpio_setup(), *emit_timer_pwm_init(mod["pwm"], clock), "}"]
+    body = [
+        "static void motor_apply_dir(const bsp_gpio_pin_t *in1, const bsp_gpio_pin_t *in2, int32_t rpm)",
+        "{",
+        "    if (rpm > 0) {",
+        "        bsp_gpio_write(in1, true);",
+        "        bsp_gpio_write(in2, false);",
+        "    } else if (rpm < 0) {",
+        "        bsp_gpio_write(in1, false);",
+        "        bsp_gpio_write(in2, true);",
+        "    } else {",
+        "        bsp_gpio_write(in1, false);",
+        "        bsp_gpio_write(in2, false);",
+        "    }",
+        "}",
+        "",
+        "void Motor_Init(void) {",
+        *plan.emit_gpio_setup(),
+        "    bsp_pwm_init(&BOARD_PWM_CFG);",
+        "}",
+        "",
+        "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm)",
+        "{",
+        "    uint16_t duty = (rpm == 0) ? 0U : 500U;",
+        "    switch (motor_id) {",
+    ]
+    for i, ch in enumerate(mod.get("pwm", []), start=1):
+        name = ch["name"]
+        body += [
+            f"    case {i}:",
+            "        motor_apply_dir(",
+            f"            &(const bsp_gpio_pin_t){{GPIO_{name}_IN1_PORT, GPIO_{name}_IN1_MASK}},",
+            f"            &(const bsp_gpio_pin_t){{GPIO_{name}_IN2_PORT, GPIO_{name}_IN2_MASK}}, rpm);",
+            f"        bsp_pwm_set_duty({name}_TIMER, {name}_PWM_CH, duty);",
+            "        break;",
+        ]
+    body += ["    default:", "        break;", "    }", "}"]
+
     protos = [
         "#include <stdint.h>",
         f"#define SYSCLK_HZ    {clock}",
@@ -413,8 +495,8 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, inc_dir: Path) 
             f"#define {ch['name']}_TIMER  {ch['timer']}_BASE",
             f"#define {ch['name']}_PWM_CH TIMER_{ch['channel']}",
         ]
-    protos += ["", "void Motor_Init(void);"]
-    write_module("motor", INCLUDES_TIMER, body, protos, src_dir, inc_dir, plan=plan)
+    protos += ["", "void Motor_Init(void);", "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);"]
+    write_module("motor", INCLUDES_MOTOR_BSP, body, protos, src_dir, inc_dir, plan=plan)
 
 
 def gen_encoder(gpio: dict, mod: dict, src_dir: Path, inc_dir: Path) -> None:
@@ -437,9 +519,23 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, inc_dir: Path) -> None:
     if timer_encoders:
         body += emit_timer_capture_init(timer_encoders)
     if qei_encoders:
-        body += emit_qei_init(qei_encoders)
+        body += ["    bsp_qei_init(&BOARD_QEI_CFG);"]
     body.append("}")
-    write_module("encoder", INCLUDES_ENCODER, body, ["void Encoder_Init(void);"], src_dir, inc_dir, plan=plan)
+
+    protos = ["#include <stdint.h>", "void Encoder_Init(void);"]
+    if qei_encoders:
+        body += [
+            "",
+            "int32_t Encoder_GetCount(uint8_t index)",
+            "{",
+            "    switch (index) {",
+        ]
+        for i, enc in enumerate(qei_encoders):
+            body.append(f"    case {i}: return bsp_qei_get_position({enc['qei']}_BASE);")
+        body += ["    default: return 0;", "    }", "}"]
+        protos.append("int32_t Encoder_GetCount(uint8_t index);")
+
+    write_module("encoder", INCLUDES_ENCODER_BSP, body, protos, src_dir, inc_dir, plan=plan)
 
 
 def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path) -> None:
@@ -493,7 +589,152 @@ def add_i2c_mux(plan: PinPlanner, pin: str, module: str, role: str) -> None:
     plan.mux_lines.append(f"    GPIOPinTypeI2C(GPIO_PORT{port}_BASE, GPIO_PIN_{pin_num});")
 
 
-def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path) -> None:
+def emit_board_config_defs(modules: dict[str, dict], board: dict) -> list[str]:
+    lines: list[str] = []
+    clock = board.get("system", {}).get("clock_hz", 80000000)
+
+    pwm_channels = modules.get("motor", {}).get("pwm", [])
+    if pwm_channels:
+        lines.append("static const bsp_pwm_channel_t board_pwm_channels[] = {")
+        for ch in pwm_channels:
+            lines.append(
+                f"    {{ {ch['timer']}_BASE, SYSCTL_PERIPH_{ch['timer']}, "
+                f"TIMER_{ch['channel']}, {ch['frequency']} }},"
+            )
+        lines.append("};")
+        lines.append("const bsp_pwm_config_t BOARD_PWM_CFG = {")
+        lines.append("    .channels = board_pwm_channels,")
+        lines.append(f"    .channel_count = {len(pwm_channels)},")
+        lines.append(f"    .clock_hz = {clock},")
+        lines.append("};")
+        lines.append("")
+
+    qei_encoders = [
+        enc for enc in modules.get("encoder", {}).get("encoder", []) if enc.get("interface") == "qei"
+    ]
+    if qei_encoders:
+        lines.append("static const bsp_qei_channel_t board_qei_channels[] = {")
+        for enc in qei_encoders:
+            lines.append(f"    {{ {enc['qei']}_BASE, SYSCTL_PERIPH_{enc['qei']} }},")
+        lines.append("};")
+        lines.append("const bsp_qei_config_t BOARD_QEI_CFG = {")
+        lines.append("    .channels = board_qei_channels,")
+        lines.append(f"    .channel_count = {len(qei_encoders)},")
+        lines.append("};")
+        lines.append("")
+
+    uart = modules.get("uart_bt", {})
+    for u in uart.get("uart", []):
+        lines += [
+            f"const bsp_uart_config_t BOARD_UART_BT_CFG = {{ {u['module']}_BASE, {u['baud']} }};",
+            "",
+        ]
+
+    dbg = modules.get("uart_debug", {})
+    for d in dbg.get("uart_debug", []):
+        lines += [
+            f"const bsp_uart_config_t BOARD_UART_DEBUG_CFG = {{ {d['module']}_BASE, {d['baud']} }};",
+            "",
+        ]
+
+    i2c = modules.get("i2c", {})
+    for item in i2c.get("i2c", []):
+        lines += [
+            f"const bsp_i2c_config_t BOARD_I2C_CFG = {{ {item['module']}_BASE, {item['speed']} }};",
+            "",
+        ]
+
+    adc_items = modules.get("adc", {}).get("adc", [])
+    if adc_items:
+        adc_module = adc_items[0]["module"]
+        lines.append("static const bsp_adc_channel_t board_adc_channels[] = {")
+        for step, item in enumerate(adc_items):
+            lines.append(f"    {{ {item['channel']}, {step} }},")
+        lines.append("};")
+        lines += [
+            "const bsp_adc_config_t BOARD_ADC_CFG = {",
+            f"    .base = {adc_module}_BASE,",
+            "    .sequence = 3,",
+            "    .channels = board_adc_channels,",
+            f"    .channel_count = {len(adc_items)},",
+            "};",
+            "",
+        ]
+
+        battery_items = [x for x in adc_items if x.get("role") == "battery"]
+        if battery_items:
+            bat = battery_items[0]
+            lines += [
+                f"static const bsp_adc_channel_t board_battery_channel = {{ {bat['channel']}, 0 }};",
+                "const bsp_adc_config_t BOARD_BATTERY_ADC_CFG = {",
+                f"    .base = {bat['module']}_BASE,",
+                "    .sequence = 2,",
+                "    .channels = &board_battery_channel,",
+                "    .channel_count = 1,",
+                "};",
+                "",
+            ]
+
+    ssi_items = modules.get("ssi", {}).get("ssi", [])
+    for item in ssi_items:
+        lines += [
+            "const bsp_spi_config_t BOARD_SPI_CFG = {",
+            f"    .base = {item['module']}_BASE,",
+            f"    .clock_hz = {item['speed']},",
+            "    .mode = BSP_SPI_MODE_0,",
+            "    .data_bits = 8,",
+            "};",
+            "",
+        ]
+
+    return lines
+
+
+def gen_periph_bind_h(modules: dict[str, dict], board: dict, inc_dir: Path) -> None:
+    lines = [
+        "/* Auto-generated by gen_config.py — do not edit */",
+        "#ifndef PERIPH_BIND_H",
+        "#define PERIPH_BIND_H",
+        "",
+        '#include "bsp_uart.h"',
+        '#include "bsp_i2c.h"',
+        '#include "bsp_adc.h"',
+        '#include "bsp_timer.h"',
+        '#include "bsp_qei.h"',
+        '#include "bsp_spi.h"',
+        "",
+        f"#define BOARD_SYSCLK_HZ  {board.get('system', {}).get('clock_hz', 80000000)}",
+        "",
+    ]
+
+    if modules.get("motor", {}).get("pwm"):
+        lines.append("extern const bsp_pwm_config_t BOARD_PWM_CFG;")
+    qei_encoders = [
+        enc for enc in modules.get("encoder", {}).get("encoder", []) if enc.get("interface") == "qei"
+    ]
+    if qei_encoders:
+        lines.append("extern const bsp_qei_config_t BOARD_QEI_CFG;")
+    if modules.get("uart_bt", {}).get("uart"):
+        lines.append("extern const bsp_uart_config_t BOARD_UART_BT_CFG;")
+    if modules.get("uart_debug", {}).get("uart_debug"):
+        lines.append("extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;")
+    if modules.get("i2c", {}).get("i2c"):
+        lines.append("extern const bsp_i2c_config_t BOARD_I2C_CFG;")
+    if modules.get("adc", {}).get("adc"):
+        lines.append("extern const bsp_adc_config_t BOARD_ADC_CFG;")
+        battery_items = [
+            x for x in modules.get("adc", {}).get("adc", []) if x.get("role") == "battery"
+        ]
+        if battery_items:
+            lines.append("extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;")
+    if modules.get("ssi", {}).get("ssi"):
+        lines.append("extern const bsp_spi_config_t BOARD_SPI_CFG;")
+
+    lines += ["", "#endif"]
+    (inc_dir / "periph_bind.h").write_text("\n".join(lines), encoding="utf-8")
+
+
+def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, inc_dir: Path) -> None:
     labels = pin_label_map(gpio)
     adc_pins = adc_pin_set(modules)
     plan = PinPlanner()
@@ -543,81 +784,65 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
                 f"    GPIOPinTypeSSI(GPIO_PORT{port}_BASE, {PinPlanner._mask(mask)});"
             )
 
-    body = ["void Board_Periph_Init(void) {", *plan.emit_gpio_setup()]
-
-    for u in uart.get("uart", []):
-        base = u["module"]
-        body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{base});",
-            f"    UARTConfigSetExpClk({base}_BASE, SysCtlClockGet(), {u['baud']}, "
-            "UART_CONFIG_WLEN_8|UART_CONFIG_STOP_ONE|UART_CONFIG_PAR_NONE);",
-            f"    UARTFIFOEnable({base}_BASE);",
-            f"    UARTEnable({base}_BASE);",
-        ]
-
+    body = emit_board_config_defs(modules, board)
+    body += ["bool Board_UartDebug_Init(void) {"]
+    dbg = modules.get("uart_debug", {})
+    dbg_ports: set[str] = set()
+    dbg_plan_lines: list[str] = []
     for d in dbg.get("uart_debug", []):
-        base = d["module"]
-        body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{base});",
-            f"    UARTConfigSetExpClk({base}_BASE, SysCtlClockGet(), {d['baud']}, "
-            "UART_CONFIG_WLEN_8|UART_CONFIG_STOP_ONE|UART_CONFIG_PAR_NONE);",
-            f"    UARTFIFOEnable({base}_BASE);",
-            f"    UARTEnable({base}_BASE);",
-        ]
+        if d.get("rx"):
+            port, pin_num = parse_pin(d["rx"])
+            dbg_ports.add(port)
+            dbg_plan_lines.append(f"    GPIOPinConfigure({uart_pin_mux(d['rx'], d['module'], 'rx')});")
+            dbg_plan_lines.append(f"    GPIOPinTypeUART(GPIO_PORT{port}_BASE, GPIO_PIN_{pin_num});")
+        port, pin_num = parse_pin(d["tx"])
+        dbg_ports.add(port)
+        dbg_plan_lines.append(f"    GPIOPinConfigure({uart_pin_mux(d['tx'], d['module'], 'tx')});")
+        dbg_plan_lines.append(f"    GPIOPinTypeUART(GPIO_PORT{port}_BASE, GPIO_PIN_{pin_num});")
+    if dbg_ports:
+        port_mask = sum(1 << (ord(p) - ord("A")) for p in dbg_ports)
+        body.extend(emit_init_guard(f"bsp_gpio_port_enable(0x{port_mask:X}u)"))
+    body += dbg_plan_lines
+    body.extend(emit_init_guard("bsp_uart_init(&BOARD_UART_DEBUG_CFG)"))
+    body += ["    return true;", "}", ""]
 
-    for item in i2c.get("i2c", []):
-        body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{item['module']});",
-            f"    I2CMasterInitExpClk({item['module']}_BASE, SysCtlClockGet(), true);",
-        ]
-
-    adc_items = adc.get("adc", [])
-    if adc_items:
-        adc_module = adc_items[0]["module"]
-        body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{adc_module});",
-            f"    ADCSequenceConfigure({adc_module}_BASE, 3, ADC_TRIGGER_PROCESSOR, 0);",
-        ]
-        for step, item in enumerate(adc_items):
-            end_flag = "|ADC_CTL_END" if step == len(adc_items) - 1 else ""
-            body.append(
-                f"    ADCSequenceStepConfigure({adc_module}_BASE, 3, {step}, "
-                f"ADC_CTL_CH{item['channel']}{end_flag});"
-            )
-        body += [
-            f"    ADCSequenceEnable({adc_module}_BASE, 3);",
-            f"    ADCProcessorTrigger({adc_module}_BASE, 3);",
-        ]
-
-    for item in ssi.get("ssi", []):
-        body += [
-            f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{item['module']});",
-            f"    SSIConfigSetExpClk({item['module']}_BASE, SysCtlClockGet(), "
-            f"SSI_FRF_MOTO_MODE_0, SSI_MODE_MASTER, {item['speed']}, 8);",
-            f"    SSIEnable({item['module']}_BASE);",
-        ]
+    body += ["bool Board_Periph_Init(void) {", *plan.emit_gpio_setup(guarded=True)]
 
     if modules.get("dma"):
-        body.append("    SysCtlPeripheralEnable(SYSCTL_PERIPH_UDMA);")
+        body.extend(emit_init_guard("bsp_dma_init()"))
 
-    body.append("}")
+    if uart.get("uart"):
+        body.extend(emit_init_guard("bsp_uart_init(&BOARD_UART_BT_CFG)"))
+
+    if dbg.get("uart_debug"):
+        body.extend(emit_init_guard("bsp_uart_init(&BOARD_UART_DEBUG_CFG)"))
+
+    if i2c.get("i2c"):
+        body.extend(emit_init_guard("bsp_i2c_init(&BOARD_I2C_CFG)"))
+
+    if adc.get("adc"):
+        body.extend(emit_init_guard("bsp_adc_init(&BOARD_ADC_CFG)"))
+        battery_items = [x for x in adc.get("adc", []) if x.get("role") == "battery"]
+        if battery_items:
+            body.extend(emit_init_guard("bsp_adc_init(&BOARD_BATTERY_ADC_CFG)"))
+
+    if ssi.get("ssi"):
+        body.extend(emit_init_guard("bsp_spi_init(&BOARD_SPI_CFG)"))
+
+    body += ["    return true;", "}"]
 
     for u in uart.get("uart", []):
         base = u["module"]
         body += [
             "",
             "void UART_Putc(char c) {",
-            f"    UARTCharPut({base}_BASE, c);",
+            f"    bsp_uart_putc({base}_BASE, c);",
             "}",
             "void UART_Puts(const char* s) {",
-            f"    while (*s) {{ UARTCharPut({base}_BASE, *s++); }}",
+            f"    bsp_uart_puts({base}_BASE, s);",
             "}",
             "int UART_Getc(char *c) {",
-            f"    if (UARTCharsAvail({base}_BASE)) {{",
-            f"        *c = (char)UARTCharGetNonBlocking({base}_BASE);",
-            "        return 1;",
-            "    }",
-            "    return 0;",
+            f"    return bsp_uart_getc({base}_BASE, c);",
             "}",
         ]
 
@@ -626,21 +851,17 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
         body += [
             "",
             "void UART_Debug_Putc(char c) {",
-            f"    UARTCharPut({base}_BASE, c);",
+            f"    bsp_uart_putc({base}_BASE, c);",
             "}",
             "void UART_Debug_Puts(const char* s) {",
-            f"    while (*s) {{ UARTCharPut({base}_BASE, *s++); }}",
+            f"    bsp_uart_puts({base}_BASE, s);",
             "}",
             "int UART_Debug_Getc(char *c) {",
-            f"    if (UARTCharsAvail({base}_BASE)) {{",
-            f"        *c = (char)UARTCharGetNonBlocking({base}_BASE);",
-            "        return 1;",
-            "    }",
-            "    return 0;",
+            f"    return bsp_uart_getc({base}_BASE, c);",
             "}",
         ]
 
-    protos = ["void Board_Periph_Init(void);"]
+    protos = ["bool Board_UartDebug_Init(void);", "bool Board_Periph_Init(void);"]
     if uart.get("uart"):
         protos += [
             "void UART_Putc(char c);",
@@ -654,7 +875,7 @@ def gen_board(gpio: dict, modules: dict[str, dict], src_dir: Path, inc_dir: Path
             "int UART_Debug_Getc(char *c);",
         ]
 
-    write_module("board", INCLUDES_BOARD, body, protos, src_dir, inc_dir, plan=plan)
+    write_module("board", INCLUDES_BOARD_BSP, body, protos, src_dir, inc_dir, plan=plan)
 
 
 def gen_gpio_allocation_md(gpio: dict, out_path: Path, car_project: str) -> None:
@@ -708,7 +929,7 @@ def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
 
 def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
     """Emit per-project build/ide-compile-db.json for IDE navigation."""
-    tivaware = Path(r"D:/Ti/TivaWare_C_Series-2.2.0.295")
+    tivaware = tivaware_root()
     freertos = tivaware / "third_party/FreeRTOS/Source"
     freertos_port = freertos / "portable/GCC/ARM_CM4F"
     gcc = ROOT / "tools/bin/arm-none-eabi-gcc.exe"
@@ -746,8 +967,18 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
         app_src / "app.c",
         app_src / "freertos_hooks.c",
         app_src / "syscalls.c",
-        bsp_src / "clock.c",
-        bsp_src / "uart.c",
+        bsp_src / "bsp_sysctl.c",
+        bsp_src / "bsp_gpio.c",
+        bsp_src / "bsp_systick.c",
+        bsp_src / "bsp_uart.c",
+        bsp_src / "bsp_i2c.c",
+        bsp_src / "bsp_adc.c",
+        bsp_src / "bsp_timer.c",
+        bsp_src / "bsp_qei.c",
+        bsp_src / "bsp_dma.c",
+        bsp_src / "bsp_spi.c",
+        bsp_src / "bsp_dac.c",
+        bsp_src / "bsp_bus_lock.c",
         ROOT / "Common/src/type.c",
         ROOT / "Common/src/device_profile.c",
         ROOT / "Common/src/start.c",
@@ -819,10 +1050,11 @@ def main() -> None:
     print(f"  car-project: {args.car_project}")
     remove_legacy(src_dir, inc_dir)
     gen_gpio_pins_h(gpio, inc_dir)
+    gen_periph_bind_h(modules, board, inc_dir)
     gen_motor(gpio, modules["motor"], board, src_dir, inc_dir)
     gen_encoder(gpio, modules["encoder"], src_dir, inc_dir)
     gen_line(gpio, modules, src_dir, inc_dir)
-    gen_board(gpio, modules, src_dir, inc_dir)
+    gen_board(gpio, modules, board, src_dir, inc_dir)
     gen_gpio_allocation_md(gpio, paths["gpio_doc"], args.car_project)
     if args.ide_db:
         gen_ide_compile_db(paths, args.car_project)

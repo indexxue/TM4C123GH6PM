@@ -13,7 +13,7 @@
 #include "task.h"
 #include "semphr.h"
 
-#include "uart.h"
+#include "bsp_uart.h"
 
 #define LOG_BUFFER_SIZE 256
 

@@ -1,6 +1,6 @@
 /**
  * @file battery.h
- * @brief TM4C123 电池电压采样（ADC0 AIN0 @ PE0，分压比 2）
+ * @brief TM4C123 电池电压采样（ADC1 AIN0 @ PE3，分压比 2）
  */
 
 #ifndef BATTERY_H

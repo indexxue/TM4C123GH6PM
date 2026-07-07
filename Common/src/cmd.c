@@ -9,6 +9,9 @@
 #include "nvs.h"
 #include "ota_meta.h"
 #include "board.h"
+#include "motor.h"
+#include "periph_bind.h"
+#include "bsp_adc.h"
 
 #include "FreeRTOS.h"
 #include "semphr.h"
@@ -377,6 +380,39 @@ static void cmd_nvs(int argc, const char *argv[])
     cmd_reply_ng();
 }
 
+static void cmd_motor(int argc, const char *argv[])
+{
+    uint8_t motor_id;
+    int32_t rpm;
+
+    if (argc != 3) {
+        cmd_reply_ng();
+        return;
+    }
+
+    motor_id = (uint8_t)strtoul(argv[1], NULL, 0);
+    rpm = (int32_t)strtol(argv[2], NULL, 0);
+    Motor_SetSpeed(motor_id, rpm);
+    cmd_reply_ok("motor", "ok");
+}
+
+static void cmd_adc(int argc, const char *argv[])
+{
+    uint32_t values[8];
+    char buf[CMD_STATUS_BUF_SIZE];
+
+    (void)argc;
+    (void)argv;
+
+    if (!bsp_adc_sample(&BOARD_ADC_CFG, values, BOARD_ADC_CFG.channel_count)) {
+        cmd_reply_ng();
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf), "bat_raw=%lu", (unsigned long)values[0]);
+    cmd_reply_ok("adc", buf);
+}
+
 void cmd_register_defaults(void)
 {
     (void)cmd_register("reboot", cmd_reboot, "software reset");
@@ -384,6 +420,8 @@ void cmd_register_defaults(void)
     (void)cmd_register("version", cmd_version, "firmware version string");
     (void)cmd_register("led", cmd_led, "led r on|off (PF1 red)");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
+    (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
+    (void)cmd_register("adc", cmd_adc, "adc sample (battery raw)");
     (void)cmd_register("otmeta", cmd_otmeta, "dump ota_meta from NVS");
     (void)cmd_register("nvs", cmd_nvs, "nvs get|set <ns> [value]");
 }

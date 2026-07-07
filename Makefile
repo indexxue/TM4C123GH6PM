@@ -17,7 +17,7 @@ SCRIPT_DIR := $(ROOT)/scripts
 
 LD_SCRIPT  := $(LD_DIR)/tm4c123gh6pm.ld
 
-TIVAWARE_ROOT ?= D:/Ti/TivaWare_C_Series-2.2.0.295
+TIVAWARE_ROOT ?= $(ROOT)/sdk/TivaWare_C_Series-2.2.0.295
 FREERTOS_ROOT := $(TIVAWARE_ROOT)/third_party/FreeRTOS/Source
 FREERTOS_PORT := $(FREERTOS_ROOT)/portable/GCC/ARM_CM4F
 

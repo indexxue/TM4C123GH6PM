@@ -8,8 +8,9 @@
 #include "device_profile.h"
 #include "log.h"
 
-#include "clock.h"
-#include "uart.h"
+#include "bsp_sysctl.h"
+#include "bsp_systick.h"
+#include "bsp_uart.h"
 
 #ifndef FIRMWARE_PROFILE_LOG_ONLY
 #define FIRMWARE_PROFILE_LOG_ONLY 0
@@ -22,6 +23,8 @@
 #include "board.h"
 #include "cmd.h"
 #include "ota_meta.h"
+#else
+#include "board.h"
 #endif
 
 static bsp_clock_source_t map_clock_source(device_clock_source_t source)
@@ -67,10 +70,17 @@ void Start_Init(void)
     const device_product_profile_t *profile = device_profile_product();
 
     bsp_clock_init(map_clock_source(profile->clock_source));
+    bsp_systick_init();
 
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
+#if !FIRMWARE_PROFILE_LOG_ONLY
+        if (Board_UartDebug_Init()) {
+            bsp_uart_debug_puts("\r\n[start] UART7 PE1 ready @ 115200\r\n");
+        }
+#else
         bsp_uart_debug_init(115200U);
         bsp_uart_debug_puts("\r\n[start] UART7 PE1 ready @ 115200\r\n");
+#endif
     }
 
 #if !FIRMWARE_PROFILE_LOG_ONLY
@@ -84,7 +94,9 @@ void Start_Init(void)
         Line_Init();
     }
     if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
-        Board_Periph_Init();
+        if (!Board_Periph_Init()) {
+            bsp_uart_debug_puts("[start] Board_Periph_Init FAILED\r\n");
+        }
     }
 #endif
 
