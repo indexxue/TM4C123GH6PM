@@ -1,11 +1,12 @@
 /**
  * @file    app.c
- * @brief   car-4wd 应用：app_evt 事件调度 + app_tmr 周期定时 + 10s 串口心跳
+ * @brief   car-4wd 应用：app_evt 事件调度 + app_tmr 周期定时 + 2s 串口心跳
  */
 
 #include "app.h"
 
 #include "board.h"
+#include "battery.h"
 #include "button.h"
 #include "buzzer.h"
 #include "cmd.h"
@@ -17,7 +18,6 @@
 
 #include "FreeRTOS.h"
 #include "task.h"
-#include "timers.h"
 
 /* -------------------------------------------------------------------------- */
 /* 任务参数                                                                   */
@@ -30,21 +30,30 @@
 #define APP_TMR_STACK_WORDS         (256U)
 
 #define APP_CTRL_PERIOD_MS          (20U)
-#define APP_HEARTBEAT_PERIOD_MS     (10000U)
+#define APP_HEARTBEAT_PERIOD_MS     (2000U)
 
 /* -------------------------------------------------------------------------- */
-/* 心跳软件定时器                                                             */
+/* 心跳（在 app_evt 任务上下文采样，避免定时器回调里读 ADC）                   */
 /* -------------------------------------------------------------------------- */
 
-static TimerHandle_t s_heartbeat_timer;
 static uint32_t s_heartbeat_count;
+static uint32_t s_heartbeat_elapsed_ms;
 
-static void heartbeat_timer_cb(TimerHandle_t timer)
+static void app_heartbeat_log(void)
 {
-    (void)timer;
+    battery_voltage_t batt = {0};
+    battery_info_t info = {0};
 
     s_heartbeat_count++;
-    LOG_INFO("heartbeat #%lu", (unsigned long)s_heartbeat_count);
+    if (battery_percent_update()) {
+        (void)battery_info_read(&info, &batt);
+    }
+
+    LOG_INFO("heartbeat #%lu batt=%lu.%03lu V %u%%",
+             (unsigned long)s_heartbeat_count,
+             (unsigned long)(batt.current_mv / 1000U),
+             (unsigned long)(batt.current_mv % 1000U),
+             (unsigned)info.percent);
 }
 
 /* -------------------------------------------------------------------------- */
@@ -53,19 +62,9 @@ static void heartbeat_timer_cb(TimerHandle_t timer)
 
 static void app_user_init(void)
 {
+    battery_init();
     buzzer_init();
     buzzer_chirp(2U, BUZZER_DEFAULT_ON_MS, BUZZER_DEFAULT_GAP_MS);
-
-    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
-        s_heartbeat_timer = xTimerCreate("hb_tmr",
-                                         pdMS_TO_TICKS(APP_HEARTBEAT_PERIOD_MS),
-                                         pdTRUE,
-                                         NULL,
-                                         heartbeat_timer_cb);
-        if (s_heartbeat_timer != NULL) {
-            (void)xTimerStart(s_heartbeat_timer, 0);
-        }
-    }
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
@@ -80,6 +79,14 @@ static void app_user_init(void)
 
 static void app_on_timer(void)
 {
+    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
+        s_heartbeat_elapsed_ms += APP_CTRL_PERIOD_MS;
+        if (s_heartbeat_elapsed_ms >= APP_HEARTBEAT_PERIOD_MS) {
+            s_heartbeat_elapsed_ms -= APP_HEARTBEAT_PERIOD_MS;
+            app_heartbeat_log();
+        }
+    }
+
     /* TODO: IMU 姿态更新 */
     /* TODO: 编码器速度计算 */
     /* TODO: PID 控制器 */

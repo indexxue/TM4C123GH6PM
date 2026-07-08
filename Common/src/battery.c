@@ -1,6 +1,6 @@
 /**
  * @file battery.c
- * @brief TM4C123 电池电压采样（ADC1 AIN0 @ PE3，分压比 2）
+ * @brief TM4C123 电池电压采样（ADC1 AIN0 @ PE3，1MΩ+200kΩ 分压，3S 18650 标称 12V）
  */
 
 #include "battery.h"
@@ -14,12 +14,17 @@
 #include "task.h"
 
 #define BATTERY_SAMPLE_CNT (8U)
-#define BATTERY_DIVIDER_RATIO (2U)
-#define BATTERY_MV_EMPTY (3300U)
-#define BATTERY_MV_FULL_SOC (4100U)
-#define BATTERY_MV_CHARGING (4200U)
+/* PE3 / ADC1 AIN0：1MΩ（电池侧）+ 200kΩ（GND），V_adc = V_batt × 200k / (1M + 200k) */
+#define BATTERY_DIVIDER_R_TOP_OHM (1000000U)
+#define BATTERY_DIVIDER_R_BOTTOM_OHM (200000U)
+#define BATTERY_DIVIDER_RATIO \
+    ((BATTERY_DIVIDER_R_TOP_OHM + BATTERY_DIVIDER_R_BOTTOM_OHM) / BATTERY_DIVIDER_R_BOTTOM_OHM)
+/* 3S 18650 Li-ion：标称 12V，满电 12.6V，放空 9.0V */
+#define BATTERY_MV_EMPTY (9000U)
+#define BATTERY_MV_FULL_SOC (12600U)
+#define BATTERY_MV_CHARGING (12600U)
 #define BATTERY_LEVEL_PERCENT_VALUES 20, 50, 80, 100
-#define BATTERY_SAMPLE_PERIOD_MS (120000U)
+#define BATTERY_SAMPLE_PERIOD_MS (2000U)
 
 static const uint8_t s_level_percent[BATTERY_LEVEL_NUM] = {BATTERY_LEVEL_PERCENT_VALUES};
 
@@ -35,15 +40,22 @@ static struct {
     bool_t data_valid;
 } s_self;
 
-static uint32_t battery_read_adc_raw(void)
+static bool_t s_adc_ready;
+
+static bool_t battery_read_adc_raw(uint32_t *raw_out)
 {
     uint32_t value = 0U;
 
-    if (!bsp_adc_sample_one(&BOARD_BATTERY_ADC_CFG, &value)) {
-        return 0U;
+    if ((raw_out == NULL) || (s_adc_ready == FALSE)) {
+        return FALSE;
     }
 
-    return value;
+    if (!bsp_adc_sample_one(&BOARD_BATTERY_ADC_CFG, &value)) {
+        return FALSE;
+    }
+
+    *raw_out = value;
+    return TRUE;
 }
 
 static uint8_t mv_to_percent(uint32_t mv)
@@ -65,6 +77,12 @@ void battery_init(void)
     (void)memset(&s_self, 0, sizeof(s_self));
     s_hw_sample_cache_valid = FALSE;
     s_last_hw_sample_ticks = 0;
+    s_adc_ready = FALSE;
+
+    if (!bsp_adc_init(&BOARD_BATTERY_ADC_CFG)) {
+        return;
+    }
+    s_adc_ready = TRUE;
     s_self.initialized = TRUE;
 }
 
@@ -76,8 +94,14 @@ static uint32_t battery_voltage_sample_hw(battery_voltage_t *voltage)
     uint16_t count = 0U;
 
     for (uint16_t i = 0U; i < BATTERY_SAMPLE_CNT; i++) {
-        uint32_t raw = battery_read_adc_raw();
-        if (raw == 0U) {
+        uint32_t raw;
+
+        if (!battery_read_adc_raw(&raw)) {
+            if (voltage != NULL) {
+                voltage->current_mv = 0U;
+                voltage->min_mv = 0U;
+                voltage->max_mv = 0U;
+            }
             return 0U;
         }
 
@@ -97,6 +121,11 @@ static uint32_t battery_voltage_sample_hw(battery_voltage_t *voltage)
     }
 
     if (count < 3U) {
+        if (voltage != NULL) {
+            voltage->current_mv = 0U;
+            voltage->min_mv = 0U;
+            voltage->max_mv = 0U;
+        }
         return 0U;
     }
 
@@ -146,10 +175,6 @@ uint32_t battery_voltage_read_mv(battery_voltage_t *voltage)
         battery_voltage_t *vout = (voltage != NULL) ? voltage : &v_local;
         uint32_t vbatt_mv = battery_voltage_sample_hw(vout);
 
-        if (vbatt_mv == 0U) {
-            return 0U;
-        }
-
         s_cached_vbatt_mv = vbatt_mv;
         s_cached_voltage = *vout;
         s_last_hw_sample_ticks = now;
@@ -168,9 +193,6 @@ bool_t battery_percent_update(void)
     }
 
     mv = battery_voltage_read_mv(&v);
-    if (mv == 0U) {
-        return FALSE;
-    }
 
     s_self.voltage = v;
     s_self.info.percent = mv_to_percent(mv);
