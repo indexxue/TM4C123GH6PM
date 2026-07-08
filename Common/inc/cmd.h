@@ -47,6 +47,9 @@ void cmd_uart_unlock(void);
 /** 创建蓝牙 UART0 读行任务（幂等）。须在 UART_Init 之后调用。 */
 status_t cmd_uart_line_service_start(void);
 
+/** 校验目标槽镜像、写 NVS slot、停电机并复位；成功不返回 */
+status_t cmd_boot_slot_switch(uint32_t slot);
+
 #ifdef __cplusplus
 }
 #endif

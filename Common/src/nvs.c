@@ -6,6 +6,7 @@
 #include "nvs.h"
 
 #include "device_profile.h"
+#include "boot_slot.h"
 #include "crc32.h"
 #include "flash_layout.h"
 
@@ -62,6 +63,7 @@ static nvs_cfg_t s_cfg;
 static int s_first_boot;
 static uint8_t s_nvs_payload[NVS_PAGE_SIZE - NVS_PAGE_HDR_SIZE] __attribute__((aligned(4)));
 static uint8_t s_boot_rsvd_copy[NVS_BOOT_RSVD_SIZE] __attribute__((aligned(4)));
+static int s_boot_rsvd_override;
 
 #if defined(NVS_RTOS_LOCK)
 static SemaphoreHandle_t s_nvs_mu;
@@ -622,6 +624,45 @@ static status_t nvs_append_record(uint8_t *buf, uint32_t buf_size, uint32_t *dst
     return STATUS_OK;
 }
 
+static status_t nvs_copy_active_kv_payload(uint8_t *buf, uint32_t buf_size, uint32_t *out_len)
+{
+    uint32_t src = NVS_DATA_OFFSET;
+    uint32_t dst = 0U;
+    const uint8_t *page = (const uint8_t *)nvs_page_base(s_active_page);
+
+    while (src < NVS_PAGE_SIZE) {
+        const nvs_rec_hdr_t *rh = (const nvs_rec_hdr_t *)(page + src);
+        uint32_t rec_total;
+
+        if (rh->magic == 0xFFFFFFFFU) {
+            break;
+        }
+        if (rh->magic != NVS_REC_MAGIC) {
+            return STATUS_FAIL;
+        }
+
+        rec_total = nvs_record_total_len(rh);
+        if ((src + rec_total) > NVS_PAGE_SIZE) {
+            return STATUS_FAIL;
+        }
+
+        if (nvs_record_crc_valid(page + src, rec_total) == 0) {
+            return STATUS_FAIL;
+        }
+
+        if ((dst + rec_total) > buf_size) {
+            return STATUS_NO_MEM;
+        }
+
+        (void)memcpy(buf + dst, page + src, rec_total);
+        dst += rec_total;
+        src += rec_total;
+    }
+
+    *out_len = dst;
+    return STATUS_OK;
+}
+
 static status_t nvs_commit_page_payload(const uint8_t *payload, uint32_t payload_len)
 {
     uint32_t inactive;
@@ -641,7 +682,9 @@ static status_t nvs_commit_page_payload(const uint8_t *payload, uint32_t payload
     {
         const uint8_t *active = (const uint8_t *)nvs_page_base(s_active_page);
 
-        (void)memcpy(s_boot_rsvd_copy, active + NVS_BOOT_RSVD_OFFSET, NVS_BOOT_RSVD_SIZE);
+        if (s_boot_rsvd_override == 0) {
+            (void)memcpy(s_boot_rsvd_copy, active + NVS_BOOT_RSVD_OFFSET, NVS_BOOT_RSVD_SIZE);
+        }
         st = nvs_program_words(nvs_page_base(inactive) + NVS_BOOT_RSVD_OFFSET, s_boot_rsvd_copy,
                                NVS_BOOT_RSVD_SIZE);
         if (st != STATUS_OK) {
@@ -660,6 +703,7 @@ static status_t nvs_commit_page_payload(const uint8_t *payload, uint32_t payload
     }
 
     s_active_page = inactive;
+    s_boot_rsvd_override = 0;
     return STATUS_OK;
 }
 
@@ -1481,6 +1525,50 @@ status_t nvs_factory_reset(void)
                            (u32_t)sizeof(s_cfg.last_mode));
 
 done:
+    nvs_unlock();
+    return st;
+}
+
+status_t nvs_boot_slot_get(uint32_t *slot_out)
+{
+    if (slot_out == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+
+    *slot_out = boot_slot_read();
+    return STATUS_OK;
+}
+
+status_t nvs_boot_slot_set(uint32_t slot)
+{
+    boot_slot_cfg_t *cfg;
+    status_t st;
+    uint32_t payload_len = 0U;
+
+    if (slot > BOOT_SLOT_B) {
+        return STATUS_INVALID_ARG;
+    }
+
+    nvs_lock();
+
+    st = nvs_copy_active_kv_payload(s_nvs_payload, sizeof(s_nvs_payload), &payload_len);
+    if (st != STATUS_OK) {
+        nvs_unlock();
+        return st;
+    }
+
+    {
+        const uint8_t *active = (const uint8_t *)nvs_page_base(s_active_page);
+
+        (void)memcpy(s_boot_rsvd_copy, active + NVS_BOOT_RSVD_OFFSET, NVS_BOOT_RSVD_SIZE);
+    }
+
+    cfg = (boot_slot_cfg_t *)s_boot_rsvd_copy;
+    cfg->magic = BOOT_SLOT_MAGIC;
+    cfg->slot = slot;
+
+    s_boot_rsvd_override = 1;
+    st = nvs_commit_page_payload(s_nvs_payload, payload_len);
     nvs_unlock();
     return st;
 }

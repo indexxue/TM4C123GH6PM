@@ -155,7 +155,8 @@ static void button_config(void)
 
     s_button_list[1].id = BTN_ID_OK;
     s_button_list[1].name = "OK";
-    s_button_list[1].permission = (uint16_t)BTN_PERMISSION_CONFIRM;
+    s_button_list[1].permission =
+        (uint16_t)(BTN_PERMISSION_CONFIRM | BTN_PERMISSION_FTM);
 
     s_button_list[2].id = BTN_ID_DN;
     s_button_list[2].name = "DN";

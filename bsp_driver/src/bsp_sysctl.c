@@ -14,18 +14,11 @@
 void bsp_clock_init(bsp_clock_source_t source)
 {
     switch (source) {
-    case BSP_CLOCK_MAIN_8MHZ:
-        SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL |
-                       SYSCTL_OSC_MAIN | SYSCTL_XTAL_8MHZ);
-        break;
-    case BSP_CLOCK_MAIN_16MHZ:
-        SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL |
-                       SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
-        break;
     case BSP_CLOCK_INT_PIOSC:
         SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL | SYSCTL_OSC_INT |
                        SYSCTL_MAIN_OSC_DIS);
         break;
+    case BSP_CLOCK_MAIN_8MHZ:
     default:
         SysCtlClockSet(SYSCTL_SYSDIV_2_5 | SYSCTL_USE_PLL |
                        SYSCTL_OSC_MAIN | SYSCTL_XTAL_8MHZ);

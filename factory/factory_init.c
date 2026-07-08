@@ -6,22 +6,16 @@
 #include "factory.h"
 
 #include "board.h"
+#include "bsp_sysctl.h"
+#include "button.h"
 #include "log.h"
 #include "cmd.h"
 #include "nvs.h"
 #include "flash_layout.h"
 
-#include "driverlib/sysctl.h"
-
-static void Clock_Init(void)
-{
-    SysCtlClockSet(SYSCTL_SYSDIV_5 | SYSCTL_USE_PLL |
-                   SYSCTL_OSC_MAIN | SYSCTL_XTAL_16MHZ);
-}
-
 void Factory_Board_Init(void)
 {
-    Clock_Init();
+    bsp_clock_init(BSP_CLOCK_MAIN_8MHZ);
     Motor_Init();
     Encoder_Init();
     Line_Init();
@@ -36,6 +30,8 @@ void Factory_Board_Init(void)
     }
 
     (void)cmd_uart_line_service_start();
+
+    button_init(factory_button_notify);
 
     LOG_INFO("factory: init @ 0x%08lX (APP_B storage)",
              (unsigned long)FLASH_APP_B_BASE);

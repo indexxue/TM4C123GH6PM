@@ -31,7 +31,6 @@
 typedef enum {
     DEVICE_CLOCK_INT_PIOSC = 0,
     DEVICE_CLOCK_MAIN_8MHZ = 1,
-    DEVICE_CLOCK_MAIN_16MHZ = 2,
 } device_clock_source_t;
 
 /* -------------------------------------------------------------------------- */

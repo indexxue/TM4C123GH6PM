@@ -1,14 +1,15 @@
 /**
  * @file    boot_slot.h
- * @brief   NVS Boot 保留区布局（与 nvs.c 页头后 256 B 对齐）
+ * @brief   NVS Boot 保留区运行槽（与 nvs.c 页头后 256 B 对齐）
  *
- * 运行槽恒为 APP_A（见 PARTITION.md）。保留区供后续 ftmenter/OTA 激活链写入元数据；
- * Bootloader 仅校验并跳转 APP_A，不直接执行 APP_B。
+ * Boot 读 slot 后直接跳转 APP_A / APP_B；无效槽 fallback 至另一槽。
+ * 详见 PARTITION.md
  */
 
-#ifndef BOOTLOADER_BOOT_SLOT_H
-#define BOOTLOADER_BOOT_SLOT_H
+#ifndef BOOT_SLOT_H
+#define BOOT_SLOT_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "flash_layout.h"
@@ -56,4 +57,4 @@ static inline uint32_t boot_slot_target_base(uint32_t slot)
     return (slot == BOOT_SLOT_B) ? FLASH_APP_B_BASE : FLASH_APP_A_BASE;
 }
 
-#endif /* BOOTLOADER_BOOT_SLOT_H */
+#endif /* BOOT_SLOT_H */

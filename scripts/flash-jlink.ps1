@@ -1,9 +1,11 @@
-﻿param(
+param(
     [string]$Image = "",
     [ValidateSet("standalone", "bootloader", "app", "factory")]
     [string]$Target = "standalone",
     [ValidateSet("car-4wd", "car-2wd")]
-    [string]$CarProject = "car-4wd"
+    [string]$CarProject = "car-4wd",
+    [switch]$EraseAll,
+    [switch]$EraseApps
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -31,10 +33,19 @@ if ([string]::IsNullOrWhiteSpace($Image)) {
 }
 if (-not (Test-Path $Image)) { throw "Image not found: $Image" }
 
+if ($EraseAll -and $EraseApps) {
+    throw "Use -EraseAll or -EraseApps, not both."
+}
+
 Write-Host "Flashing $Image via JLink..." -ForegroundColor Cyan
 Write-Host "  Car:    $CarProject" -ForegroundColor DarkGray
 Write-Host "  Target: $Target" -ForegroundColor DarkGray
 Write-Host "  Image:  $Image" -ForegroundColor DarkGray
+if ($EraseAll) {
+    Write-Host "  Erase:  full chip (256 KB)" -ForegroundColor Yellow
+} elseif ($EraseApps) {
+    Write-Host "  Erase:  0x4000..0x3FFFF (APP_A + APP_B + NVS)" -ForegroundColor Yellow
+}
 
 # Build JLink command file
 $tmpDir = Join-Path $ProjectRoot "tmp"
@@ -55,18 +66,27 @@ $loadCmd = if ($isElf) {
     "loadbin `"$Image`", $off"
 }
 
-@"
-si SWD
-speed 1000
-device TM4C123GH6PM
-connect
-r
-halt
-$loadCmd
-r
-g
-exit
-"@ | Set-Content -Path $cmdFile -Encoding ASCII
+$eraseCmd = if ($EraseAll) {
+    "erase"
+} elseif ($EraseApps) {
+    "erase 0x4000 0x40000"
+} else {
+    ""
+}
+
+$jlinkBody = @(
+    "si SWD",
+    "speed 1000",
+    "device TM4C123GH6PM",
+    "connect",
+    "r",
+    "halt"
+)
+if ($eraseCmd) { $jlinkBody += $eraseCmd }
+$jlinkBody += $loadCmd
+$jlinkBody += @("r", "g", "exit")
+
+($jlinkBody -join "`n") + "`n" | Set-Content -Path $cmdFile -Encoding ASCII
 
 # Run JLink
 $log = Join-Path $tmpDir "jlink-flash.log"

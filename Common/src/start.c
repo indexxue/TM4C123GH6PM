@@ -19,8 +19,6 @@ static bsp_clock_source_t map_clock_source(device_clock_source_t source)
     switch (source) {
     case DEVICE_CLOCK_INT_PIOSC:
         return BSP_CLOCK_INT_PIOSC;
-    case DEVICE_CLOCK_MAIN_16MHZ:
-        return BSP_CLOCK_MAIN_16MHZ;
     case DEVICE_CLOCK_MAIN_8MHZ:
     default:
         return BSP_CLOCK_MAIN_8MHZ;

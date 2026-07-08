@@ -12,8 +12,10 @@
 typedef enum {
     BSP_CLOCK_INT_PIOSC = 0,
     BSP_CLOCK_MAIN_8MHZ = 1,
-    BSP_CLOCK_MAIN_16MHZ = 2,
 } bsp_clock_source_t;
+
+/** 8 MHz 主晶振 + PLL → 80 MHz 系统时钟（全项目统一） */
+#define BSP_SYSCLK_HZ           80000000U
 
 void bsp_clock_init(bsp_clock_source_t source);
 uint32_t bsp_clock_get_hz(void);

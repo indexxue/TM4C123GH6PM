@@ -5,9 +5,12 @@
 
 #include "cmd.h"
 
-#include "app.h"
 #include "log.h"
 #include "nvs.h"
+#include "app.h"
+#include "boot_image.h"
+#include "boot_slot.h"
+#include "flash_layout.h"
 #include "board.h"
 #include "button.h"
 #include "bsp_adc.h"
@@ -464,6 +467,97 @@ static void cmd_adc(int argc, const char *argv[])
     cmd_reply_ok("adc", buf);
 }
 
+static void cmd_motors_stop(void)
+{
+    uint8_t i;
+
+    for (i = 1U; i <= 4U; i++) {
+        Motor_SetSpeed(i, 0);
+    }
+}
+
+status_t cmd_boot_slot_switch(uint32_t slot)
+{
+    uint32_t base;
+
+    if (slot > BOOT_SLOT_B) {
+        return STATUS_INVALID_ARG;
+    }
+
+    base = boot_slot_target_base(slot);
+    if (!boot_image_is_valid(base)) {
+        LOG_WARN("cmd: slot %lu image invalid @ 0x%08lX",
+                 (unsigned long)slot, (unsigned long)base);
+        return STATUS_FAIL;
+    }
+
+    if (nvs_boot_slot_set(slot) != STATUS_OK) {
+        LOG_WARN("cmd: set slot %lu failed", (unsigned long)slot);
+        return STATUS_FAIL;
+    }
+
+    LOG_INFO("cmd: boot slot=%lu reboot", (unsigned long)slot);
+    cmd_motors_stop();
+    vTaskDelay(pdMS_TO_TICKS(50));
+    SysCtlReset();
+    return STATUS_OK;
+}
+
+static void cmd_ftmenter(int argc, const char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+#if defined(FLASH_FACTORY_SLOT)
+    cmd_reply_ng();
+    return;
+#else
+    if (!boot_image_is_valid(FLASH_APP_B_BASE)) {
+        cmd_reply_ng();
+        return;
+    }
+    cmd_reply_ok("ftmenter", "reset");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    (void)cmd_boot_slot_switch(BOOT_SLOT_B);
+#endif
+}
+
+static void cmd_ftmexit(int argc, const char *argv[])
+{
+    (void)argc;
+    (void)argv;
+
+#if defined(FLASH_APP_A_SLOT)
+    cmd_reply_ng();
+    return;
+#else
+    if (!boot_image_is_valid(FLASH_APP_A_BASE)) {
+        cmd_reply_ng();
+        return;
+    }
+    cmd_reply_ok("ftmexit", "reset");
+    vTaskDelay(pdMS_TO_TICKS(50));
+    (void)cmd_boot_slot_switch(BOOT_SLOT_A);
+#endif
+}
+
+static void cmd_slot(int argc, const char *argv[])
+{
+    char buf[CMD_STATUS_BUF_SIZE];
+    uint32_t slot = BOOT_SLOT_A;
+
+    (void)argc;
+    (void)argv;
+
+    if (nvs_boot_slot_get(&slot) != STATUS_OK) {
+        cmd_reply_ng();
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf), "%lu", (unsigned long)slot);
+    cmd_reply_ok("slot", buf);
+}
+
 void cmd_register_defaults(void)
 {
     (void)cmd_register("reboot", cmd_reboot, "software reset");
@@ -472,6 +566,9 @@ void cmd_register_defaults(void)
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
     (void)cmd_register("adc", cmd_adc, "adc sample (bat_raw btn_raw btn_id)");
+    (void)cmd_register("ftmenter", cmd_ftmenter, "switch to factory slot (APP_B)");
+    (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A)");
+    (void)cmd_register("slot", cmd_slot, "show boot slot (0=A 1=B)");
 #if defined(NVS_CMD_RAW_KV)
     (void)cmd_register("nvs", cmd_nvs, "nvs get <ns> <key>");
 #endif

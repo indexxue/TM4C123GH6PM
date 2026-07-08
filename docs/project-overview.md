@@ -8,7 +8,7 @@
 
 | 项 | 说明 |
 |----|------|
-| 芯片 | TM4C123GH6PM，Cortex-M4F @ 80 MHz |
+| 芯片 | TM4C123GH6PM，Cortex-M4F @ 80 MHz（**8 MHz 晶振** + PLL） |
 | RTOS | FreeRTOS v8.2.3（TivaWare GCC ARM_CM4F） |
 | 形态 | 四轮 / 两轮 MG513 电机智能小车（两个独立工程） |
 | 仓库 | https://github.com/indexxue/TM4C123GH6PM |
@@ -21,7 +21,7 @@
 projects/
   car-4wd/     .syscfg/  board/（设备库）  main/（应用）  build/
   car-2wd/     同上
-Common/        跨工程公共模块（log、nvs、ota、start、app…）
+Common/        跨工程公共模块（log、nvs、cmd、start、app…）
 include/       芯片级头文件（FreeRTOSConfig、flash_layout、tm4c123gh6pm）
 scripts/       build.ps1、gen_config.py、flash-*.ps1
 ld/            链接脚本
@@ -65,13 +65,12 @@ App_Start();    /* projects/<car>/main/app.c：业务任务 */
 | [car-chassis-reference.md](car-chassis-reference.md) | TivaWare API 参考 |
 | [peripheral-selection.md](peripheral-selection.md) | 外设模块选型 |
 | [flash-partition.md](flash-partition.md) | Flash 分区 |
-| [ab-ota-dev-plan.md](ab-ota-dev-plan.md) | OTA 计划 |
+| [factory-partition-plan.md](factory-partition-plan.md) | 厂测切换计划 |
 
 ---
 
 ## 当前进度
 
 - [x] 双工程脚手架、SysConfig 代码生成、板级 Init 框架
-- [x] Bootloader + NVS / ota_meta（M0~M2）
+- [x] Bootloader + NVS + 厂测 slot 切换
 - [ ] 蓝牙遥控、IMU、编码器测速、PID、循迹闭环
-- [ ] OTA 激活与协议（M3~M5）

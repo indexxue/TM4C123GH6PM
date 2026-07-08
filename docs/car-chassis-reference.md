@@ -90,7 +90,7 @@ ADCSequenceEnable(ADC1_BASE, 3);
 
 ```
 Start_Init()
-├── bsp_clock_init()       按 device_profile 选时钟源
+├── bsp_clock_init()       8 MHz 晶振 → 80 MHz（device_profile）
 ├── bsp_systick_init()
 ├── Motor_Init()           PWM + 方向 GPIO（board_mask）
 ├── Encoder_Init()         QEI

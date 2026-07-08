@@ -14,6 +14,16 @@
 | ARM GNU Toolchain | `tools/bin/arm-none-eabi-gcc.exe` | 首次构建由 `install-toolchain.ps1` 自动下载 |
 | UniFlash 9.2.0 | `D:\Ti\uniflash_9.2.0\dslite.bat` | 烧录（需 `TM4C123GH6PM.ccxml`） |
 
+### 系统时钟（全项目统一）
+
+| 项 | 配置 |
+|----|------|
+| 主晶振 | **8 MHz** |
+| PLL | `SYSDIV_2_5` → **80 MHz** 系统时钟 |
+| 代码 | `bsp_sysctl.c` / `bootloader.c` / `device_profile` 均为 `XTAL_8MHZ` |
+
+> LaunchPad（EK-TM4C123GXL）板载 **16 MHz** 晶振；本仓库按自定义 PCB **8 MHz** 配置，勿混用。
+
 首次构建时 `build.ps1` 会依次确保工具链与 TivaWare SDK 就绪。SDK 安装顺序：
 
 1. 已存在于 `sdk/TivaWare_C_Series-2.2.0.295`
@@ -84,7 +94,7 @@ IDE：**Ctrl+Shift+B** → 默认编译 `car-4wd`（见 `.vscode/tasks.json`）�
 | `bootloader` | `ld/bootloader.ld` | `projects/car-4wd/build/bootloader.bin` | Boot @ `0x0`（≤16 KB） |
 | `app` | `ld/app.ld` | `projects/car-4wd/build/app.bin` | 主固件 @ `0x4000`（≤116 KB） |
 | `factory` | `ld/factory.ld` | `projects/car-4wd/build/factory.bin` | 厂测 @ `0x21000`（≤116 KB） |
-| `all` | 以上三者 | 三个 `.bin` | 产线/OTA 全套 |
+| `all` | 以上三者 | 三个 `.bin` | 产线全套（Boot + 量产 + 厂测） |
 
 分区地址见 [PARTITION.md](../PARTITION.md)、[flash-partition.md](flash-partition.md)。
 
@@ -161,7 +171,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 
 - `projects/<car>/src/`：startup、main、init、app、freertos_hooks、syscalls
 - `projects/<car>/source/src/`：生成的板级模块
-- `Common/src/`：log、cmd、battery、nvs、ota_meta 等
+- `Common/src/`：log、cmd、battery、nvs 等
 - `cbb/ws2812b/ws2812b.c`
 - TivaWare FreeRTOS
 
@@ -251,4 +261,4 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | [syscfg-io-allocation.md](syscfg-io-allocation.md) | 双车型引脚设计说明 |
 | [resource-allocation.md](resource-allocation.md) | 定时器/DMA/中断规划 |
 | [flash-partition.md](flash-partition.md) | Flash 分区 |
-| [ab-ota-dev-plan.md](ab-ota-dev-plan.md) | OTA 开发计划 |
+| [factory-partition-plan.md](factory-partition-plan.md) | 厂测分区切换 |

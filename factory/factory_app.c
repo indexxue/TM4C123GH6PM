@@ -5,10 +5,24 @@
 
 #include "factory.h"
 
+#include "button.h"
+#include "cmd.h"
+
+#include "boot_slot.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
 
 #include "log.h"
+
+void factory_button_notify(btn_id_e id, const char *name, btn_permission_e permission,
+                           btn_event_e event)
+{
+    if ((event == BTN_EVENT_LONG_PRESS) && ((permission & BTN_PERMISSION_FTM) != 0U)) {
+        (void)cmd_boot_slot_switch(BOOT_SLOT_A);
+    }
+    button_log_notify(id, name, permission, event);
+}
 
 #define FACTORY_VERSION         "ft-0.1.0"
 
@@ -32,6 +46,7 @@ static void PrimaryTask(void *pvParameters)
     LOG_INFO("factory:ready version=%s", FACTORY_VERSION);
 
     for (;;) {
+        button_schedule();
         vTaskDelay(pdMS_TO_TICKS(FACTORY_HEARTBEAT_MS));
         LOG_INFO("factory:heartbeat");
     }
