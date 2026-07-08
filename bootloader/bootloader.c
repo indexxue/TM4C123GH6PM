@@ -1,11 +1,9 @@
 /**
  * @file    bootloader.c
- * @brief   TM4C123 Bootloader：校验 APP_A / APP_B 并按 NVS slot 跳转
+ * @brief   TM4C123 Bootloader：校验 APP_A 并跳转（APP_B 为厂测存储，不直接运行）
  */
 
 #include "bootloader.h"
-
-#include "boot_slot.h"
 
 #include <errno.h>
 #include <stddef.h>
@@ -294,17 +292,10 @@ void boot_app_jump(uint32_t app_base)
     }
 }
 
-static uint32_t boot_pick_target(uint32_t preferred_slot)
+static uint32_t boot_pick_target(void)
 {
-    uint32_t preferred_base = boot_slot_target_base(preferred_slot);
-    uint32_t fallback_base =
-        (preferred_base == FLASH_APP_A_BASE) ? FLASH_APP_B_BASE : FLASH_APP_A_BASE;
-
-    if (boot_app_is_valid(preferred_base)) {
-        return preferred_base;
-    }
-    if (boot_app_is_valid(fallback_base)) {
-        return fallback_base;
+    if (boot_app_is_valid(FLASH_APP_A_BASE)) {
+        return FLASH_APP_A_BASE;
     }
     return 0U;
 }
@@ -315,24 +306,20 @@ static uint32_t boot_pick_target(uint32_t preferred_slot)
 
 int main(void)
 {
-    uint32_t slot;
     uint32_t target;
 
     boot_hw_init();
     boot_log_puts("\r\n[boot] TM4C123 start\r\n");
 
-    slot = boot_slot_read();
-    target = boot_pick_target(slot);
+    target = boot_pick_target();
 
     if (target == 0U) {
-        boot_log_puts("[boot] APP_A/APP_B invalid, halt\r\n");
+        boot_log_puts("[boot] APP_A invalid, halt\r\n");
         for (;;) {
         }
     }
 
-    boot_log_puts("[boot] slot=");
-    boot_log_putc((slot == BOOT_SLOT_B) ? 'B' : 'A');
-    boot_log_puts(" jump ");
+    boot_log_puts("[boot] jump APP_A ");
     boot_log_hex32(target);
     boot_log_puts("\r\n");
 

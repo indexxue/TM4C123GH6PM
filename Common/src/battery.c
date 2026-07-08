@@ -9,6 +9,7 @@
 
 #include "board.h"
 #include "bsp_adc.h"
+#include "cfg.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -137,6 +138,8 @@ static uint32_t battery_voltage_sample_hw(battery_voltage_t *voltage)
         uint32_t avg_raw = sum / (uint32_t)count;
         uint32_t vadc_mv = (avg_raw * 3300U) / 4095U;
         uint32_t vbatt_mv = vadc_mv * BATTERY_DIVIDER_RATIO;
+
+        vbatt_mv = cfg_battery_calibrate_mv(vbatt_mv);
 
         if (voltage != NULL) {
             voltage->current_mv = (uint16_t)vbatt_mv;

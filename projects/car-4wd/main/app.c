@@ -9,10 +9,12 @@
 #include "battery.h"
 #include "button.h"
 #include "buzzer.h"
+#include "cfg.h"
 #include "cmd.h"
 #include "device_profile.h"
 #include "event.h"
 #include "log.h"
+#include "nvs.h"
 
 #include "bsp_uart.h"
 
@@ -68,8 +70,8 @@ static void app_user_init(void)
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
-        Motor_SetSpeed(1U, 100);
-        Motor_SetSpeed(2U, 100);
+        Motor_SetSpeed(1U, cfg_motor_rpm(1U, 100));
+        Motor_SetSpeed(2U, cfg_motor_rpm(2U, 100));
         vTaskDelay(pdMS_TO_TICKS(3000U));
         Motor_SetSpeed(1U, 0);
         Motor_SetSpeed(2U, 0);
@@ -88,9 +90,9 @@ static void app_on_timer(void)
     }
 
     /* TODO: IMU 姿态更新 */
-    /* TODO: 编码器速度计算 */
-    /* TODO: PID 控制器 */
-    /* TODO: 输出电机 PWM */
+    /* TODO: 编码器速度计算（cfg_encoder_count + cfg_kinematics） */
+    /* TODO: PID 控制器（cfg_pid_speed / cfg_pid_line） */
+    /* TODO: 输出电机 PWM（cfg_motor_rpm + cfg_spd_limit 限速） */
 }
 
 static void app_on_button(void)
@@ -131,9 +133,10 @@ static void app_evt_dispatch_task(void *arg)
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         log_notify_scheduler_running();
         (void)log_set_level(LOG_LEVEL_VERBOSE);
-        LOG_INFO("app_evt: started (%s), heap_free=%u",
-                 device_profile_product()->name,
-                 (unsigned)xPortGetFreeHeapSize());
+    }
+
+    if (nvs_startup_finalize() != STATUS_OK) {
+        LOG_WARN("app: nvs_startup_finalize failed");
     }
 
     app_user_init();
@@ -186,6 +189,13 @@ static void app_tmr_tick_task(void *arg)
 status_t App_Start(void)
 {
     status_t st;
+
+    if (nvs_init() != STATUS_OK) {
+        bsp_uart_debug_puts("[app] nvs_init FAILED\r\n");
+        return STATUS_FAIL;
+    }
+
+    cfg_init();
 
     st = event_init();
     if (st != STATUS_OK) {

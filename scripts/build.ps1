@@ -53,6 +53,10 @@ function Get-DeviceDefines {
     return @("-DDEVICE_PRODUCT_ID=$productId")
 }
 
+function Get-NvsAppDefines {
+    return @("-DNVS_RTOS_LOCK", "-DNVS_CMD_RAW_KV")
+}
+
 function Get-BspSources {
     return @(
         (Join-Path $BspSrc "bsp_sysctl.c"),
@@ -105,7 +109,8 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "buzzer.c"),
         (Join-Path $CommonSrc "flexible_button.c"),
         (Join-Path $CommonSrc "crc32.c"),
-        (Join-Path $CommonSrc "nvs.c")
+        (Join-Path $CommonSrc "nvs.c"),
+        (Join-Path $CommonSrc "cfg.c")
     )
 }
 
@@ -237,23 +242,23 @@ New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 switch ($Target) {
     "standalone" {
         Invoke-AppCodegen -CompileDb
-        Build-FirmwareTarget -Name $CarProject -LdScript (Join-Path $LdDir "tm4c123gh6pm.ld") -Sources (Get-AppSources)
+        Build-FirmwareTarget -Name $CarProject -LdScript (Join-Path $LdDir "tm4c123gh6pm.ld") -Sources (Get-AppSources) -ExtraDefines (Get-NvsAppDefines)
     }
     "bootloader" {
         Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
     }
     "app" {
         Invoke-AppCodegen
-        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines @("-DFLASH_APP_A_SLOT") -CheckImageSize
+        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines)) -CheckImageSize
     }
     "factory" {
         Invoke-AppCodegen
-        Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines @("-DFLASH_FACTORY_SLOT") -ExtraIncludes @($FactoryDir) -CheckImageSize
+        Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($FactoryDir) -CheckImageSize
     }
     "all" {
         Invoke-AppCodegen
         Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
-        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines @("-DFLASH_APP_A_SLOT") -CheckImageSize
-        Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines @("-DFLASH_FACTORY_SLOT") -ExtraIncludes @($FactoryDir) -CheckImageSize
+        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines)) -CheckImageSize
+        Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($FactoryDir) -CheckImageSize
     }
 }

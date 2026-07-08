@@ -8,6 +8,7 @@
 #include "board.h"
 #include "log.h"
 #include "cmd.h"
+#include "nvs.h"
 #include "flash_layout.h"
 
 #include "driverlib/sysctl.h"
@@ -27,6 +28,13 @@ void Factory_Board_Init(void)
     Board_Periph_Init();
 
     (void)log_init(NULL);
+
+    if (nvs_init() != STATUS_OK) {
+        LOG_WARN("factory: nvs_init failed");
+    } else {
+        (void)nvs_startup_finalize();
+    }
+
     (void)cmd_uart_line_service_start();
 
     LOG_INFO("factory: init @ 0x%08lX (APP_B storage)",

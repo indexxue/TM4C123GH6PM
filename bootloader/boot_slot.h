@@ -1,9 +1,9 @@
 /**
  * @file    boot_slot.h
- * @brief   Bootloader 运行槽选择（NVS 持久化，无 OTA 状态机）
+ * @brief   NVS Boot 保留区布局（与 nvs.c 页头后 256 B 对齐）
  *
- * APP 或厂测固件写入 boot_slot_cfg 后复位，Bootloader 跳转 APP_A 或 APP_B。
- * 配置位于 NVS 页 0 数据区起始（偏移 16 B，紧接页头之后）。
+ * 运行槽恒为 APP_A（见 PARTITION.md）。保留区供后续 ftmenter/OTA 激活链写入元数据；
+ * Bootloader 仅校验并跳转 APP_A，不直接执行 APP_B。
  */
 
 #ifndef BOOTLOADER_BOOT_SLOT_H

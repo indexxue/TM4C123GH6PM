@@ -183,7 +183,6 @@ void button_init(btn_notify_t notify)
     if (bsp_adc_sample_one(&s_button_adc_cfg, &raw)) {
         s_adc_last_raw = raw;
         s_adc_pressed_id = button_adc_decode(raw);
-        LOG_INFO("button: ADC1 AIN1 @ PE2 ready, idle raw=%lu", (unsigned long)raw);
     } else {
         LOG_WARN("button: ADC1 AIN1 @ PE2 init ok, first sample failed");
     }

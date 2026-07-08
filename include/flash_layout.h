@@ -19,11 +19,8 @@
 #define FLASH_APP_A_END         0x00020FFFU
 
 #define FLASH_APP_B_BASE        0x00021000U
-#define FLASH_APP_B_SIZE        0x0001D000U   /* 116 KB — 第二分区（厂测等） */
+#define FLASH_APP_B_SIZE        0x0001D000U   /* 116 KB — 厂测镜像存储 */
 #define FLASH_APP_B_END         0x0003DFFFU
-
-#define FLASH_STAGING_BASE      FLASH_APP_B_BASE
-#define FLASH_STAGING_SIZE      FLASH_APP_B_SIZE
 
 #define FLASH_NVS_BASE          0x0003E000U
 #define FLASH_NVS_SIZE          0x00002000U   /* 8 KB */

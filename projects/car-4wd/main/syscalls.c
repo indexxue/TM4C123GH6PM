@@ -13,7 +13,7 @@ extern int errno;
 extern uint32_t _ebss;
 extern uint32_t _estack;
 
-#define MAIN_STACK_RESERVE 2048U
+#define MAIN_STACK_RESERVE 4096U
 
 static uint8_t *s_heap_end;
 

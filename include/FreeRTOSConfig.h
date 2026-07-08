@@ -22,7 +22,7 @@
 #define configMINIMAL_STACK_SIZE        (128U)
 #define configMAX_TASK_NAME_LEN         (16U)
 /* app_evt + app_tmr + timer service + cmd */
-#define configTOTAL_HEAP_SIZE           (12288U)
+#define configTOTAL_HEAP_SIZE           (14336U)
 
 #define configUSE_MALLOC_FAILED_HOOK    1
 
