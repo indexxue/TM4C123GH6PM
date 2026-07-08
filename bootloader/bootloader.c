@@ -7,13 +7,12 @@
 
 #include "bootloader.h"
 
+#include <stdbool.h>
 #include <errno.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/stat.h>
 
-#include "boot_image.h"
-#include "boot_slot.h"
 #include "flash_layout.h"
 
 #include "inc/hw_memmap.h"
@@ -103,14 +102,20 @@ static void boot_puts(const char *s)
     }
 }
 
-static void boot_put_hex(uint32_t v)
+static void boot_uart_flush(void)
 {
-    static const char hex[] = "0123456789ABCDEF";
-    int sh;
+    while (UARTBusy(UART7_BASE)) {
+    }
+}
 
-    boot_puts("0x");
-    for (sh = 28; sh >= 0; sh -= 4) {
-        UARTCharPut(UART7_BASE, hex[(v >> (uint32_t)sh) & 0xFU]);
+static void boot_log_target(uint32_t base, bool fallback)
+{
+    if (base == FLASH_APP_A_BASE) {
+        boot_puts(fallback ? "boot A*\r\n" : "boot A\r\n");
+    } else if (base == FLASH_APP_B_BASE) {
+        boot_puts(fallback ? "boot B*\r\n" : "boot B\r\n");
+    } else {
+        boot_puts("boot ?\r\n");
     }
 }
 
@@ -134,31 +139,47 @@ static void boot_hw_init(void)
     UARTEnable(UART7_BASE);
 }
 
-static uint32_t boot_pick_target(void)
+static bool boot_pick_target(uint32_t *target_out, bool *fallback_out)
 {
     uint32_t slot = boot_slot_read();
     uint32_t primary = boot_slot_target_base(slot);
     uint32_t alt = boot_slot_target_base(slot == BOOT_SLOT_A ? BOOT_SLOT_B : BOOT_SLOT_A);
 
     if (boot_image_is_valid(primary)) {
-        return primary;
+        *target_out = primary;
+        *fallback_out = false;
+        return true;
     }
     if (boot_image_is_valid(alt)) {
-        boot_puts("[boot] fallback\r\n");
-        return alt;
+        *target_out = alt;
+        *fallback_out = true;
+        return true;
     }
-    return 0U;
+    return false;
 }
 
 void boot_app_jump(uint32_t app_base)
 {
-    uint32_t sp = *(volatile uint32_t *)app_base;
-    void (*reset)(void) = (void (*)(void))(*(volatile uint32_t *)(app_base + 4U));
+    uint32_t sp;
+    uint32_t reset;
+
+    __asm volatile("dsb" ::: "memory");
+    sp = *(volatile uint32_t *)app_base;
+    reset = *(volatile uint32_t *)(app_base + 4U);
 
     __asm volatile("cpsid i");
     HWREG(BOOT_SCB_VTOR_ADDR) = app_base;
-    __asm volatile("msr msp, %0" : : "r"(sp));
-    reset();
+    __asm volatile("dsb" ::: "memory");
+    __asm volatile("isb" ::: "memory");
+
+    /* bx 使用向量表原值（含 Thumb 位），勿 & ~1U */
+    __asm volatile(
+        "msr msp, %0\n"
+        "bx  %1\n"
+        :
+        : "r"(sp), "r"(reset)
+        : "memory");
+
     for (;;) {
     }
 }
@@ -166,20 +187,19 @@ void boot_app_jump(uint32_t app_base)
 int main(void)
 {
     uint32_t target;
+    bool fallback;
 
     boot_hw_init();
-    boot_puts("\r\n[boot] start\r\n");
 
-    target = boot_pick_target();
-    if (target == 0U) {
-        boot_puts("[boot] no app\r\n");
+    if (!boot_pick_target(&target, &fallback)) {
+        boot_puts("boot -\r\n");
+        boot_uart_flush();
         for (;;) {
         }
     }
 
-    boot_puts("[boot] jump ");
-    boot_put_hex(target);
-    boot_puts("\r\n");
+    boot_log_target(target, fallback);
+    boot_uart_flush();
     boot_app_jump(target);
 
     for (;;) {

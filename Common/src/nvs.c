@@ -6,7 +6,6 @@
 #include "nvs.h"
 
 #include "device_profile.h"
-#include "boot_slot.h"
 #include "crc32.h"
 #include "flash_layout.h"
 

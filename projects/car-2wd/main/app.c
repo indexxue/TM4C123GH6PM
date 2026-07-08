@@ -6,7 +6,6 @@
 #include "app.h"
 
 #include "button.h"
-#include "cmd.h"
 #include "device_profile.h"
 #include "event.h"
 #include "log.h"
@@ -80,7 +79,7 @@ static void app_on_button(void)
 
 static void app_on_input(void)
 {
-    /* TODO: 蓝牙指令处理 */
+    /* TODO: 蓝牙协议层指令处理（UART0） */
 }
 
 /* -------------------------------------------------------------------------- */
@@ -189,13 +188,6 @@ status_t App_Start(void)
                     APP_TASK_PRIO_TMR, NULL) != pdPASS) {
         bsp_uart_debug_puts("[app] app_tmr create FAIL (heap)\r\n");
         return STATUS_NO_MEM;
-    }
-
-    if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_CMD)) {
-        st = cmd_uart_line_service_start();
-        if (st != STATUS_OK) {
-            return st;
-        }
     }
 
     return STATUS_OK;

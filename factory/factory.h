@@ -6,11 +6,28 @@
 #ifndef FACTORY_H
 #define FACTORY_H
 
-#include "button.h"
+#ifdef __cplusplus
+extern "C" {
+#endif
+
+#include "type.h"
+
+/* -------------------------------------------------------------------------- */
+/* FreeRTOS 任务名（≤ 16 字符）                                               */
+/* -------------------------------------------------------------------------- */
+
+#define FACTORY_TASK_NAME_EVT   "factory_evt"
+#define FACTORY_TASK_NAME_TMR   "factory_tmr"
+
+/* -------------------------------------------------------------------------- */
+/* 生命周期                                                                   */
+/* -------------------------------------------------------------------------- */
 
 void Factory_Board_Init(void);
-void Factory_Start(void);
-void factory_button_notify(btn_id_e id, const char *name, btn_permission_e permission,
-                           btn_event_e event);
+status_t Factory_Start(void);
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* FACTORY_H */

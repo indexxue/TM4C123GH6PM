@@ -1,5 +1,5 @@
 /**
- * @file    factory_main.c
+ * @file    main.c
  * @brief   厂测固件入口（FreeRTOS）
  *
  * 产物 factory.bin 烧录至 APP_B（0x00021000），Boot 按 NVS slot 直接跳转。

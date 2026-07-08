@@ -210,7 +210,7 @@ status_t nvs_param_set_last_mode(nvs_run_mode_t mode, nvs_write_src_t src);
 /** 恢复 ctrl/cal/user 参数为默认值；保留 serial / hw_rev / fw_ver / boot_cnt */
 status_t nvs_factory_reset(void);
 
-/** 读 / 写 Boot 保留区运行槽（见 boot_slot.h） */
+/** 读 / 写 Boot 保留区运行槽（见 flash_layout.h） */
 status_t nvs_boot_slot_get(uint32_t *slot_out);
 status_t nvs_boot_slot_set(uint32_t slot);
 

@@ -26,7 +26,7 @@ alwaysApply: true
 | 设计文档 | `docs/<主题>.md`（kebab-case 英文） | `build.md`、`syscfg-io-allocation.md` |
 | 脚本 | `scripts/<动词_名词>.ps1` 或 `<名词>.py` | `build.ps1`、`gen_config.py`、`flash-uniflash.ps1` |
 | 根目录快捷方式 | `<动作>.cmd` 包装对应 ps1 | `build.cmd`、`flash.cmd` |
-| C 源文件 | `snake_case.c`；模块名简短表意 | `factory_init.c`、`nvs.c` |
+| C 源文件 | `snake_case.c`；模块名简短表意 | `factory.c`、`nvs.c` |
 | BSP 驱动 | `bsp_driver/{inc,src}/bsp_<外设>.{h,c}` 成对；禁止裸名 `uart.h`/`clock.h` | `bsp_uart.c`、`bsp_timer.c`、`bsp_sysctl.c` |
 | BSP 头 guard | `BSP_DRIVER_<外设>_H` 大写 | `BSP_DRIVER_UART_H` |
 | 头文件 guard | `MODULE_<名>_H` 或功能前缀 | `MODULE_MOTOR_H` |
@@ -84,8 +84,8 @@ docs/                   # 设计文档
 | 4 路电机 PWM | Timer0/1 | PB6/PB7, PB4/PB5 @ 10 kHz |
 | 方向控制 | GPIO | PF4/PC7, PC4/PD4, PD5/PA6, PA7/PF0 |
 | 编码器 | QEI1/QEI0 | PC5/PC6 (M3), PD6/PD7 (M4) |
-| 蓝牙 | UART0 | PA0/PA1 @ 115200 |
-| 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 |
+| 蓝牙 | UART0 | PA0/PA1 @ 115200 — **协议层**（遥控/上位机通信，非 CMD） |
+| 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
 | I2C 总线 | I2C0 | PB2/PB3 @ 400 kHz — OLED、MPU6050、QMC5883P |
 | SPI IMU | SSI0 | PA2~PA5 — QMI8658A |
 | 电池电压 | ADC1 AIN0 | PE3 |
@@ -97,14 +97,27 @@ docs/                   # 设计文档
 
 完整引脚表见 `docs/syscfg-io-allocation.md` 与编译生成的 `projects/<car>/gpio-allocation.md`。
 
+## 串口与通信分工
+
+两路 UART **职责分离**，新增功能时不得混用：
+
+| 接口 | 用途 | 模块/约定 |
+|------|------|-----------|
+| **UART7**（调试） | 开发日志、`cmd` 命令行（`ftmenter`、`motor`、`adc` 等） | `log`、`cmd`（`cmd_uart_line_service_start`） |
+| **UART0**（蓝牙） | 协议层：遥控、上位机/App 二进制或帧协议 | 独立协议栈；**禁止**将 `cmd` 读行任务绑到 UART0 |
+
+- 产线调试、厂测、固件开发：接 **UART7**（PE1 TX @ 115200）。
+- 蓝牙 HC-05 仅承载业务协议，不与 `cmd` 共用同一物理口。
+
 ## 当前开发状态
 
-平台层：UART7 日志 + 蓝牙 CMD + 1 Hz 心跳；板级外设 init 已接通。
+平台层：量产 app 仅 UART7 日志；厂测 factory 使用 UART7 日志 + CMD；UART0 蓝牙协议层（待实现）；板级外设 init 已接通。
 
 **待实现**：IMU/磁力计驱动、编码器测速、PID、ADC 循迹与按键判读等业务逻辑。
 
 ## 开发约束
 
+- **串口分工**：`cmd` 走 **UART7**；**UART0** 仅协议层，勿把调试/厂测命令接到蓝牙口
 - **不要提交**：`build/`（含 `ide-compile-db.json`）、`tools/`、`downloads/`、`sdk/`（除 `sdk/README.md`）
 - **不要手改** `projects/*/board/src/{motor,encoder,line,board}.c`（改对应 `.syscfg` 后重新编译）
 - 提交前本地编译通过；提交信息简短中文/英文，说明做了什么/为什么

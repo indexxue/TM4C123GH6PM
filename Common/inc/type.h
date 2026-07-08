@@ -49,6 +49,4 @@ typedef enum {
     STATUS_INVALID_STATE = -6,
 } status_t;
 
-const char *status_to_str(status_t s);
-
 #endif /* COMMON_TYPE_H */

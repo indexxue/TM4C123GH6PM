@@ -31,8 +31,7 @@
 ## 目录
 
 ```
-include/boot_slot.h
-include/boot_image.h
+include/flash_layout.h       — 分区常量、Boot 运行槽、镜像校验
 bootloader/bootloader.c      — 精简 Boot，8 MHz 时钟，slot 跳转
 Common/src/nvs.c          — nvs_boot_slot_get/set
 Common/src/cmd.c          — ftmenter/ftmexit、cmd_boot_slot_switch

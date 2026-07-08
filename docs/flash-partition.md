@@ -43,7 +43,7 @@
 5. 仍无效 → halt
 6. 设 VTOR / MSP / PC 跳转
 
-实现：`bootloader/bootloader.c`、`include/boot_slot.h`、`include/boot_image.h`。
+实现：`bootloader/bootloader.c`、`include/flash_layout.h`。
 
 ---
 

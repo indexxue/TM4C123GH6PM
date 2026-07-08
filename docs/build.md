@@ -179,7 +179,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 
 ### factory
 
-- `factory/factory_*.c`
+- `factory/{main,factory}.c`
 - 共享 `projects/<car>/src/startup_*`、`freertos_hooks.c`、`syscalls.c` 及板级/Common 模块
 
 ### bootloader

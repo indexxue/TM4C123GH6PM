@@ -18,7 +18,6 @@ extern "C" {
 
 #define APP_TASK_NAME_EVT   "app_evt"
 #define APP_TASK_NAME_TMR   "app_tmr"
-#define APP_TASK_NAME_CMD   "app_cmd"
 
 /* -------------------------------------------------------------------------- */
 /* 生命周期                                                                   */

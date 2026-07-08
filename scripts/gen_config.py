@@ -994,7 +994,6 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
         bsp_src / "bsp_spi.c",
         bsp_src / "bsp_dac.c",
         bsp_src / "bsp_bus_lock.c",
-        ROOT / "Common/src/type.c",
         ROOT / "Common/src/device_profile.c",
         ROOT / "Common/src/start.c",
         ROOT / "Common/src/event.c",

@@ -28,7 +28,7 @@ bsp_driver/           →  TivaWare DriverLib only
 | 文件 | 职责 |
 |------|------|
 | `FreeRTOSConfig.h` | RTOS 配置 |
-| `flash_layout.h` | Flash 分区常量 |
+| `flash_layout.h` | Flash 分区常量、Boot 运行槽、镜像合法性检查 |
 | `tm4c123gh6pm.h` | 寄存器 / HWREG 宏 |
 
 模块头与源文件同层：`Common/inc/start.h` ↔ `Common/src/start.c`，`Common/inc/app.h` ↔ `projects/<car>/main/app.c`。

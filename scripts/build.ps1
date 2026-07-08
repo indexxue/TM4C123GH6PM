@@ -93,7 +93,6 @@ function Get-FreeRtosSources {
 
 function Get-CommonCoreSources {
     return @(
-        (Join-Path $CommonSrc "type.c"),
         (Join-Path $CommonSrc "device_profile.c"),
         (Join-Path $CommonSrc "start.c"),
         (Join-Path $CommonSrc "event.c"),
@@ -103,7 +102,6 @@ function Get-CommonCoreSources {
 
 function Get-FullCommonSources {
     return (Get-CommonCoreSources) + @(
-        (Join-Path $CommonSrc "cmd.c"),
         (Join-Path $CommonSrc "battery.c"),
         (Join-Path $CommonSrc "button.c"),
         (Join-Path $CommonSrc "buzzer.c"),
@@ -111,6 +109,12 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "crc32.c"),
         (Join-Path $CommonSrc "nvs.c"),
         (Join-Path $CommonSrc "cfg.c")
+    )
+}
+
+function Get-FactoryCommonSources {
+    return (Get-FullCommonSources) + @(
+        (Join-Path $CommonSrc "cmd.c")
     )
 }
 
@@ -126,7 +130,9 @@ function Get-MainSources {
 
 function Get-AppSources {
     return (Get-MainSources) + (Get-BspSources) + (Get-FullCommonSources) +
-           (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
+           (Get-GeneratedBoardSources) + (Get-FreeRtosSources) + @(
+        (Join-Path $CommonSrc "cmd.c")
+    )
 }
 
 function Get-FactorySources {
@@ -134,10 +140,9 @@ function Get-FactorySources {
         (Join-Path $MainDir "startup_tm4c123gh6pm.c"),
         (Join-Path $MainDir "freertos_hooks.c"),
         (Join-Path $MainDir "syscalls.c"),
-        (Join-Path $FactoryDir "factory_main.c"),
-        (Join-Path $FactoryDir "factory_init.c"),
-        (Join-Path $FactoryDir "factory_app.c")
-    ) + (Get-BspSources) + (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
+        (Join-Path $FactoryDir "main.c"),
+        (Join-Path $FactoryDir "factory.c")
+    ) + (Get-BspSources) + (Get-FactoryCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
 
 function Get-BootloaderSources {

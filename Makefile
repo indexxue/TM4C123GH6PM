@@ -46,7 +46,6 @@ APP_SOURCES := $(SRC_DIR)/startup_tm4c123gh6pm.c \
                $(SRC_DIR)/syscalls.c \
                $(COMMON_SRC)/pinout.c \
                $(COMMON_SRC)/peripheral.c \
-               $(COMMON_SRC)/type.c \
                $(COMMON_SRC)/log.c \
                $(COMMON_SRC)/cmd.c \
                $(COMMON_SRC)/battery.c \

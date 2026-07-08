@@ -53,7 +53,7 @@ OK 键为 PE2 ADC 分压按键（与 UP/DN 共用一路 ADC）。
 #define FLASH_NVS_SIZE          0x00002000U   /* 8 KB */
 ```
 
-运行槽由 `include/boot_slot.h` + NVS Boot 保留区（256 B）持久化。
+运行槽由 `include/flash_layout.h`（Boot 运行槽 + 镜像校验）与 NVS Boot 保留区（256 B）持久化。
 
 ---
 

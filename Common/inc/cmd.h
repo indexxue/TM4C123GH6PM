@@ -1,6 +1,6 @@
 /**
  * @file    cmd.h
- * @brief   串口命令行框架（TM4C123 蓝牙 UART0）
+ * @brief   串口命令行框架（TM4C123 调试 UART7）
  */
 
 #ifndef CMD_H
@@ -23,6 +23,7 @@ extern "C" {
 #define CMD_MAX_COMMANDS (32U)
 #define CMD_MAX_ARGC (8U)
 #define CMD_STATUS_BUF_SIZE (128U)
+#define CMD_TASK_NAME_READER "cmd_rd"
 
 typedef bool (*cmd_write_fn)(const void *data, size_t len, void *user_ctx);
 typedef void (*cmd_handler_t)(int argc, const char *argv[]);
@@ -44,7 +45,7 @@ void cmd_register_defaults(void);
 void cmd_uart_lock(void);
 void cmd_uart_unlock(void);
 
-/** 创建蓝牙 UART0 读行任务（幂等）。须在 UART_Init 之后调用。 */
+/** 创建调试 UART7 读行任务（幂等）。须在 UART7 初始化之后调用。 */
 status_t cmd_uart_line_service_start(void);
 
 /** 校验目标槽镜像、写 NVS slot、停电机并复位；成功不返回 */

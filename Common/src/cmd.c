@@ -1,15 +1,12 @@
 /**
  * @file    cmd.c
- * @brief   厂测命令行框架（TM4C123 蓝牙 UART0）
+ * @brief   调试串口命令行框架（TM4C123 UART7）
  */
 
 #include "cmd.h"
 
 #include "log.h"
 #include "nvs.h"
-#include "app.h"
-#include "boot_image.h"
-#include "boot_slot.h"
 #include "flash_layout.h"
 #include "board.h"
 #include "button.h"
@@ -35,7 +32,7 @@ static int s_cmd_count;
 static SemaphoreHandle_t s_uart_mutex;
 static TaskHandle_t s_reader_task;
 
-static bool cmd_write_bt(const void *data, size_t len, void *user_ctx)
+static bool cmd_write_debug(const void *data, size_t len, void *user_ctx)
 {
     const uint8_t *p;
     size_t i;
@@ -46,14 +43,14 @@ static bool cmd_write_bt(const void *data, size_t len, void *user_ctx)
     }
     p = (const uint8_t *)data;
     for (i = 0U; i < len; i++) {
-        UART_Putc((char)p[i]);
+        UART_Debug_Putc((char)p[i]);
     }
     return true;
 }
 
 void cmd_init(cmd_write_fn write_fn, void *write_ctx)
 {
-    s_write_fn = (write_fn != NULL) ? write_fn : cmd_write_bt;
+    s_write_fn = (write_fn != NULL) ? write_fn : cmd_write_debug;
     s_write_ctx = write_ctx;
     s_cmd_count = 0;
     (void)memset(s_cmd_table, 0, sizeof(s_cmd_table));
@@ -589,7 +586,7 @@ static void cmd_reader_task(void *arg)
     for (;;) {
         char ch;
 
-        if (UART_Getc(&ch) == 0) {
+        if (UART_Debug_Getc(&ch) == 0) {
             vTaskDelay(pdMS_TO_TICKS(CMD_READER_POLL_MS));
             continue;
         }
@@ -618,9 +615,9 @@ status_t cmd_uart_line_service_start(void)
     if (s_reader_task != NULL) {
         return STATUS_OK;
     }
-    cmd_init(cmd_write_bt, NULL);
+    cmd_init(cmd_write_debug, NULL);
     cmd_register_defaults();
-    if (xTaskCreate(cmd_reader_task, APP_TASK_NAME_CMD, CMD_READER_STACK_WORDS, NULL, CMD_READER_PRIORITY,
+    if (xTaskCreate(cmd_reader_task, CMD_TASK_NAME_READER, CMD_READER_STACK_WORDS, NULL, CMD_READER_PRIORITY,
                     &s_reader_task) != pdPASS) {
         LOG_ERROR("cmd: create reader task failed");
         s_reader_task = NULL;
