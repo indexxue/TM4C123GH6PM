@@ -218,5 +218,11 @@ status_t App_Start(void)
         return STATUS_NO_MEM;
     }
 
+    st = cmd_uart_line_service_start();
+    if (st != STATUS_OK) {
+        bsp_uart_debug_puts("[app] cmd service start FAILED\r\n");
+        return st;
+    }
+
     return STATUS_OK;
 }

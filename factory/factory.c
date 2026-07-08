@@ -6,7 +6,9 @@
 #include "factory.h"
 
 #include "board.h"
+#include "bsp_i2c.h"
 #include "bsp_sysctl.h"
+#include "bsp_systick.h"
 #include "bsp_uart.h"
 #include "button.h"
 #include "cmd.h"
@@ -30,20 +32,75 @@
 #define FACTORY_TMR_STACK_WORDS     (256U)
 
 #define FACTORY_CTRL_PERIOD_MS      (20U)
-#define FACTORY_HEARTBEAT_PERIOD_MS (1000U)
 
 /* -------------------------------------------------------------------------- */
-/* 心跳                                                                       */
+/* 上电 NVS 摘要（仅打印一次）                                                 */
 /* -------------------------------------------------------------------------- */
 
-static uint32_t s_heartbeat_count;
-static uint32_t s_heartbeat_elapsed_ms;
-
-static void factory_heartbeat_log(void)
+static void factory_nvs_info_log(void)
 {
-    s_heartbeat_count++;
-    LOG_INFO("factory:heartbeat #%lu version=%s",
-             (unsigned long)s_heartbeat_count, FACTORY_VERSION);
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+    uint32_t slot = BOOT_SLOT_A;
+
+    (void)nvs_boot_slot_get(&slot);
+
+    LOG_INFO("factory:nvs serial=%s hw=%lu boot=%lu fw=%s slot=%lu first=%d",
+             (cfg->serial[0] != '\0') ? cfg->serial : "-",
+             (unsigned long)cfg->hw_rev,
+             (unsigned long)cfg->boot_count,
+             (cfg->fw_version[0] != '\0') ? cfg->fw_version : "-",
+             (unsigned long)slot,
+             nvs_first_boot() ? 1 : 0);
+}
+
+/* -------------------------------------------------------------------------- */
+/* 上电 I2C 地址扫描（factory_evt 内直接测，不经 cmd）                         */
+/* -------------------------------------------------------------------------- */
+
+static void factory_i2c_scan_log(void)
+{
+    char buf[128];
+    size_t len = 0U;
+    int found = 0;
+
+    bsp_i2c0_gpio_scan_begin();
+
+    for (uint8_t addr = 1U; addr < 0x7FU; addr++) {
+        if (!bsp_i2c0_gpio_probe(addr)) {
+            continue;
+        }
+
+        {
+            int n;
+
+            if (found > 0) {
+                n = snprintf(buf + len, sizeof(buf) - len, ",0x%02X", (unsigned int)addr);
+            } else {
+                n = snprintf(buf + len, sizeof(buf) - len, "0x%02X", (unsigned int)addr);
+            }
+            if ((n > 0) && ((size_t)n < (sizeof(buf) - len))) {
+                len += (size_t)n;
+            }
+            found++;
+        }
+    }
+
+    bsp_i2c0_gpio_scan_end_idle_high();
+
+    {
+        bool scl_high = false;
+        bool sda_high = false;
+
+        (void)bsp_i2c0_sample_idle_lines(&scl_high, &sda_high);
+        LOG_INFO("factory:i2c idle scl=%u sda=%u (1=high)",
+                 (unsigned)scl_high, (unsigned)sda_high);
+    }
+
+    if (found == 0) {
+        LOG_INFO("factory:i2c scan none (PB2/PB3 I2C0)");
+    } else {
+        LOG_INFO("factory:i2c scan %s (PB2/PB3 I2C0)", buf);
+    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -73,15 +130,6 @@ static void factory_cmd_register(void)
 /* 业务钩子                                                                   */
 /* -------------------------------------------------------------------------- */
 
-static void factory_on_timer(void)
-{
-    s_heartbeat_elapsed_ms += FACTORY_CTRL_PERIOD_MS;
-    if (s_heartbeat_elapsed_ms >= FACTORY_HEARTBEAT_PERIOD_MS) {
-        s_heartbeat_elapsed_ms -= FACTORY_HEARTBEAT_PERIOD_MS;
-        factory_heartbeat_log();
-    }
-}
-
 static void factory_on_button(void)
 {
     /* 预留：厂测按键业务 */
@@ -110,21 +158,20 @@ static void factory_evt_dispatch_task(void *arg)
     (void)arg;
 
     log_notify_scheduler_running();
-    (void)log_set_level(LOG_LEVEL_VERBOSE);
+    (void)log_set_level(LOG_LEVEL_INFO);
 
     if (nvs_startup_finalize() != STATUS_OK) {
         LOG_WARN("factory: nvs_startup_finalize failed");
     }
 
-    LOG_INFO("factory:ready version=%s @ 0x%08lX",
-             FACTORY_VERSION, (unsigned long)FLASH_APP_B_BASE);
+    factory_nvs_info_log();
+    factory_i2c_scan_log();
 
     for (;;) {
         event_schedule();
 
         if (event_is_set(EVT_ID_TIMER)) {
             button_schedule();
-            factory_on_timer();
         }
 
         if (event_is_set(EVT_ID_BUTTON)) {
@@ -156,15 +203,13 @@ static void factory_tmr_tick_task(void *arg)
 void Factory_Board_Init(void)
 {
     bsp_clock_init(BSP_CLOCK_MAIN_8MHZ);
+    bsp_systick_init();
     Motor_Init();
     Encoder_Init();
     Line_Init();
     Board_Periph_Init();
 
     (void)log_init(NULL);
-
-    LOG_INFO("factory: board init @ 0x%08lX (APP_B storage)",
-             (unsigned long)FLASH_APP_B_BASE);
 }
 
 status_t Factory_Start(void)

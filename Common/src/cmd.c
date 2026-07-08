@@ -11,13 +11,13 @@
 #include "board.h"
 #include "button.h"
 #include "bsp_adc.h"
+#include "bsp_i2c.h"
 
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
 
 #include "inc/hw_memmap.h"
-#include "driverlib/i2c.h"
 #include "driverlib/sysctl.h"
 
 #include <ctype.h>
@@ -287,12 +287,13 @@ static void cmd_i2c(int argc, const char *argv[])
     (void)argc;
     (void)argv;
 
+    bsp_i2c0_gpio_scan_begin();
+
     for (uint8_t addr = 1U; addr < 0x7FU; addr++) {
-        I2CMasterSlaveAddrSet(I2C0_BASE, addr, false);
-        I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_START);
-        while (I2CMasterBusy(I2C0_BASE)) {
+        if (!bsp_i2c0_gpio_probe(addr)) {
+            continue;
         }
-        if (I2CMasterErr(I2C0_BASE) == I2C_MASTER_ERR_NONE) {
+        {
             int n;
             if (found > 0) {
                 n = snprintf(buf + len, sizeof(buf) - len, ",0x%02X", (unsigned int)addr);
@@ -304,13 +305,14 @@ static void cmd_i2c(int argc, const char *argv[])
             }
             found++;
         }
-        I2CMasterControl(I2C0_BASE, I2C_MASTER_CMD_BURST_SEND_STOP);
     }
 
     if (found == 0) {
         (void)strncpy(buf, "none", sizeof(buf) - 1U);
         buf[sizeof(buf) - 1U] = '\0';
     }
+
+    bsp_i2c0_gpio_scan_end_idle_high();
     cmd_reply_ok("i2c", buf);
 }
 
@@ -606,6 +608,7 @@ static void cmd_reader_task(void *arg)
         }
         if (li < (sizeof(line) - 1U)) {
             line[li++] = ch;
+            (void)UART_Debug_Putc(ch);
         }
     }
 }
