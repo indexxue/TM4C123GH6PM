@@ -5,6 +5,7 @@
 
 #include "app.h"
 
+#include "attitude.h"
 #include "board.h"
 #include "battery.h"
 #include "button.h"
@@ -14,13 +15,17 @@
 #include "device_profile.h"
 #include "event.h"
 #include "flash_layout.h"
+#include "imu.h"
 #include "log.h"
+#include "magnetometer.h"
 #include "nvs.h"
 
 #include "bsp_uart.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
+
+#include <stdio.h>
 
 /* -------------------------------------------------------------------------- */
 /* 任务参数                                                                   */
@@ -34,6 +39,11 @@
 
 #define APP_CTRL_PERIOD_MS          (20U)
 #define APP_HEARTBEAT_PERIOD_MS     (2000U)
+
+/** 姿态解算采样率 = 1 / app_tmr 周期 */
+#define APP_ATT_SAMPLE_HZ           (1000.0f / (float)APP_CTRL_PERIOD_MS)
+/** 每 N 个控制周期打印一次姿态（20ms * 25 = 500ms） */
+#define APP_ATT_LOG_INTERVAL        (25U)
 
 /* -------------------------------------------------------------------------- */
 /* 心跳（在 app_evt 任务上下文采样，避免定时器回调里读 ADC）                   */
@@ -60,6 +70,122 @@ static void app_heartbeat_log(void)
 }
 
 /* -------------------------------------------------------------------------- */
+/* IMU / 磁力计 / 姿态（I2C0 软件 I2C，地址见 imu.h / magnetometer.h）         */
+/* -------------------------------------------------------------------------- */
+
+static void app_sensors_init(void)
+{
+    imu_sample_t imu;
+    magnetometer_sample_t mag;
+    status_t st;
+
+    if (!device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        return;
+    }
+
+    st = imu_init();
+    if (st != STATUS_OK) {
+        LOG_WARN("app:imu init failed (%d)", (int)st);
+        return;
+    }
+    LOG_INFO("app:imu ready addr=0x%02X", (unsigned)IMU_I2C_ADDR_DEFAULT);
+
+    st = magnetometer_init();
+    if (st != STATUS_OK) {
+        LOG_WARN("app:mag init failed (%d)", (int)st);
+        return;
+    }
+    LOG_INFO("app:mag ready addr=0x%02X", (unsigned)MAGNETOMETER_I2C_ADDR_DEFAULT);
+
+    if (attitude_init(APP_ATT_SAMPLE_HZ) != STATUS_OK) {
+        LOG_WARN("app:att init failed");
+        return;
+    }
+    LOG_INFO("app:att madgwick ready %dHz 9dof", (int)APP_ATT_SAMPLE_HZ);
+
+    if ((imu_read_sample(&imu) == STATUS_OK) && (magnetometer_read_sample(&mag) == STATUS_OK) &&
+        (attitude_update_from_sensors(&imu, &mag) == STATUS_OK)) {
+        attitude_euler_t euler;
+
+        if (attitude_get_euler(&euler) == STATUS_OK) {
+            LOG_INFO("app:att roll=%d pitch=%d yaw=%d (0.1deg)",
+                     (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+        }
+    }
+}
+
+static void app_attitude_periodic(void)
+{
+    static uint32_t s_log_div;
+
+    imu_sample_t imu;
+    magnetometer_sample_t mag;
+    attitude_euler_t euler;
+
+    if (!attitude_is_ready()) {
+        return;
+    }
+    if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample(&mag) != STATUS_OK)) {
+        return;
+    }
+    if (attitude_update_from_sensors(&imu, &mag) != STATUS_OK) {
+        return;
+    }
+
+    if (!device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
+        return;
+    }
+
+    s_log_div++;
+    if (s_log_div < APP_ATT_LOG_INTERVAL) {
+        return;
+    }
+    s_log_div = 0U;
+
+    if (attitude_get_euler(&euler) == STATUS_OK) {
+        LOG_INFO("app:att roll=%d pitch=%d yaw=%d (0.1deg)",
+                 (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+    }
+}
+
+static void app_cmd_att(int argc, const char *argv[])
+{
+    imu_sample_t imu;
+    magnetometer_sample_t mag;
+    attitude_euler_t euler;
+    char buf[CMD_STATUS_BUF_SIZE];
+
+    (void)argc;
+    (void)argv;
+
+    if (!attitude_is_ready()) {
+        cmd_reply_ok("att", "ng:not ready");
+        return;
+    }
+    if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample(&mag) != STATUS_OK)) {
+        cmd_reply_ok("att", "ng:sensor read");
+        return;
+    }
+    if (attitude_update_from_sensors(&imu, &mag) != STATUS_OK) {
+        cmd_reply_ok("att", "ng:fusion");
+        return;
+    }
+    if (attitude_get_euler(&euler) != STATUS_OK) {
+        cmd_reply_ok("att", "ng:euler");
+        return;
+    }
+
+    (void)snprintf(buf, sizeof(buf), "roll=%d pitch=%d yaw=%d (0.1deg)",
+                   (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+    cmd_reply_ok("att", buf);
+}
+
+static void app_cmd_register(void)
+{
+    (void)cmd_register("att", app_cmd_att, "att read euler angles (0.1deg)");
+}
+
+/* -------------------------------------------------------------------------- */
 /* 业务钩子（本文件内 static，按需扩展）                                       */
 /* -------------------------------------------------------------------------- */
 
@@ -68,6 +194,7 @@ static void app_user_init(void)
     battery_init();
     buzzer_init();
     buzzer_chirp(2U, BUZZER_DEFAULT_ON_MS, BUZZER_DEFAULT_GAP_MS);
+    app_sensors_init();
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
@@ -90,7 +217,8 @@ static void app_on_timer(void)
         }
     }
 
-    /* TODO: IMU 姿态更新 */
+    app_attitude_periodic();
+
     /* TODO: 编码器速度计算（cfg_encoder_count + cfg_kinematics） */
     /* TODO: PID 控制器（cfg_pid_speed / cfg_pid_line） */
     /* TODO: 输出电机 PWM（cfg_motor_rpm + cfg_spd_limit 限速） */
@@ -223,6 +351,7 @@ status_t App_Start(void)
         bsp_uart_debug_puts("[app] cmd service start FAILED\r\n");
         return st;
     }
+    app_cmd_register();
 
     return STATUS_OK;
 }

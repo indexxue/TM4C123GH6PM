@@ -11,12 +11,20 @@
 
 #include "factory.h"
 
+#include "bsp_uart.h"
+#include "type.h"
+
 int main(void)
 {
     Factory_Board_Init();
-    Factory_Start();
+    if (Factory_Start() != STATUS_OK) {
+        bsp_uart_debug_puts("[factory] start FAILED, halt\r\n");
+        for (;;) {
+        }
+    }
     vTaskStartScheduler();
 
+    bsp_uart_debug_puts("[factory] scheduler FAILED\r\n");
     for (;;) {
     }
 }

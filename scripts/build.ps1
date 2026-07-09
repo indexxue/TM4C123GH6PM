@@ -23,6 +23,8 @@ $CommonInc = Join-Path $CommonDir "inc"
 $CommonSrc = Join-Path $CommonDir "src"
 $BspInc = Join-Path $ProjectRoot "bsp_driver\inc"
 $BspSrc = Join-Path $ProjectRoot "bsp_driver\src"
+$CbbDir = Join-Path $ProjectRoot "cbb"
+$ThirdPartyDir = Join-Path $ProjectRoot "third_party"
 $LdDir = Join-Path $ProjectRoot "ld"
 $ToolsDir = Join-Path $ProjectRoot "tools"
 $ToolchainBin = Join-Path $ToolsDir "bin"
@@ -55,6 +57,32 @@ function Get-DeviceDefines {
 
 function Get-NvsAppDefines {
     return @("-DNVS_RTOS_LOCK", "-DNVS_CMD_RAW_KV")
+}
+
+function Get-CbbSources {
+    return @(
+        (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
+        (Join-Path $CbbDir "mpu6050\mpu6050.c")
+    )
+}
+
+function Get-CbbIncludes {
+    return @(
+        (Join-Path $CbbDir "qmc5883p"),
+        (Join-Path $CbbDir "mpu6050")
+    )
+}
+
+function Get-ThirdPartySources {
+    return @(
+        (Join-Path $ThirdPartyDir "madgwick\MadgwickAHRS.c")
+    )
+}
+
+function Get-ThirdPartyIncludes {
+    return @(
+        (Join-Path $ThirdPartyDir "madgwick")
+    )
 }
 
 function Get-BspSources {
@@ -108,7 +136,10 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "flexible_button.c"),
         (Join-Path $CommonSrc "crc32.c"),
         (Join-Path $CommonSrc "nvs.c"),
-        (Join-Path $CommonSrc "cfg.c")
+        (Join-Path $CommonSrc "cfg.c"),
+        (Join-Path $CommonSrc "imu.c"),
+        (Join-Path $CommonSrc "magnetometer.c"),
+        (Join-Path $CommonSrc "attitude.c")
     )
 }
 
@@ -129,8 +160,8 @@ function Get-MainSources {
 }
 
 function Get-AppSources {
-    return (Get-MainSources) + (Get-BspSources) + (Get-FullCommonSources) +
-           (Get-GeneratedBoardSources) + (Get-FreeRtosSources) + @(
+    return (Get-MainSources) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) +
+           (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources) + @(
         (Join-Path $CommonSrc "cmd.c")
     )
 }
@@ -142,7 +173,8 @@ function Get-FactorySources {
         (Join-Path $MainDir "syscalls.c"),
         (Join-Path $FactoryDir "main.c"),
         (Join-Path $FactoryDir "factory.c")
-    ) + (Get-BspSources) + (Get-FactoryCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
+    ) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) + (Get-FactoryCommonSources) +
+        (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
 
 function Get-BootloaderSources {
@@ -183,7 +215,8 @@ function Build-FirmwareTarget {
         "-I$BlDir",
         "-I$FreeRTOSRoot\include",
         "-I$FreeRTOSPort"
-    ) + ($ExtraIncludes | ForEach-Object { "-I$_" })
+    ) + (Get-CbbIncludes | ForEach-Object { "-I$_" }) +
+        (Get-ThirdPartyIncludes | ForEach-Object { "-I$_" }) + ($ExtraIncludes | ForEach-Object { "-I$_" })
 
     $CommonFlags = @(
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16"
@@ -203,7 +236,7 @@ function Build-FirmwareTarget {
         $CommonFlags += "-I$TivaWareRoot"
         $CommonFlags += "-I$(Join-Path $TivaWareRoot "inc")"
         $LinkFlags += "-L$(Join-Path $TivaWareRoot "driverlib\gcc")"
-        $LinkFlags += "-ldriver", "-lc", "-lgcc"
+        $LinkFlags += "-ldriver", "-lc", "-lm", "-lgcc"
     }
 
     Write-Host "=== Target: $Name ===" -ForegroundColor Cyan

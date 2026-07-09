@@ -8,7 +8,7 @@ alwaysApply: true
 ## 项目是什么
 
 - **目标**：基于 **TM4C123GH6PM**（Cortex-M4F @ 80 MHz）的 **FreeRTOS** 四轴 MG513 电机小车底盘固件
-- **硬件**：自定义 PCB，**8 MHz** 主晶振 + PLL → 80 MHz 系统时钟；引脚以 `projects/<car>/.syscfg/` 为准（电机、编码器、蓝牙、双 IMU、磁力计、OLED、ADC 循迹/按键/电池、超声波等）
+- **硬件**：自定义 PCB，**8 MHz** 主晶振 + PLL → 80 MHz 系统时钟；引脚以 `projects/<car>/.syscfg/` 为准（电机、编码器、蓝牙、IMU、磁力计、OLED、ADC 循迹/按键/电池、超声波等）
 - **参考**：EK-TM4C123GXL LaunchPad 仅作早期对照（LaunchPad 为 16 MHz 晶振，**本仓库固件统一按 8 MHz 配置**）
 - **仓库**：https://github.com/indexxue/TM4C123GH6PM
 
@@ -86,8 +86,8 @@ docs/                   # 设计文档
 | 编码器 | QEI1/QEI0 | PC5/PC6 (M3), PD6/PD7 (M4) |
 | 蓝牙 | UART0 | PA0/PA1 @ 115200 — **协议层**（遥控/上位机通信，非 CMD） |
 | 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
-| I2C 总线 | I2C0 | PB2/PB3 @ 400 kHz — OLED、MPU6050、QMC5883P |
-| SPI IMU | SSI0 | PA2~PA5 — QMI8658A |
+| I2C 总线 | I2C0 软件（GPIO 位操作） | PB2/PB3 — MPU6050@0x69、QMC5883P@0x2C（暂无 OLED） |
+| SPI / SSI0 | SSI0 | PA2~PA5 — 预留 SPI 外设 |
 | 电池电压 | ADC1 AIN0 | PE3 |
 | 按键 | ADC1 AIN1 | PE2（电阻分压采样） |
 | 循迹 | ADC1 AIN4~9 | PD3/PD2/PD1/PD0, PE5/PE4（6 路；除按键/电池外的全部 ADC 通道） |
@@ -113,15 +113,83 @@ docs/                   # 设计文档
 
 平台层：量产 app 仅 UART7 日志；厂测 factory 使用 UART7 日志 + CMD；UART0 蓝牙协议层（待实现）；板级外设 init 已接通。
 
-**待实现**：IMU/磁力计驱动、编码器测速、PID、ADC 循迹与按键判读等业务逻辑。
+**待实现**：编码器测速、PID、ADC 循迹与按键判读等业务逻辑。IMU/磁力计驱动与厂测读数已接入（I2C0 软件 I2C）。
 
 ## 开发约束
 
 - **串口分工**：`cmd` 走 **UART7**；**UART0** 仅协议层，勿把调试/厂测命令接到蓝牙口
+- **I2C0 必须软件 I2C**：PB2/PB3 仅用 GPIO 开漏位操作；**禁止**对 I2C0 调用 `I2CMasterDisable/Enable` 等硬件寄存器（外设时钟未开时会卡死）
 - **不要提交**：`build/`（含 `ide-compile-db.json`）、`tools/`、`downloads/`、`sdk/`（除 `sdk/README.md`）
 - **不要手改** `projects/*/board/src/{motor,encoder,line,board}.c`（改对应 `.syscfg` 后重新编译）
 - 提交前本地编译通过；提交信息简短中文/英文，说明做了什么/为什么
 - `build.ps1` 使用 `-mfloat-abi=hard` + FPU（以 PowerShell 脚本为准）
+
+## 厂测启动卡死排障（高频）
+
+### 典型现象
+
+UART7 只看到：
+
+```
+boot B
+[factory] boot
+```
+
+之后无任何 `[INFO]` 日志，表现为“程序卡死”。此问题在厂测/I2C 改动后多次出现。
+
+### 正常启动日志阶梯（UART7 @ 115200）
+
+按顺序应出现（`bsp_uart_debug_puts` 阶段）：
+
+```
+boot B
+[factory] boot
+[factory] i2c sw init
+[factory] board ok
+[factory] board init done
+[factory] nvs init
+[factory] tasks start
+[factory] rtos start
+```
+
+调度器起来后（`LOG_INFO` 阶段）：
+
+```
+[INFO] factory:nvs serial=...
+[INFO] factory:i2c idle scl=1 sda=1 (1=high)
+[INFO] factory:i2c scan 0x2C,0x69 (PB2/PB3 I2C0)
+[INFO] factory:imu ready ...
+[INFO] factory:mag ready ...
+```
+
+**卡在哪一行**，就重点查该阶段（不要先怀疑业务逻辑）。
+
+### 常见根因与修复
+
+| 根因 | 说明 | 修复 |
+|------|------|------|
+| **I2C0 软件路径访问硬件寄存器** | `bsp_i2c_init`/`gpio_scan_begin` 在未 `SysCtlPeripheralEnable(I2C0)` 时调用 `I2CMasterDisable` → **卡死在 periph init** | I2C0 软件 I2C **禁止**读写 `I2CMaster*`；仅 `GPIOPinTypeGPIOOutputOD` + 位操作 |
+| **软件/硬件 I2C 混用** | 扫描用 GPIO 位操作，读写却切 `GPIOPinTypeI2C` + 硬件主机 | I2C0 统一走 `bsp_i2c` 软件路径；`gen_config.py` 对 I2C0 不生成硬件引脚复用 |
+| **GPIO 扫描后总线未恢复** | SCL/SDA 停在 GPIO 输入/硬件复用异常 | `bsp_i2c_init(I2C0)` → `bsp_i2c0_gpio_scan_begin()`；读写前勿 `i2c0_restore_pin_mux` |
+| **厂测过早初始化电机/QEI** | `Motor_Init`/`Encoder_Init` 在传感器厂测前拉起 Timer/QEI，偶发阻塞启动 | 厂测 `Factory_Board_Init` 仅 `Board_Periph_Init`，电机项测再 init |
+| **`event_schedule` 无首事件** | `factory_evt` 进循环后 `event_schedule` 永久等信号量 | 进循环前 `event_set(EVT_ID_TIMER)`；确认 `factory_tmr` 已创建 |
+| **堆栈/堆耗尽** | 任务创建失败或栈溢出 | 看 `[rtos] malloc failed` / `stack overflow`；加大 `configTOTAL_HEAP_SIZE` 或 `FACTORY_EVT_STACK_WORDS` |
+| **调度器前误用阻塞 RTOS API** | `vTaskDelay`/`xSemaphoreTake(portMAX_DELAY)` 在 `vTaskStartScheduler` 前调用 | 调度器前仅用 `bsp_delay_us/ms`（DWT）；RTOS 同步在任务内 |
+
+### 修改 I2C/厂测代码时的检查清单
+
+1. I2C0 扫描、IMU、磁力计是否**同一条**软件 I2C 路径？
+2. 是否误调 `bsp_i2c_bus_release(..., reinit_master)` 把 I2C0 切回硬件主机？
+3. `Board_Periph_Init` 后是否仍打印 `[factory] board ok`？
+4. 重新烧录的是 `projects/car-4wd/build/factory.bin`（非旧缓存）？
+5. 传感器地址是否与扫描一致：**MPU6050=0x69**、**QMC5883P=0x2C**（暂无 OLED）？
+
+### 相关文件
+
+- 厂测入口：`factory/main.c`、`factory/factory.c`
+- I2C BSP：`bsp_driver/src/bsp_i2c.c`
+- 板级生成：`scripts/gen_config.py`（I2C0 跳过硬件 mux）
+- 传感器：`Common/src/imu.c`、`Common/src/magnetometer.c`
 
 ## 文档索引
 

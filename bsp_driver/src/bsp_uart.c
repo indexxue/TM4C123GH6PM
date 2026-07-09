@@ -125,3 +125,13 @@ void bsp_uart_debug_puts(const char *s)
     }
     bsp_uart_puts(s_debug_uart_base, s);
 }
+
+void bsp_uart_debug_flush(void)
+{
+    if (!s_debug_uart_ready) {
+        return;
+    }
+
+    while (UARTBusy(s_debug_uart_base)) {
+    }
+}

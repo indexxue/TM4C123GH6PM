@@ -19,7 +19,7 @@
 
 #define BSP_I2C_PERIPH_READY_US 100000U
 #define BSP_I2C_OP_TIMEOUT_US   10000U
-#define BSP_I2C_GPIO_PULSE_US     5U
+#define BSP_I2C_GPIO_PULSE_US     10U
 #define BSP_I2C_MASTER_TIMEOUT    0xFFU
 #define BSP_I2C0_SCL_PIN          GPIO_PIN_2
 #define BSP_I2C0_SDA_PIN          GPIO_PIN_3
@@ -210,13 +210,20 @@ bool bsp_i2c0_sample_idle_lines(bool *scl_high, bool *sda_high)
 /* I2C0 GPIO 位操作扫描（PB2/PB3）— 规避硬件主机锁死                           */
 /* -------------------------------------------------------------------------- */
 
+static void i2c0_bb_pins_output_od(uint8_t pins)
+{
+    GPIOPinTypeGPIOOutputOD(GPIO_PORTB_BASE, pins);
+}
+
 static void i2c0_bb_sda_out(bool high)
 {
+    i2c0_bb_pins_output_od(BSP_I2C0_SDA_PIN);
     GPIOPinWrite(GPIO_PORTB_BASE, BSP_I2C0_SDA_PIN, high ? BSP_I2C0_SDA_PIN : 0U);
 }
 
 static void i2c0_bb_scl_out(bool high)
 {
+    i2c0_bb_pins_output_od(BSP_I2C0_SCL_PIN);
     GPIOPinWrite(GPIO_PORTB_BASE, BSP_I2C0_SCL_PIN, high ? BSP_I2C0_SCL_PIN : 0U);
 }
 
@@ -278,9 +285,116 @@ static bool i2c0_bb_write_byte(uint8_t byte)
     }
 }
 
+static bool i2c0_bb_read_byte(uint8_t *byte, bool ack)
+{
+    uint8_t i;
+    uint8_t value = 0u;
+
+    if (byte == NULL) {
+        return false;
+    }
+
+    GPIOPinTypeGPIOInput(GPIO_PORTB_BASE, BSP_I2C0_SDA_PIN);
+    GPIOPadConfigSet(GPIO_PORTB_BASE, BSP_I2C0_SDA_PIN, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
+
+    for (i = 0U; i < 8U; i++) {
+        i2c0_bb_scl_out(false);
+        bsp_delay_us(BSP_I2C_GPIO_PULSE_US);
+        i2c0_bb_scl_out(true);
+        bsp_delay_us(BSP_I2C_GPIO_PULSE_US);
+        value <<= 1;
+        if ((GPIOPinRead(GPIO_PORTB_BASE, BSP_I2C0_SDA_PIN) & BSP_I2C0_SDA_PIN) != 0U) {
+            value |= 1u;
+        }
+    }
+
+    i2c0_bb_scl_out(false);
+    i2c0_bb_pins_output_od(BSP_I2C0_SDA_PIN);
+    i2c0_bb_sda_out(ack ? false : true);
+    bsp_delay_us(BSP_I2C_GPIO_PULSE_US);
+    i2c0_bb_scl_out(true);
+    bsp_delay_us(BSP_I2C_GPIO_PULSE_US);
+    i2c0_bb_scl_out(false);
+    bsp_delay_us(BSP_I2C_GPIO_PULSE_US);
+    i2c0_bb_sda_out(true);
+
+    *byte = value;
+    return true;
+}
+
+static bool i2c0_bb_write_locked(uint8_t addr_7bit, uint8_t reg, const uint8_t *data, size_t len)
+{
+    size_t i;
+
+    i2c0_bb_pins_output_od(BSP_I2C0_PINS);
+    GPIOPinWrite(GPIO_PORTB_BASE, BSP_I2C0_PINS, BSP_I2C0_PINS);
+    bsp_delay_us(10U);
+
+    i2c0_bb_start();
+    if (!i2c0_bb_write_byte((uint8_t)(addr_7bit << 1))) {
+        i2c0_bb_stop();
+        return false;
+    }
+    if (!i2c0_bb_write_byte(reg)) {
+        i2c0_bb_stop();
+        return false;
+    }
+
+    for (i = 0U; i < len; i++) {
+        if (!i2c0_bb_write_byte(data[i])) {
+            i2c0_bb_stop();
+            return false;
+        }
+    }
+
+    i2c0_bb_stop();
+    return true;
+}
+
+static bool i2c0_bb_read_locked(uint8_t addr_7bit, uint8_t reg, uint8_t *data, size_t len)
+{
+    size_t i;
+
+    if ((data == NULL) || (len == 0U)) {
+        return false;
+    }
+
+    i2c0_bb_pins_output_od(BSP_I2C0_PINS);
+    GPIOPinWrite(GPIO_PORTB_BASE, BSP_I2C0_PINS, BSP_I2C0_PINS);
+    bsp_delay_us(10U);
+
+    i2c0_bb_start();
+    if (!i2c0_bb_write_byte((uint8_t)(addr_7bit << 1))) {
+        i2c0_bb_stop();
+        return false;
+    }
+    if (!i2c0_bb_write_byte(reg)) {
+        i2c0_bb_stop();
+        return false;
+    }
+
+    i2c0_bb_stop();
+    i2c0_bb_start();
+    if (!i2c0_bb_write_byte((uint8_t)((addr_7bit << 1) | 1u))) {
+        i2c0_bb_stop();
+        return false;
+    }
+
+    for (i = 0U; i < len; i++) {
+        if (!i2c0_bb_read_byte(&data[i], i < (len - 1U))) {
+            i2c0_bb_stop();
+            return false;
+        }
+    }
+
+    i2c0_bb_stop();
+    return true;
+}
+
 void bsp_i2c0_gpio_scan_begin(void)
 {
-    I2CMasterDisable(I2C0_BASE);
+    SysCtlPeripheralEnable(SYSCTL_PERIPH_GPIOB);
+    (void)bsp_periph_wait_ready(SYSCTL_PERIPH_GPIOB, BSP_I2C_PERIPH_READY_US);
     GPIOPinTypeGPIOOutputOD(GPIO_PORTB_BASE, BSP_I2C0_PINS);
     GPIOPinWrite(GPIO_PORTB_BASE, BSP_I2C0_PINS, BSP_I2C0_PINS);
     bsp_delay_us(10U);
@@ -433,6 +547,11 @@ bool bsp_i2c_init(const bsp_i2c_config_t *cfg)
         return false;
     }
 
+    if (cfg->base == I2C0_BASE) {
+        bsp_i2c0_gpio_scan_begin();
+        return true;
+    }
+
     periph = i2c_periph_from_base(cfg->base);
     if (periph == 0U) {
         return false;
@@ -483,6 +602,11 @@ bool bsp_i2c_probe(uint32_t base, uint8_t addr_7bit)
 
 void bsp_i2c_bus_release(uint32_t base, const bsp_i2c_config_t *cfg)
 {
+    if (base == I2C0_BASE) {
+        i2c0_gpio_bus_recover(NULL, false);
+        return;
+    }
+
     uint32_t periph = i2c_periph_from_base(base);
 
     if (I2CMasterBusy(base)) {
@@ -498,15 +622,18 @@ void bsp_i2c_bus_release(uint32_t base, const bsp_i2c_config_t *cfg)
         (void)bsp_periph_wait_ready(periph, BSP_I2C_PERIPH_READY_US);
     }
 
-    if (base == I2C0_BASE) {
-        i2c0_gpio_bus_recover(cfg, true);
-    } else if (cfg != NULL) {
+    if (cfg != NULL) {
         i2c_master_reinit(cfg);
     }
 }
 
 void bsp_i2c_bus_release_idle_high(uint32_t base)
 {
+    if (base == I2C0_BASE) {
+        i2c0_gpio_bus_recover(NULL, false);
+        return;
+    }
+
     uint32_t periph = i2c_periph_from_base(base);
 
     if (I2CMasterBusy(base)) {
@@ -520,11 +647,6 @@ void bsp_i2c_bus_release_idle_high(uint32_t base)
         SysCtlPeripheralReset(periph);
         SysCtlPeripheralEnable(periph);
         (void)bsp_periph_wait_ready(periph, BSP_I2C_PERIPH_READY_US);
-    }
-
-    if (base == I2C0_BASE) {
-        /* 保持 GPIO 开漏释放为高，不再 I2CMasterEnable，避免 SCL 再次被拉低 */
-        i2c0_gpio_bus_recover(NULL, false);
     }
 }
 
@@ -537,7 +659,13 @@ bool bsp_i2c_write(uint32_t base, uint8_t addr_7bit, uint8_t reg, const uint8_t 
     }
 
     if (base == I2C0_BASE) {
-        i2c0_restore_pin_mux();
+        if (!bsp_bus_lock_i2c(base, 0U)) {
+            return false;
+        }
+
+        ok = i2c0_bb_write_locked(addr_7bit, reg, data, len);
+        bsp_bus_unlock_i2c(base);
+        return ok;
     }
 
     if (!bsp_bus_lock_i2c(base, 0U)) {
@@ -554,7 +682,13 @@ bool bsp_i2c_read(uint32_t base, uint8_t addr_7bit, uint8_t reg, uint8_t *data, 
     bool ok;
 
     if (base == I2C0_BASE) {
-        i2c0_restore_pin_mux();
+        if (!bsp_bus_lock_i2c(base, 0U)) {
+            return false;
+        }
+
+        ok = i2c0_bb_read_locked(addr_7bit, reg, data, len);
+        bsp_bus_unlock_i2c(base);
+        return ok;
     }
 
     if (!bsp_bus_lock_i2c(base, 0U)) {

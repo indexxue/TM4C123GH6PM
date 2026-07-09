@@ -21,4 +21,7 @@ void bsp_clock_init(bsp_clock_source_t source);
 uint32_t bsp_clock_get_hz(void);
 bool bsp_periph_wait_ready(uint32_t periph, uint32_t timeout_us);
 
+/** 软件复位；成功不返回（AIRCR + 看门狗兜底） */
+void bsp_system_reset(void) __attribute__((noreturn));
+
 #endif /* BSP_DRIVER_SYSCTL_H */

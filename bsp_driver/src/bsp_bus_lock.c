@@ -9,6 +9,7 @@
 
 #include "FreeRTOS.h"
 #include "semphr.h"
+#include "task.h"
 #include "inc/hw_memmap.h"
 
 #define BSP_BUS_LOCK_MS_DEFAULT 100U
@@ -66,6 +67,10 @@ static bool bus_lock(SemaphoreHandle_t *slot, uint32_t timeout_ms)
         return false;
     }
 
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return true;
+    }
+
     if (*slot == NULL) {
         *slot = xSemaphoreCreateMutex();
         if (*slot == NULL) {
@@ -82,6 +87,10 @@ static bool bus_lock(SemaphoreHandle_t *slot, uint32_t timeout_ms)
 
 static void bus_unlock(SemaphoreHandle_t *slot)
 {
+    if (xTaskGetSchedulerState() == taskSCHEDULER_NOT_STARTED) {
+        return;
+    }
+
     if ((slot != NULL) && (*slot != NULL)) {
         (void)xSemaphoreGive(*slot);
     }

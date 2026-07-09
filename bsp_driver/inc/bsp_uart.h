@@ -22,5 +22,6 @@ int bsp_uart_getc(uint32_t base, char *c);
 void bsp_uart_debug_init(uint32_t baud_rate);
 void bsp_uart_debug_putc(char c);
 void bsp_uart_debug_puts(const char *s);
+void bsp_uart_debug_flush(void);
 
 #endif /* BSP_DRIVER_UART_H */

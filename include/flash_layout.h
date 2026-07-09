@@ -46,6 +46,8 @@ static inline int flash_addr_in_range(uint32_t addr, uint32_t base, uint32_t siz
 #define BOOT_NVS_PAGE_MAGIC     0x4E565331U   /* "NVS1" */
 #define BOOT_NVS_PAGE_VERSION   1U
 #define BOOT_NVS_PAGE_HDR_SIZE  16U
+#define BOOT_NVS_PAGE_SIZE      4096U
+#define BOOT_NVS_PAGE_COUNT     2U
 #define BOOT_SLOT_CFG_OFFSET    BOOT_NVS_PAGE_HDR_SIZE
 
 #define BOOT_SLOT_MAGIC         0x534C4F54U   /* "SLOT" */
@@ -57,19 +59,60 @@ typedef struct {
     uint32_t slot;
 } boot_slot_cfg_t;
 
-static inline bool boot_nvs_page0_valid(void)
+static inline bool boot_nvs_page_hdr_ok(const uint32_t *hdr)
 {
-    const uint32_t *hdr = (const uint32_t *)FLASH_NVS_BASE;
-
     return (hdr[0] == BOOT_NVS_PAGE_MAGIC) && (hdr[1] == BOOT_NVS_PAGE_VERSION);
+}
+
+static inline int boot_nvs_page_hdr_erased(const uint32_t *hdr)
+{
+    const uint8_t *p = (const uint8_t *)hdr;
+    uint32_t i;
+
+    for (i = 0U; i < BOOT_NVS_PAGE_HDR_SIZE; i++) {
+        if (p[i] != 0xFFU) {
+            return 0;
+        }
+    }
+    return 1;
+}
+
+/** 与 nvs_scan_pages 一致：取 seq 最大且页头有效的 NVS 页 */
+static inline uint32_t boot_nvs_active_page_base(void)
+{
+    uint32_t i;
+    uint32_t best_seq = 0U;
+    uint32_t best_base = FLASH_NVS_BASE;
+    int found = 0;
+
+    for (i = 0U; i < BOOT_NVS_PAGE_COUNT; i++) {
+        const uint32_t *hdr =
+            (const uint32_t *)(FLASH_NVS_BASE + (i * BOOT_NVS_PAGE_SIZE));
+
+        if (boot_nvs_page_hdr_erased(hdr) != 0) {
+            continue;
+        }
+        if (!boot_nvs_page_hdr_ok(hdr)) {
+            continue;
+        }
+        if ((found == 0) || (hdr[2] >= best_seq)) {
+            best_seq = hdr[2];
+            best_base = FLASH_NVS_BASE + (i * BOOT_NVS_PAGE_SIZE);
+            found = 1;
+        }
+    }
+
+    return best_base;
 }
 
 static inline uint32_t boot_slot_read(void)
 {
+    uint32_t page_base = boot_nvs_active_page_base();
+    const uint32_t *hdr = (const uint32_t *)page_base;
     const boot_slot_cfg_t *cfg =
-        (const boot_slot_cfg_t *)(FLASH_NVS_BASE + BOOT_SLOT_CFG_OFFSET);
+        (const boot_slot_cfg_t *)(page_base + BOOT_SLOT_CFG_OFFSET);
 
-    if (!boot_nvs_page0_valid()) {
+    if (!boot_nvs_page_hdr_ok(hdr)) {
         return BOOT_SLOT_A;
     }
     if (cfg->magic != BOOT_SLOT_MAGIC) {

@@ -12,13 +12,13 @@
 #include "button.h"
 #include "bsp_adc.h"
 #include "bsp_i2c.h"
+#include "bsp_sysctl.h"
 
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
 
 #include "inc/hw_memmap.h"
-#include "driverlib/sysctl.h"
 
 #include <ctype.h>
 #include <stdio.h>
@@ -259,8 +259,7 @@ static void cmd_reboot(int argc, const char *argv[])
     (void)argc;
     (void)argv;
     cmd_reply_ok("reboot", "now");
-    vTaskDelay(pdMS_TO_TICKS(50));
-    SysCtlReset();
+    bsp_system_reset();
 }
 
 static void cmd_log(int argc, const char *argv[])
@@ -466,6 +465,7 @@ static void cmd_adc(int argc, const char *argv[])
     cmd_reply_ok("adc", buf);
 }
 
+#if !defined(FLASH_FACTORY_SLOT)
 static void cmd_motors_stop(void)
 {
     uint8_t i;
@@ -474,6 +474,7 @@ static void cmd_motors_stop(void)
         Motor_SetSpeed(i, 0);
     }
 }
+#endif
 
 status_t cmd_boot_slot_switch(uint32_t slot)
 {
@@ -496,9 +497,11 @@ status_t cmd_boot_slot_switch(uint32_t slot)
     }
 
     LOG_INFO("cmd: boot slot=%lu reboot", (unsigned long)slot);
+#if !defined(FLASH_FACTORY_SLOT)
+    /* 厂测固件未 Motor_Init，访问电机 GPIO/Timer 会卡死总线 */
     cmd_motors_stop();
-    vTaskDelay(pdMS_TO_TICKS(50));
-    SysCtlReset();
+#endif
+    bsp_system_reset();
     return STATUS_OK;
 }
 
@@ -516,7 +519,6 @@ static void cmd_ftmenter(int argc, const char *argv[])
         return;
     }
     cmd_reply_ok("ftmenter", "reset");
-    vTaskDelay(pdMS_TO_TICKS(50));
     (void)cmd_boot_slot_switch(BOOT_SLOT_B);
 #endif
 }
@@ -535,7 +537,6 @@ static void cmd_ftmexit(int argc, const char *argv[])
         return;
     }
     cmd_reply_ok("ftmexit", "reset");
-    vTaskDelay(pdMS_TO_TICKS(50));
     (void)cmd_boot_slot_switch(BOOT_SLOT_A);
 #endif
 }

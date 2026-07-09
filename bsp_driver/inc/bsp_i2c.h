@@ -1,6 +1,6 @@
 /**
  * @file bsp_i2c.h
- * @brief TM4C123 I2C 主机薄封装
+ * @brief TM4C123 I2C 薄封装（I2C0=PB2/PB3 GPIO 软件 I2C，其余实例走硬件主机）
  */
 
 #ifndef BSP_DRIVER_I2C_H

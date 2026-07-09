@@ -3,9 +3,10 @@
 #include "flexible_button.h"
 #include "log.h"
 
-#include "board.h"
 #include "bsp_adc.h"
+#include "bsp_gpio.h"
 
+#include "driverlib/gpio.h"
 #include "inc/hw_memmap.h"
 
 #include <string.h>
@@ -166,27 +167,46 @@ static void button_config(void)
     self.list = s_button_list;
 }
 
+static bool button_adc_hw_init(void)
+{
+    uint32_t raw;
+
+    if (!bsp_gpio_port_enable(1u << 4)) {
+        LOG_ERROR("button: GPIOE enable failed (PE2 AIN1)");
+        return false;
+    }
+
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_2);
+
+    if (!bsp_adc_init(&s_button_adc_cfg)) {
+        LOG_ERROR("button: ADC1 AIN1 init failed (PE2)");
+        return false;
+    }
+
+    if (bsp_adc_sample_one(&s_button_adc_cfg, &raw)) {
+        s_adc_last_raw = raw;
+        s_adc_pressed_id = button_adc_decode(raw);
+        LOG_INFO("button: ADC1 AIN1 @ PE2 ready raw=%lu", (unsigned long)raw);
+    } else {
+        LOG_WARN("button: ADC1 AIN1 @ PE2 init ok, first sample failed");
+    }
+
+    return true;
+}
+
 void button_init(btn_notify_t notify)
 {
     uint8_t i;
-    uint32_t raw;
 
     (void)memset(&self, 0, sizeof(button_item_t));
     button_config();
     self.notify = notify;
 
-    if (!bsp_adc_init(&s_button_adc_cfg)) {
-        LOG_ERROR("button: ADC1 AIN1 init failed (PE2)");
+    if (!button_adc_hw_init()) {
         return;
     }
 
     self.adc_ready = true;
-    if (bsp_adc_sample_one(&s_button_adc_cfg, &raw)) {
-        s_adc_last_raw = raw;
-        s_adc_pressed_id = button_adc_decode(raw);
-    } else {
-        LOG_WARN("button: ADC1 AIN1 @ PE2 init ok, first sample failed");
-    }
 
     for (i = 0U; i < BTN_NUM; i++) {
         button_flex_init(&s_button_list[i]);

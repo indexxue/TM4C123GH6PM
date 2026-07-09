@@ -639,8 +639,11 @@ def add_uart_mux(plan: PinPlanner, pin: str, module: str, role: str) -> None:
 
 def add_i2c_mux(plan: PinPlanner, pin: str, module: str, role: str) -> None:
     port, pin_num = parse_pin(pin)
-    mux = i2c_pin_mux(pin, module, role)
     plan._ports.add(port)
+    if module == "I2C0":
+        # I2C0 走 PB2/PB3 软件 I2C（GPIO 开漏），引脚在 bsp_i2c_init() 配置
+        return
+    mux = i2c_pin_mux(pin, module, role)
     plan.mux_lines.append(f"    GPIOPinConfigure({mux});")
     plan.mux_lines.append(f"    GPIOPinTypeI2C(GPIO_PORT{port}_BASE, GPIO_PIN_{pin_num});")
 
