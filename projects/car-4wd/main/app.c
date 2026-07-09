@@ -1,6 +1,6 @@
 /**
  * @file    app.c
- * @brief   car-4wd 应用：app_evt 事件调度 + app_tmr 周期定时 + 2s 串口心跳
+ * @brief   (car-4wd) app_evt 事件调度 + app_tmr 周期定时 + UART0 蓝牙协议层
  */
 
 #include "app.h"
@@ -11,21 +11,18 @@
 #include "button.h"
 #include "buzzer.h"
 #include "cfg.h"
-#include "cmd.h"
 #include "device_profile.h"
 #include "event.h"
-#include "flash_layout.h"
 #include "imu.h"
 #include "log.h"
 #include "magnetometer.h"
 #include "nvs.h"
+#include "proto.h"
 
 #include "bsp_uart.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
-
-#include <stdio.h>
 
 /* -------------------------------------------------------------------------- */
 /* 任务参数                                                                   */
@@ -38,12 +35,12 @@
 #define APP_TMR_STACK_WORDS         (256U)
 
 #define APP_CTRL_PERIOD_MS          (20U)
-#define APP_HEARTBEAT_PERIOD_MS     (2000U)
+#define APP_HEARTBEAT_PERIOD_MS     (20000U)
 
 /** 姿态解算采样率 = 1 / app_tmr 周期 */
 #define APP_ATT_SAMPLE_HZ           (1000.0f / (float)APP_CTRL_PERIOD_MS)
-/** 每 N 个控制周期打印一次姿态（20ms * 25 = 500ms） */
-#define APP_ATT_LOG_INTERVAL        (25U)
+/** 每 N 个控制周期打印一次姿态（20ms * 1000 = 20s） */
+#define APP_ATT_LOG_INTERVAL        (1000U)
 
 /* -------------------------------------------------------------------------- */
 /* 心跳（在 app_evt 任务上下文采样，避免定时器回调里读 ADC）                   */
@@ -148,53 +145,26 @@ static void app_attitude_periodic(void)
     }
 }
 
-static void app_cmd_att(int argc, const char *argv[])
-{
-    imu_sample_t imu;
-    magnetometer_sample_t mag;
-    attitude_euler_t euler;
-    char buf[CMD_STATUS_BUF_SIZE];
-
-    (void)argc;
-    (void)argv;
-
-    if (!attitude_is_ready()) {
-        cmd_reply_ok("att", "ng:not ready");
-        return;
-    }
-    if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample(&mag) != STATUS_OK)) {
-        cmd_reply_ok("att", "ng:sensor read");
-        return;
-    }
-    if (attitude_update_from_sensors(&imu, &mag) != STATUS_OK) {
-        cmd_reply_ok("att", "ng:fusion");
-        return;
-    }
-    if (attitude_get_euler(&euler) != STATUS_OK) {
-        cmd_reply_ok("att", "ng:euler");
-        return;
-    }
-
-    (void)snprintf(buf, sizeof(buf), "roll=%d pitch=%d yaw=%d (0.1deg)",
-                   (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
-    cmd_reply_ok("att", buf);
-}
-
-static void app_cmd_register(void)
-{
-    (void)cmd_register("att", app_cmd_att, "att read euler angles (0.1deg)");
-}
-
 /* -------------------------------------------------------------------------- */
 /* 业务钩子（本文件内 static，按需扩展）                                       */
 /* -------------------------------------------------------------------------- */
 
 static void app_user_init(void)
 {
+    status_t st;
+
     battery_init();
+
+    /* I2C0 软件 I2C 须在 proto_rx 与其它 vTaskDelay 之前完成，避免总线时序被打断 */
+    app_sensors_init();
+
+    st = proto_uart_service_start();
+    if (st != STATUS_OK) {
+        LOG_WARN("app: proto service start failed (%d)", (int)st);
+    }
+
     buzzer_init();
     buzzer_chirp(2U, BUZZER_DEFAULT_ON_MS, BUZZER_DEFAULT_GAP_MS);
-    app_sensors_init();
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
@@ -219,6 +189,8 @@ static void app_on_timer(void)
 
     app_attitude_periodic();
 
+    proto_telemetry_tick(APP_CTRL_PERIOD_MS);
+
     /* TODO: 编码器速度计算（cfg_encoder_count + cfg_kinematics） */
     /* TODO: PID 控制器（cfg_pid_speed / cfg_pid_line） */
     /* TODO: 输出电机 PWM（cfg_motor_rpm + cfg_spd_limit 限速） */
@@ -231,7 +203,7 @@ static void app_on_button(void)
 
 static void app_on_input(void)
 {
-    /* TODO: 蓝牙协议层指令处理（UART0） */
+    /* 遥控等业务事件预留；DRIVE 由 proto_telemetry_tick 在定时器上下文执行 */
 }
 
 /* -------------------------------------------------------------------------- */
@@ -240,9 +212,6 @@ static void app_on_input(void)
 
 static void app_button_notify(btn_id_e id, const char *name, btn_permission_e permission, btn_event_e event)
 {
-    if ((event == BTN_EVENT_LONG_PRESS) && ((permission & BTN_PERMISSION_FTM) != 0U)) {
-        (void)cmd_boot_slot_switch(BOOT_SLOT_B);
-    }
     button_log_notify(id, name, permission, event);
     event_set(EVT_ID_BUTTON);
 }
@@ -345,13 +314,6 @@ status_t App_Start(void)
         bsp_uart_debug_puts("[app] app_tmr create FAIL (heap)\r\n");
         return STATUS_NO_MEM;
     }
-
-    st = cmd_uart_line_service_start();
-    if (st != STATUS_OK) {
-        bsp_uart_debug_puts("[app] cmd service start FAILED\r\n");
-        return st;
-    }
-    app_cmd_register();
 
     return STATUS_OK;
 }

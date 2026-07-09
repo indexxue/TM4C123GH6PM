@@ -139,7 +139,8 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "cfg.c"),
         (Join-Path $CommonSrc "imu.c"),
         (Join-Path $CommonSrc "magnetometer.c"),
-        (Join-Path $CommonSrc "attitude.c")
+        (Join-Path $CommonSrc "attitude.c"),
+        (Join-Path $CommonSrc "proto.c")
     )
 }
 
@@ -161,9 +162,7 @@ function Get-MainSources {
 
 function Get-AppSources {
     return (Get-MainSources) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) +
-           (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources) + @(
-        (Join-Path $CommonSrc "cmd.c")
-    )
+           (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
 
 function Get-FactorySources {
