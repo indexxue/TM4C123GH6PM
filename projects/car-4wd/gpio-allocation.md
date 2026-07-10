@@ -33,7 +33,7 @@
 | PB1 | BUZZER | 输出 | buzzer |
 | PC3 | RGB_LED | 输出 | WS2812 |
 | PC2 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
-| PC1 | ULTRA_ECHO | 输入 | HC-SR04 echo |
+| PC1 | ULTRA_ECHO | 输入 | HC-SR04 echo (SWDIO — deferred init, see Board_Ultra_Init) |
 | PA0 | BT_RX | 输入 | UART0 RX |
 | PA1 | BT_TX | 输出 | UART0 TX |
 | PB2 | I2C_SCL | 输入 | I2C0 SCL |

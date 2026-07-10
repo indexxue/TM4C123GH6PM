@@ -27,7 +27,7 @@
     { "port": "B", "pin": 1, "label": "BUZZER", "direction": "output", "_usage": "buzzer" },
     { "port": "C", "pin": 3, "label": "RGB_LED", "direction": "output", "_usage": "WS2812" },
     { "port": "C", "pin": 2, "label": "ULTRA_TRIG", "direction": "output", "_usage": "HC-SR04 trigger" },
-    { "port": "C", "pin": 1, "label": "ULTRA_ECHO", "direction": "input", "_usage": "HC-SR04 echo" },
+    { "port": "C", "pin": 1, "label": "ULTRA_ECHO", "direction": "input", "_usage": "HC-SR04 echo (SWDIO — deferred init, see Board_Ultra_Init)" },
     { "port": "A", "pin": 0, "label": "BT_RX", "direction": "input", "_usage": "UART0 RX" },
     { "port": "A", "pin": 1, "label": "BT_TX", "direction": "output", "_usage": "UART0 TX" },
     { "port": "B", "pin": 2, "label": "I2C_SCL", "direction": "input", "_usage": "I2C0 SCL" },

@@ -5,7 +5,8 @@ param(
     [ValidateSet("car-4wd", "car-2wd")]
     [string]$CarProject = "car-4wd",
     [switch]$EraseAll,
-    [switch]$EraseApps
+    [switch]$EraseApps,
+    [int]$Speed = 400
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
@@ -22,7 +23,7 @@ if ([string]::IsNullOrWhiteSpace($Image)) {
     }
     $base = $presets[$Target]
     if (-not $base) { throw "Unknown target: $Target. Valid: standalone, bootloader, app, factory" }
-    
+
     $elf = Join-Path $BuildDir "$base.elf"
     if (Test-Path $elf) { $Image = $elf }
     else {
@@ -41,6 +42,7 @@ Write-Host "Flashing $Image via JLink..." -ForegroundColor Cyan
 Write-Host "  Car:    $CarProject" -ForegroundColor DarkGray
 Write-Host "  Target: $Target" -ForegroundColor DarkGray
 Write-Host "  Image:  $Image" -ForegroundColor DarkGray
+Write-Host "  SWD:    ${Speed} kHz" -ForegroundColor DarkGray
 if ($EraseAll) {
     Write-Host "  Erase:  full chip (256 KB)" -ForegroundColor Yellow
 } elseif ($EraseApps) {
@@ -74,12 +76,12 @@ $eraseCmd = if ($EraseAll) {
     ""
 }
 
+# halt 后再 load；若仍连不上，按住 RESET 到出现 Connecting...
 $jlinkBody = @(
     "si SWD",
-    "speed 1000",
+    "speed $Speed",
     "device TM4C123GH6PM",
     "connect",
-    "r",
     "halt"
 )
 if ($eraseCmd) { $jlinkBody += $eraseCmd }
@@ -88,9 +90,29 @@ $jlinkBody += @("r", "g", "exit")
 
 ($jlinkBody -join "`n") + "`n" | Set-Content -Path $cmdFile -Encoding ASCII
 
-# Run JLink
+if (-not (Test-Path $JLinkExe)) {
+    throw "J-Link not found: $JLinkExe"
+}
+
 $log = Join-Path $tmpDir "jlink-flash.log"
-Start-Process -NoNewWindow -Wait -FilePath $JLinkExe -ArgumentList $cmdFile -RedirectStandardOutput $log
+Write-Host "  Tip: if connect fails, hold RESET during 'Connecting to target via SWD'" -ForegroundColor DarkGray
+
+$jlinkArgs = @("-AutoConnect", "1", "-CommanderScript", $cmdFile)
+$p = Start-Process -NoNewWindow -Wait -PassThru -FilePath $JLinkExe -ArgumentList $jlinkArgs -RedirectStandardOutput $log
+$logText = Get-Content $log -Raw
 Get-Content $log
+
+if ($logText -match 'Error occurred:' -or $logText -match 'Could not connect') {
+    Write-Host "J-Link connect/flash failed. See $log" -ForegroundColor Red
+    Write-Host "  1. Use -Target standalone for full car firmware (not app.elf @ 0x4000 only)" -ForegroundColor Yellow
+    Write-Host "  2. Unplug HC-SR04 Echo (PC1) if wired" -ForegroundColor Yellow
+    Write-Host "  3. Hold RESET, rerun flash, release when connecting" -ForegroundColor Yellow
+    exit 1
+}
+
+if ($p.ExitCode -ne 0) {
+    Write-Host "J-Link failed (exit $($p.ExitCode)). See $log" -ForegroundColor Red
+    exit $p.ExitCode
+}
 
 Write-Host "Done. See $log for details." -ForegroundColor Green

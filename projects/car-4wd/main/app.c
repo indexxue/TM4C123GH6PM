@@ -14,6 +14,7 @@
 #include "device_profile.h"
 #include "event.h"
 #include "imu.h"
+#include "led_scene.h"
 #include "log.h"
 #include "magnetometer.h"
 #include "nvs.h"
@@ -41,6 +42,7 @@
 #define APP_ATT_SAMPLE_HZ           (1000.0f / (float)APP_CTRL_PERIOD_MS)
 /** 每 N 个控制周期打印一次姿态（20ms * 1000 = 20s） */
 #define APP_ATT_LOG_INTERVAL        (1000U)
+#define APP_LED_SCENE_TICK_MS       (50U)
 
 /* -------------------------------------------------------------------------- */
 /* 心跳（在 app_evt 任务上下文采样，避免定时器回调里读 ADC）                   */
@@ -152,6 +154,9 @@ static void app_attitude_periodic(void)
 static void app_user_init(void)
 {
     status_t st;
+
+    led_scene_init();
+    led_scene_run(LED_SCENE_ID_BOOTUP);
 
     battery_init();
 
@@ -267,11 +272,19 @@ static void app_evt_dispatch_task(void *arg)
 static void app_tmr_tick_task(void *arg)
 {
     TickType_t last_wake = xTaskGetTickCount();
+    static uint32_t s_led_scene_elapsed_ms;
 
     (void)arg;
 
     for (;;) {
         vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(APP_CTRL_PERIOD_MS));
+        s_led_scene_elapsed_ms += APP_CTRL_PERIOD_MS;
+        if (s_led_scene_elapsed_ms >= APP_LED_SCENE_TICK_MS) {
+            s_led_scene_elapsed_ms -= APP_LED_SCENE_TICK_MS;
+            if (led_scene_is_active()) {
+                led_scene_update();
+            }
+        }
         event_set(EVT_ID_TIMER);
     }
 }
@@ -282,7 +295,7 @@ static void app_tmr_tick_task(void *arg)
 
 status_t App_Start(void)
 {
-    status_t st;
+    status_t st = STATUS_OK;
 
     if (nvs_init() != STATUS_OK) {
         bsp_uart_debug_puts("[app] nvs_init FAILED\r\n");

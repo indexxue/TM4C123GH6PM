@@ -12,6 +12,8 @@
 #include "driverlib/gpio.h"
 #include "driverlib/sysctl.h"
 
+#include "inc/hw_memmap.h"
+
 #define BSP_GPIO_PERIPH_READY_US 100000U
 
 static bool gpio_wait_port_ready(uint32_t port_mask)
@@ -74,6 +76,22 @@ bool bsp_gpio_port_enable(uint32_t port_mask)
     return gpio_wait_port_ready(port_mask);
 }
 
+void bsp_gpio_commit_locked_pins(uint32_t port_base, uint8_t pin_mask)
+{
+    uint8_t locked_pins;
+
+    if (port_base != GPIO_PORTC_BASE) {
+        return;
+    }
+
+    locked_pins = pin_mask & (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
+    if (locked_pins == 0U) {
+        return;
+    }
+
+    GPIOUnlockPin(port_base, locked_pins);
+}
+
 void bsp_gpio_configure(const bsp_gpio_pin_t *pin, bsp_gpio_dir_t dir, bsp_gpio_pull_t pull)
 {
     if (pin == NULL) {
@@ -81,10 +99,12 @@ void bsp_gpio_configure(const bsp_gpio_pin_t *pin, bsp_gpio_dir_t dir, bsp_gpio_
     }
 
     if (dir == BSP_GPIO_DIR_OUTPUT) {
+        bsp_gpio_commit_locked_pins(pin->port_base, pin->pin_mask);
         GPIOPinTypeGPIOOutput(pin->port_base, pin->pin_mask);
         return;
     }
 
+    bsp_gpio_commit_locked_pins(pin->port_base, pin->pin_mask);
     GPIOPinTypeGPIOInput(pin->port_base, pin->pin_mask);
     if (pull == BSP_GPIO_PULL_UP) {
         GPIOPadConfigSet(pin->port_base, pin->pin_mask, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);

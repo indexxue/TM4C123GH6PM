@@ -1,6 +1,6 @@
 /**
  * @file buzzer.h
- * @brief 无源蜂鸣器 PWM 驱动（Timer CCP @ GPIO_BUZZER_*）
+ * @brief 蜂鸣器驱动（有源 GPIO / 无源 Timer PWM，宏切换）
  */
 
 #ifndef BUZZER_H
@@ -12,6 +12,26 @@ extern "C" {
 
 #include <stdbool.h>
 #include <stdint.h>
+
+/** 蜂鸣器类型：有源（GPIO 电平）/ 无源（Timer PWM） */
+#define BUZZER_TYPE_ACTIVE   0
+#define BUZZER_TYPE_PASSIVE  1
+
+#ifndef BUZZER_TYPE
+#define BUZZER_TYPE BUZZER_TYPE_ACTIVE
+#endif
+
+#if (BUZZER_TYPE != BUZZER_TYPE_ACTIVE) && (BUZZER_TYPE != BUZZER_TYPE_PASSIVE)
+#error "BUZZER_TYPE must be BUZZER_TYPE_ACTIVE or BUZZER_TYPE_PASSIVE"
+#endif
+
+#if (BUZZER_TYPE == BUZZER_TYPE_ACTIVE)
+
+#ifndef BUZZER_ACTIVE_HIGH
+#define BUZZER_ACTIVE_HIGH 1
+#endif
+
+#endif /* BUZZER_TYPE_ACTIVE */
 
 #define BUZZER_FREQ_MIN_HZ          100U
 #define BUZZER_FREQ_MAX_HZ          20000U

@@ -105,8 +105,7 @@ bool Board_Periph_Init(void) {
         return false;
     }
     gpio_outputs(GPIO_PORTB_BASE, GPIO_PIN_1);
-    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_2 | GPIO_PIN_3);
-    gpio_inputs(GPIO_PORTC_BASE, GPIO_PIN_1, false);
+    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_3);
     GPIOPinConfigure(GPIO_PA0_U0RX);
     GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0);
     GPIOPinConfigure(GPIO_PA1_U0TX);
@@ -149,6 +148,20 @@ bool Board_Periph_Init(void) {
     if (!bsp_spi_init(&BOARD_SPI_CFG)) {
         return false;
     }
+    return true;
+}
+
+/**
+ * HC-SR04 GPIO（PC1=Echo/SWDIO, PC2=Trig）。
+ * 勿在 Board_Periph_Init 里初始化，否则 J-Link 只能烧录一次。
+ * 启用超声波前由驱动调用。
+ */
+bool Board_Ultra_Init(void) {
+    if (!bsp_gpio_port_enable(0x04u)) {
+        return false;
+    }
+    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_2);
+    gpio_inputs(GPIO_PORTC_BASE, GPIO_PIN_1, false);
     return true;
 }
 

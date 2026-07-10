@@ -45,6 +45,19 @@ BOARD_MUX_LABELS = frozenset(
     {"BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX", "BAT_ADC", "BTN_ADC"}
 )
 
+# TM4C123: PC0=SWCLK, PC1=SWDIO — 启动时配成 GPIO 会导致 J-Link 只能烧录一次
+TM4C123_SWD_GPIO = frozenset({("C", 0), ("C", 1)})
+DEFER_BOOT_GPIO_LABELS = frozenset({"ULTRA_ECHO", "ULTRA_TRIG"})
+
+
+def defer_gpio_at_boot(label: str, port: str, pin: int) -> bool:
+    """Return True if pin must not be touched in Board_Periph_Init (SWD reconnect)."""
+    if (port, pin) in TM4C123_SWD_GPIO:
+        return True
+    if label in DEFER_BOOT_GPIO_LABELS and port == "C" and pin in (1, 2):
+        return True
+    return False
+
 INCLUDES_GPIO = [
     "#include <stdbool.h>",
     "#include <stdint.h>",
@@ -191,6 +204,16 @@ class PinPlanner:
             self.inputs_pu[port] |= mask
         else:
             self.inputs[port] |= mask
+
+    def merge_gpio(self, other: PinPlanner) -> None:
+        """Merge GPIO direction maps (for gpio_helpers when init is split)."""
+        self._ports |= other._ports
+        for port, bits in other.outputs.items():
+            self.outputs[port] |= bits
+        for port, bits in other.inputs.items():
+            self.inputs[port] |= bits
+        for port, bits in other.inputs_pu.items():
+            self.inputs_pu[port] |= bits
 
     def add_mux(self, mux: str, port: str, pin: int, kind: str) -> None:
         self._ports.add(port)
@@ -753,6 +776,7 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
     labels = pin_label_map(gpio)
     adc_pins = adc_pin_set(modules)
     plan = PinPlanner()
+    deferred_plan = PinPlanner()
 
     for group in BOARD_GPIO_GROUPS:
         for label in gpio["pinout_groups"].get(group, []):
@@ -761,7 +785,8 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
             p = labels[label]
             if pin_label_to_str(p) in adc_pins:
                 continue
-            plan.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
+            target = deferred_plan if defer_gpio_at_boot(label, p["port"], p["pin"]) else plan
+            target.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
 
     uart = modules.get("uart_bt", {})
     for u in uart.get("uart", []):
@@ -846,6 +871,20 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
 
     body += ["    return true;", "}"]
 
+    if deferred_plan._ports:
+        body += [
+            "",
+            "/**",
+            " * HC-SR04 GPIO（PC1=Echo/SWDIO, PC2=Trig）。",
+            " * 勿在 Board_Periph_Init 里初始化，否则 J-Link 只能烧录一次。",
+            " * 启用超声波前由驱动调用。",
+            " */",
+            "bool Board_Ultra_Init(void) {",
+            *deferred_plan.emit_gpio_setup(guarded=True),
+            "    return true;",
+            "}",
+        ]
+
     for u in uart.get("uart", []):
         base = u["module"]
         body += [
@@ -877,6 +916,8 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
         ]
 
     protos = ["bool Board_UartDebug_Init(void);", "bool Board_Periph_Init(void);"]
+    if deferred_plan._ports:
+        protos.append("bool Board_Ultra_Init(void);")
     if uart.get("uart"):
         protos += [
             "void UART_Putc(char c);",
@@ -890,7 +931,19 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
             "int UART_Debug_Getc(char *c);",
         ]
 
-    write_module("board", INCLUDES_BOARD_BSP, body, protos, src_dir, header, section_title="Board", plan=plan)
+    gpio_helpers_plan = PinPlanner()
+    gpio_helpers_plan.merge_gpio(plan)
+    gpio_helpers_plan.merge_gpio(deferred_plan)
+    write_module(
+        "board",
+        INCLUDES_BOARD_BSP,
+        body,
+        protos,
+        src_dir,
+        header,
+        section_title="Board",
+        plan=gpio_helpers_plan,
+    )
 
 
 def gen_gpio_allocation_md(gpio: dict, out_path: Path, car_project: str) -> None:

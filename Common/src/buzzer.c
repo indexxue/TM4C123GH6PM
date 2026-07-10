@@ -1,11 +1,120 @@
 /**
  * @file buzzer.c
- * @brief 无源蜂鸣器 PWM 驱动（Timer CCP @ GPIO_BUZZER_*）
+ * @brief 蜂鸣器驱动（有源 GPIO / 无源 Timer PWM，由 BUZZER_TYPE 宏切换）
  */
 
 #include "buzzer.h"
 
 #include "board.h"
+
+static bool s_initialized;
+
+#if (BUZZER_TYPE == BUZZER_TYPE_ACTIVE)
+
+#include "bsp_gpio.h"
+#include "bsp_systick.h"
+
+static const bsp_gpio_pin_t s_buzzer_pin = {
+    .port_base = GPIO_BUZZER_PORT,
+    .pin_mask = GPIO_BUZZER_PIN,
+};
+
+#if (GPIO_BUZZER_PORT == GPIO_PORTA_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 0)
+#elif (GPIO_BUZZER_PORT == GPIO_PORTB_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 1)
+#elif (GPIO_BUZZER_PORT == GPIO_PORTC_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 2)
+#elif (GPIO_BUZZER_PORT == GPIO_PORTD_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 3)
+#elif (GPIO_BUZZER_PORT == GPIO_PORTE_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 4)
+#elif (GPIO_BUZZER_PORT == GPIO_PORTF_BASE)
+#define BUZZER_GPIO_PORT_MASK (1u << 5)
+#else
+#error "buzzer.c: unsupported GPIO_BUZZER port"
+#endif
+
+static void buzzer_set_on(bool on)
+{
+#if BUZZER_ACTIVE_HIGH
+    bsp_gpio_write(&s_buzzer_pin, on);
+#else
+    bsp_gpio_write(&s_buzzer_pin, !on);
+#endif
+}
+
+void buzzer_init(void)
+{
+    if (s_initialized) {
+        return;
+    }
+
+    (void)bsp_gpio_port_enable(BUZZER_GPIO_PORT_MASK);
+    bsp_gpio_configure(&s_buzzer_pin, BSP_GPIO_DIR_OUTPUT, BSP_GPIO_PULL_NONE);
+    buzzer_set_on(false);
+    s_initialized = true;
+}
+
+void buzzer_start(uint32_t freq_hz, uint8_t duty_percent)
+{
+    (void)freq_hz;
+
+    if (!s_initialized) {
+        buzzer_init();
+    }
+
+    if (duty_percent == 0U) {
+        buzzer_stop();
+        return;
+    }
+
+    buzzer_set_on(true);
+}
+
+void buzzer_stop(void)
+{
+    if (!s_initialized) {
+        return;
+    }
+
+    buzzer_set_on(false);
+}
+
+bool buzzer_beep(uint32_t freq_hz, uint32_t duration_ms)
+{
+    if (duration_ms == 0U) {
+        return false;
+    }
+
+    buzzer_start(freq_hz, BUZZER_DEFAULT_DUTY_PERCENT);
+    bsp_delay_ms(duration_ms);
+    buzzer_stop();
+    return true;
+}
+
+void buzzer_chirp(uint8_t count, uint32_t on_ms, uint32_t gap_ms)
+{
+    if (count == 0U) {
+        return;
+    }
+
+    if (!s_initialized) {
+        buzzer_init();
+    }
+
+    while (count-- > 0U) {
+        (void)buzzer_beep(0U, on_ms);
+        if ((count > 0U) && (gap_ms > 0U)) {
+            bsp_delay_ms(gap_ms);
+        }
+    }
+
+    buzzer_stop();
+}
+
+#else /* BUZZER_TYPE_PASSIVE */
+
 #include "bsp_gpio.h"
 #include "bsp_systick.h"
 #include "bsp_sysctl.h"
@@ -50,7 +159,6 @@ static const buzzer_hw_t s_buzzer_hw = {
 #error "buzzer.c: unsupported GPIO_BUZZER pin — add Timer CCP mapping"
 #endif
 
-static bool s_initialized;
 static uint32_t s_running_freq_hz;
 
 static bool buzzer_calc_period(uint32_t freq_hz, uint32_t *period)
@@ -179,3 +287,5 @@ void buzzer_chirp(uint8_t count, uint32_t on_ms, uint32_t gap_ms)
 
     buzzer_stop();
 }
+
+#endif /* BUZZER_TYPE */

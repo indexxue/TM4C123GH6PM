@@ -25,6 +25,8 @@ typedef enum {
 } bsp_gpio_pull_t;
 
 bool bsp_gpio_port_enable(uint32_t port_mask);
+/** TM4C123：释放 Port C 的 JTAG 锁定引脚（PC0–PC3）为 GPIO；勿 commit PC0/PC1 若需 SWD 调试 */
+void bsp_gpio_commit_locked_pins(uint32_t port_base, uint8_t pin_mask);
 void bsp_gpio_configure(const bsp_gpio_pin_t *pin, bsp_gpio_dir_t dir, bsp_gpio_pull_t pull);
 void bsp_gpio_write(const bsp_gpio_pin_t *pin, bool high);
 bool bsp_gpio_read(const bsp_gpio_pin_t *pin);
