@@ -83,7 +83,7 @@ docs/                   # 设计文档
 |------|------|-----------|
 | 4 路电机 PWM | Timer0/1 | PB6/PB7, PB4/PB5 @ 10 kHz |
 | 方向控制 | GPIO | PF4/PC7 (M1), PC4/PA6 (M2), PA7/PF0 (M3), PF1/PF2 (M4) |
-| 编码器 | QEI1/QEI0 + GPIO 软件 | M1/M2 硬件 QEI：PC5/PC6、PD6/PD7；M3/M4 软件：PF3/PD4、PD5/PB0 |
+| 编码器 | GPIO 软件（`bsp_sw_qei`） | 四路均为软件正交解码；M1 PC5/PC6、M2 PD6/PD7、M3 PF3/PD4、M4 PD5/PB0 |
 | 蓝牙 | UART0 | PA0/PA1 @ 115200 — **协议层**（遥控/上位机通信，非 CMD） |
 | 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
 | I2C 总线 | I2C0 软件（GPIO 位操作） | PB2/PB3 — MPU6050@0x69、QMC5883P@0x2C（暂无 OLED） |
@@ -123,6 +123,13 @@ docs/                   # 设计文档
 - **不要手改** `projects/*/board/src/{motor,encoder,line,board}.c`（改对应 `.syscfg` 后重新编译）
 - 提交前本地编译通过；提交信息简短中文/英文，说明做了什么/为什么
 - `build.ps1` 使用 `-mfloat-abi=hard` + FPU（以 PowerShell 脚本为准）
+
+## 编码器硬件说明（car-4wd）
+
+- **板级 RC 滤波**：每路编码器 A/B 相在进 MCU 前串联 **RC 低通滤波**；边沿被钝化后 **硬件 QEI 模块实测不计数**（GPIO 读 ab 与软件解码仍有效）。
+- **M2 引脚 PD6/PD7**：手册规定 **QEI0 PhA0/PhB0** 映射 PD6/PD7，**芯片支持**；其中 **PD7 默认为 NMI 锁定引脚**，须 `GPIOUnlockPin`/`bsp_gpio_commit_locked_pins` 后才能作 GPIO/QEI（M1 的 PC5/PC6 无此问题）。
+- **固件策略**：`car-4wd` 四路编码器统一走 **`bsp_sw_qei`**（GPIO 边沿中断 + 4x 正交表）；`bsp_qei` 保留给 **car-2wd** 等无 RC 滤波、可硬件 QEI 的板型。
+- **验证**：手转对应电机时 `Encoder_GetCount(0..3)` 应对应 M1..M4 变化；500 ms 采样偏稀，启动验证阶段会 1 ms 轮询 `bsp_sw_qei_poll`。
 
 ## 厂测启动卡死排障（高频）
 

@@ -7,6 +7,7 @@
 
 #include <stddef.h>
 
+#include "bsp_gpio.h"
 #include "driverlib/gpio.h"
 #include "driverlib/interrupt.h"
 #include "inc/hw_ints.h"
@@ -76,6 +77,11 @@ static void sw_qei_port_handler(uint32_t port_base)
     GPIOIntClear(port_base, status);
 }
 
+static void sw_qei_portc_handler(void)
+{
+    sw_qei_port_handler(GPIO_PORTC_BASE);
+}
+
 static void sw_qei_portb_handler(void)
 {
     sw_qei_port_handler(GPIO_PORTB_BASE);
@@ -93,6 +99,7 @@ static void sw_qei_portf_handler(void)
 
 static void sw_qei_arm_pin(const bsp_gpio_pin_t *pin)
 {
+    bsp_gpio_commit_locked_pins(pin->port_base, pin->pin_mask);
     GPIOIntTypeSet(pin->port_base, pin->pin_mask, GPIO_BOTH_EDGES);
     GPIOIntEnable(pin->port_base, pin->pin_mask);
 }
@@ -124,6 +131,7 @@ void bsp_sw_qei_enable(void)
 {
     uint8_t i;
     bool port_b = false;
+    bool port_c = false;
     bool port_d = false;
     bool port_f = false;
 
@@ -140,6 +148,9 @@ void bsp_sw_qei_enable(void)
         if (st->ch.pin_a.port_base == GPIO_PORTB_BASE || st->ch.pin_b.port_base == GPIO_PORTB_BASE) {
             port_b = true;
         }
+        if (st->ch.pin_a.port_base == GPIO_PORTC_BASE || st->ch.pin_b.port_base == GPIO_PORTC_BASE) {
+            port_c = true;
+        }
         if (st->ch.pin_a.port_base == GPIO_PORTD_BASE || st->ch.pin_b.port_base == GPIO_PORTD_BASE) {
             port_d = true;
         }
@@ -148,6 +159,9 @@ void bsp_sw_qei_enable(void)
         }
     }
 
+    if (port_c) {
+        sw_qei_enable_port(GPIO_PORTC_BASE, sw_qei_portc_handler, INT_GPIOC);
+    }
     if (port_b) {
         sw_qei_enable_port(GPIO_PORTB_BASE, sw_qei_portb_handler, INT_GPIOB);
     }
@@ -165,6 +179,28 @@ int32_t bsp_sw_qei_get_count(uint8_t index)
         return 0;
     }
     return s_sw_qei[index].count;
+}
+
+void bsp_sw_qei_poll(uint8_t index)
+{
+    if (index >= BSP_SW_QEI_MAX) {
+        return;
+    }
+    if (!s_sw_qei[index].used) {
+        return;
+    }
+    sw_qei_update(&s_sw_qei[index]);
+}
+
+uint8_t bsp_sw_qei_read_ab(uint8_t index)
+{
+    if (index >= BSP_SW_QEI_MAX) {
+        return 0U;
+    }
+    if (!s_sw_qei[index].used) {
+        return 0U;
+    }
+    return sw_qei_read_state(&s_sw_qei[index]);
 }
 
 void bsp_sw_qei_reset(uint8_t index)

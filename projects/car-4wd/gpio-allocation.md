@@ -18,10 +18,10 @@
 | PB7 | M2_PWM | 输出 | PWM0 CH1 |
 | PB4 | M3_PWM | 输出 | PWM0 CH2 |
 | PB5 | M4_PWM | 输出 | PWM0 CH3 |
-| PC5 | M1_ENCA | 输入 | QEI1 PHA |
-| PC6 | M1_ENCB | 输入 | QEI1 PHB |
-| PD6 | M2_ENCA | 输入 | QEI0 PHA |
-| PD7 | M2_ENCB | 输入 | QEI0 PHB |
+| PC5 | M1_ENCA | 输入 | SW encoder A (RC filter) |
+| PC6 | M1_ENCB | 输入 | SW encoder B (RC filter) |
+| PD6 | M2_ENCA | 输入 | SW encoder A (RC filter) |
+| PD7 | M2_ENCB | 输入 | SW encoder B (RC filter) |
 | PF3 | M3_ENCA | 输入 | SW encoder A |
 | PD4 | M3_ENCB | 输入 | SW encoder B |
 | PD5 | M4_ENCA | 输入 | SW encoder A |
@@ -71,7 +71,7 @@
 | PF1 | M4_IN1 | 输出 |
 | PF2 | M4_IN2 | 输出 |
 
-### 编码器 (QEI + 软件)
+### 编码器 (GPIO 软件 + RC 滤波)
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|

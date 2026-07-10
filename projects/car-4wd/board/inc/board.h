@@ -144,7 +144,6 @@
 #include "bsp_spi.h"
 #define BOARD_SYSCLK_HZ  80000000
 extern const bsp_pwm_config_t BOARD_PWM_CFG;
-extern const bsp_qei_config_t BOARD_QEI_CFG;
 extern const bsp_uart_config_t BOARD_UART_BT_CFG;
 extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;
 extern const bsp_i2c_config_t BOARD_I2C_CFG;

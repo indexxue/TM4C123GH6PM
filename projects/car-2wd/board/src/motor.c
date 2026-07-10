@@ -12,6 +12,7 @@
 
 static void gpio_outputs(uint32_t port, uint8_t pins)
 {
+    bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOOutput(port, pins);
 }
 

@@ -78,18 +78,19 @@ bool bsp_gpio_port_enable(uint32_t port_mask)
 
 void bsp_gpio_commit_locked_pins(uint32_t port_base, uint8_t pin_mask)
 {
-    uint8_t locked_pins;
+    uint8_t locked_pins = 0U;
 
-    if (port_base != GPIO_PORTC_BASE) {
-        return;
+    if (port_base == GPIO_PORTC_BASE) {
+        locked_pins = pin_mask & (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
+    } else if (port_base == GPIO_PORTD_BASE) {
+        locked_pins = pin_mask & GPIO_PIN_7;
+    } else if (port_base == GPIO_PORTF_BASE) {
+        locked_pins = pin_mask & GPIO_PIN_0;
     }
 
-    locked_pins = pin_mask & (GPIO_PIN_0 | GPIO_PIN_1 | GPIO_PIN_2 | GPIO_PIN_3);
-    if (locked_pins == 0U) {
-        return;
+    if (locked_pins != 0U) {
+        GPIOUnlockPin(port_base, locked_pins);
     }
-
-    GPIOUnlockPin(port_base, locked_pins);
 }
 
 void bsp_gpio_configure(const bsp_gpio_pin_t *pin, bsp_gpio_dir_t dir, bsp_gpio_pull_t pull)

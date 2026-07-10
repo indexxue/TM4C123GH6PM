@@ -22,6 +22,9 @@
 
 #include "bsp_uart.h"
 
+#include "bsp_systick.h"
+#include "bsp_sw_qei.h"
+
 #include "FreeRTOS.h"
 #include "task.h"
 
@@ -43,6 +46,11 @@
 /** 每 N 个控制周期打印一次姿态（20ms * 1000 = 20s） */
 #define APP_ATT_LOG_INTERVAL        (1000U)
 #define APP_LED_SCENE_TICK_MS       (50U)
+
+/** 编码器手转验证（M1/M2 = index 0/1，bsp_sw_qei + 1ms 轮询） */
+#define APP_ENC_VERIFY_MS           (20000U)
+#define APP_ENC_SAMPLE_MS           (500U)
+#define APP_ENC_POLL_US             (1000U)
 
 /* -------------------------------------------------------------------------- */
 /* 心跳（在 app_evt 任务上下文采样，避免定时器回调里读 ADC）                   */
@@ -148,7 +156,65 @@ static void app_attitude_periodic(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 业务钩子（本文件内 static，按需扩展）                                       */
+/* 编码器手转验证（car-4wd 四路均为 bsp_sw_qei，RC 滤波板不用硬件 QEI）       */
+/* -------------------------------------------------------------------------- */
+
+static void app_encoder_poll_all(void)
+{
+    bsp_sw_qei_poll(0U);
+    bsp_sw_qei_poll(1U);
+    bsp_sw_qei_poll(2U);
+    bsp_sw_qei_poll(3U);
+}
+
+static void app_encoder_poll_window(uint32_t window_ms)
+{
+    uint32_t elapsed_ms = 0U;
+
+    while (elapsed_ms < window_ms) {
+        app_encoder_poll_all();
+        bsp_delay_us(APP_ENC_POLL_US);
+        elapsed_ms += 1U;
+    }
+}
+
+static void app_encoder_verify(void)
+{
+    int32_t m1_start;
+    int32_t m2_start;
+    int32_t m1_now;
+    int32_t m2_now;
+    uint32_t elapsed_ms;
+
+    if (!device_profile_board_wants(DEVICE_BOARD_MASK_ENCODER)) {
+        return;
+    }
+
+    m1_start = Encoder_GetCount(0U);
+    m2_start = Encoder_GetCount(1U);
+    LOG_INFO("app: enc start M1=%ld M2=%ld ab1=%u ab2=%u",
+             (long)m1_start, (long)m2_start,
+             (unsigned)bsp_sw_qei_read_ab(0U),
+             (unsigned)bsp_sw_qei_read_ab(1U));
+    LOG_INFO("app: enc verify %lus — rotate M1 (PC5/6) then M2 (PD6/7) separately",
+             (unsigned long)(APP_ENC_VERIFY_MS / 1000U));
+
+    for (elapsed_ms = 0U; elapsed_ms < APP_ENC_VERIFY_MS; elapsed_ms += APP_ENC_SAMPLE_MS) {
+        app_encoder_poll_window(APP_ENC_SAMPLE_MS);
+        m1_now = Encoder_GetCount(0U);
+        m2_now = Encoder_GetCount(1U);
+        LOG_INFO("app: enc +%lums M1=%ld M2=%ld dM1=%ld dM2=%ld ab1=%u ab2=%u",
+                 (unsigned long)(elapsed_ms + APP_ENC_SAMPLE_MS),
+                 (long)m1_now, (long)m2_now,
+                 (long)(m1_now - m1_start), (long)(m2_now - m2_start),
+                 (unsigned)bsp_sw_qei_read_ab(0U),
+                 (unsigned)bsp_sw_qei_read_ab(1U));
+    }
+
+    LOG_INFO("app: enc done dM1=%ld dM2=%ld (non-zero => OK; M3/M4 index 2/3)",
+             (long)(m1_now - m1_start), (long)(m2_now - m2_start));
+}
+
 /* -------------------------------------------------------------------------- */
 
 static void app_user_init(void)
@@ -171,15 +237,7 @@ static void app_user_init(void)
     buzzer_init();
     buzzer_chirp(2U, BUZZER_DEFAULT_ON_MS, BUZZER_DEFAULT_GAP_MS);
 
-    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
-        LOG_INFO("app: motor open-loop demo 3s @ M1/M2");
-        Motor_SetSpeed(1U, cfg_motor_rpm(1U, 100));
-        Motor_SetSpeed(2U, cfg_motor_rpm(2U, 100));
-        vTaskDelay(pdMS_TO_TICKS(3000U));
-        Motor_SetSpeed(1U, 0);
-        Motor_SetSpeed(2U, 0);
-        LOG_INFO("app: motor demo done");
-    }
+    app_encoder_verify();
 }
 
 static void app_on_timer(void)

@@ -1,6 +1,6 @@
 /**
  * @file bsp_qei.h
- * @brief TM4C123 QEI 编码器薄封装
+ * @brief TM4C123 硬件 QEI 编码器薄封装（M1/M2 等，非 GPIO 软件解码）
  */
 
 #ifndef BSP_DRIVER_QEI_H
@@ -21,6 +21,9 @@ typedef struct {
 } bsp_qei_config_t;
 
 bool bsp_qei_init(const bsp_qei_config_t *cfg);
+bool bsp_qei_is_enabled(uint32_t qei_base);
+uint32_t bsp_qei_ctl_get(uint32_t qei_base);
+bool bsp_qei_has_error(uint32_t qei_base);
 int32_t bsp_qei_get_position(uint32_t qei_base);
 void bsp_qei_reset(uint32_t qei_base);
 

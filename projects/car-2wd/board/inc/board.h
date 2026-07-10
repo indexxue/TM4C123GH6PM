@@ -137,6 +137,7 @@ void Line_Init(void);
 /* --- Board --- */
 bool Board_UartDebug_Init(void);
 bool Board_Periph_Init(void);
+bool Board_Ultra_Init(void);
 void UART_Putc(char c);
 void UART_Puts(const char* s);
 int UART_Getc(char *c);

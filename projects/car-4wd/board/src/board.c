@@ -16,11 +16,13 @@
 
 static void gpio_outputs(uint32_t port, uint8_t pins)
 {
+    bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOOutput(port, pins);
 }
 
 static void gpio_inputs(uint32_t port, uint8_t pins, bool pullup)
 {
+    bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOInput(port, pins);
     if (pullup) {
         GPIOPadConfigSet(port, pins, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
@@ -37,15 +39,6 @@ const bsp_pwm_config_t BOARD_PWM_CFG = {
     .channels = board_pwm_channels,
     .channel_count = 4,
     .clock_hz = 80000000,
-};
-
-static const bsp_qei_channel_t board_qei_channels[] = {
-    { QEI1_BASE, SYSCTL_PERIPH_QEI1 },
-    { QEI0_BASE, SYSCTL_PERIPH_QEI0 },
-};
-const bsp_qei_config_t BOARD_QEI_CFG = {
-    .channels = board_qei_channels,
-    .channel_count = 2,
 };
 
 const bsp_uart_config_t BOARD_UART_BT_CFG = { UART0_BASE, 115200 };

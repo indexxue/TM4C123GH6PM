@@ -39,9 +39,6 @@ void Start_Init(void)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         Motor_Init();
     }
-    if (device_profile_board_wants(DEVICE_BOARD_MASK_ENCODER)) {
-        Encoder_Init();
-    }
     if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
         Line_Init();
     }
@@ -49,6 +46,9 @@ void Start_Init(void)
         if (!Board_Periph_Init()) {
             bsp_uart_debug_puts("[start] Board_Periph_Init FAILED\r\n");
         }
+    }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_ENCODER)) {
+        Encoder_Init();
     }
 
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {

@@ -16,11 +16,13 @@
 
 static void gpio_outputs(uint32_t port, uint8_t pins)
 {
+    bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOOutput(port, pins);
 }
 
 static void gpio_inputs(uint32_t port, uint8_t pins, bool pullup)
 {
+    bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOInput(port, pins);
     if (pullup) {
         GPIOPadConfigSet(port, pins, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);
@@ -97,10 +99,9 @@ bool Board_UartDebug_Init(void) {
 }
 
 bool Board_Periph_Init(void) {
-    if (!bsp_gpio_port_enable(0x1Fu)) {
+    if (!bsp_gpio_port_enable(0x1Bu)) {
         return false;
     }
-    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_0);
     gpio_inputs(GPIO_PORTD_BASE, GPIO_PIN_5, false);
     gpio_outputs(GPIO_PORTE_BASE, GPIO_PIN_4 | GPIO_PIN_5);
     GPIOPinConfigure(GPIO_PB0_U1RX);
@@ -111,10 +112,6 @@ bool Board_Periph_Init(void) {
     GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_0);
     GPIOPinConfigure(GPIO_PE1_U7TX);
     GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_1);
-    GPIOPinConfigure(GPIO_PB2_I2C0SCL);
-    GPIOPinTypeI2C(GPIO_PORTB_BASE, GPIO_PIN_2);
-    GPIOPinConfigure(GPIO_PB3_I2C0SDA);
-    GPIOPinTypeI2C(GPIO_PORTB_BASE, GPIO_PIN_3);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_2);
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_2);
@@ -147,6 +144,19 @@ bool Board_Periph_Init(void) {
     if (!bsp_spi_init(&BOARD_SPI_CFG)) {
         return false;
     }
+    return true;
+}
+
+/**
+ * HC-SR04 GPIO（PC1=Echo/SWDIO, PC2=Trig）。
+ * 勿在 Board_Periph_Init 里初始化，否则 J-Link 只能烧录一次。
+ * 启用超声波前由驱动调用。
+ */
+bool Board_Ultra_Init(void) {
+    if (!bsp_gpio_port_enable(0x04u)) {
+        return false;
+    }
+    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_0);
     return true;
 }
 

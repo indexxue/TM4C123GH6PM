@@ -126,6 +126,7 @@ def gpio_helpers(plan: PinPlanner) -> str:
         parts += [
             "static void gpio_outputs(uint32_t port, uint8_t pins)",
             "{",
+            "    bsp_gpio_commit_locked_pins(port, pins);",
             "    GPIOPinTypeGPIOOutput(port, pins);",
             "}",
         ]
@@ -134,6 +135,7 @@ def gpio_helpers(plan: PinPlanner) -> str:
             "",
             "static void gpio_inputs(uint32_t port, uint8_t pins, bool pullup)",
             "{",
+            "    bsp_gpio_commit_locked_pins(port, pins);",
             "    GPIOPinTypeGPIOInput(port, pins);",
             "    if (pullup) {",
             "        GPIOPadConfigSet(port, pins, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);",
@@ -237,6 +239,24 @@ class PinPlanner:
             self.mux_lines.append(
                 f"    GPIOPinTypeSSI(GPIO_PORT{port}_BASE, GPIO_PIN_{pin});"
             )
+
+    def emit_gpio_inputs(self) -> list[str]:
+        lines: list[str] = []
+        for port in sorted(self._ports):
+            base = f"GPIO_PORT{port}_BASE"
+            in_m = self.inputs[port]
+            pu_m = self.inputs_pu[port]
+            if in_m:
+                lines.append(f"    gpio_inputs({base}, {self._mask(in_m)}, false);")
+            if pu_m:
+                lines.append(f"    gpio_inputs({base}, {self._mask(pu_m)}, true);")
+        return lines
+
+    def merge_planner(self, other: PinPlanner) -> None:
+        self.merge_gpio(other)
+        self.mux_lines.extend(other.mux_lines)
+        for port, bits in other.timer_pins.items():
+            self.timer_pins[port] |= bits
 
     def port_mask(self) -> int:
         return sum(1 << self.PORT_BIT[p] for p in self._ports)
@@ -490,8 +510,12 @@ def add_qei_mux(plan: PinPlanner, enc: dict) -> None:
         plan.mux_lines.append(f"    GPIOPinConfigure({qei_gpio_mux(pin, enc['qei'], role)});")
         pins_by_port[port] |= 1 << pin_num
     for port, mask in sorted(pins_by_port.items()):
+        base = f"GPIO_PORT{port}_BASE"
+        m = PinPlanner._mask(mask)
+        plan.mux_lines.append(f"    bsp_gpio_commit_locked_pins({base}, {m});")
+        plan.mux_lines.append(f"    GPIOPinTypeQEI({base}, {m});")
         plan.mux_lines.append(
-            f"    GPIOPinTypeQEI(GPIO_PORT{port}_BASE, {PinPlanner._mask(mask)});"
+            f"    GPIOPadConfigSet({base}, {m}, GPIO_STRENGTH_2MA, GPIO_PIN_TYPE_STD_WPU);"
         )
 
 
@@ -611,7 +635,8 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
 
 
 def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> None:
-    plan = PinPlanner()
+    qei_plan = PinPlanner()
+    sw_plan = PinPlanner()
     timer_encoders: list[dict] = []
     qei_encoders: list[dict] = []
     gpio_encoders: list[dict] = []
@@ -624,29 +649,39 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
         iface = enc.get("interface", "timer")
         if iface == "qei":
             qei_encoders.append(enc)
-            add_qei_mux(plan, enc)
+            add_qei_mux(qei_plan, enc)
         elif iface == "gpio":
             gpio_encoders.append(enc)
             for pin_key in ("pin_a", "pin_b"):
                 port, pin = parse_pin(enc[pin_key])
-                plan.add_pin(port, pin, "input", pull="up")
+                sw_plan.add_pin(port, pin, "input", pull="up")
         else:
             timer_encoders.append(enc)
             for pin_key, channel in (("pin_a", "A"), ("pin_b", "B")):
                 port, pin = parse_pin(enc[pin_key])
                 mux = timer_ccp_mux(enc[pin_key], enc["timer"], channel)
-                plan.add_mux(mux, port, pin, "timer")
+                qei_plan.add_mux(mux, port, pin, "timer")
 
+    combined = PinPlanner()
+    combined.merge_planner(qei_plan)
+    combined.merge_planner(sw_plan)
+
+    port_mask = qei_plan.port_mask() | sw_plan.port_mask()
     body = ["void Encoder_Init(void) {"]
-    body += plan.emit_gpio_setup()
+    if port_mask:
+        body.append(f"    (void)bsp_gpio_port_enable(0x{port_mask:02X}u);")
+    if qei_encoders:
+        body.append("    /* SDK 顺序：GPIO 时钟 → QEI 时钟 → pin mux → QEIConfigure → QEIEnable */")
+        for qei in sorted({enc["qei"] for enc in qei_encoders}):
+            body.append(f"    SysCtlPeripheralEnable(SYSCTL_PERIPH_{qei});")
+        body.extend(qei_plan.mux_lines)
+        body.append("    (void)bsp_qei_init(&BOARD_QEI_CFG);")
     if gpio_encoders:
+        body.extend(sw_plan.emit_gpio_inputs())
         body += emit_sw_qei_register(gpio_encoders)
+        body += ["    bsp_sw_qei_enable();"]
     if timer_encoders:
         body += emit_timer_capture_init(timer_encoders)
-    if qei_encoders:
-        body += ["    bsp_qei_init(&BOARD_QEI_CFG);"]
-    if gpio_encoders:
-        body += ["    bsp_sw_qei_enable();"]
     body.append("}")
 
     protos = ["#include <stdint.h>", "void Encoder_Init(void);"]
@@ -669,7 +704,7 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
         body += ["    default: return 0;", "    }", "}"]
         protos.append("int32_t Encoder_GetCount(uint8_t index);")
 
-    write_module("encoder", includes, body, protos, src_dir, header, section_title="Encoder", plan=plan)
+    write_module("encoder", includes, body, protos, src_dir, header, section_title="Encoder", plan=combined)
 
 
 def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardHeader) -> None:
