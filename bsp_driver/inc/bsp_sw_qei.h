@@ -1,6 +1,6 @@
 /**
  * @file bsp_sw_qei.h
- * @brief GPIO 边沿中断软件正交解码（M3/M4 等无硬件 QEI 通道）
+ * @brief GPIO 轮询 + 4x 正交状态表软件正交解码（RC 滤波板四路编码器）
  */
 
 #ifndef BSP_DRIVER_SW_QEI_H
@@ -21,6 +21,7 @@ void bsp_sw_qei_enable(void);
 int32_t bsp_sw_qei_get_count(uint8_t index);
 void bsp_sw_qei_reset(uint8_t index);
 void bsp_sw_qei_poll(uint8_t index);
+void bsp_sw_qei_poll_all(void);
 uint8_t bsp_sw_qei_read_ab(uint8_t index);
 
 #endif /* BSP_DRIVER_SW_QEI_H */

@@ -22,10 +22,10 @@
 | PC6 | M1_ENCB | 输入 | SW encoder B (RC filter) |
 | PD6 | M2_ENCA | 输入 | SW encoder A (RC filter) |
 | PD7 | M2_ENCB | 输入 | SW encoder B (RC filter) |
-| PF3 | M3_ENCA | 输入 | SW encoder A |
-| PD4 | M3_ENCB | 输入 | SW encoder B |
-| PD5 | M4_ENCA | 输入 | SW encoder A |
-| PB0 | M4_ENCB | 输入 | SW encoder B |
+| PF3 | M3_ENCA | 输入 | SW encoder A (RC filter) |
+| PD4 | M3_ENCB | 输入 | SW encoder B (RC filter) |
+| PD5 | M4_ENCA | 输入 | SW encoder A (RC filter) |
+| PB0 | M4_ENCB | 输入 | SW encoder B (RC filter) |
 | PE3 | BAT_ADC | 输入 | ADC1 AIN0 battery |
 | PE2 | BTN_ADC | 输入 | ADC1 AIN1 button |
 | PD3 | LINE1 | 输入 | ADC1 AIN4 line 1 |

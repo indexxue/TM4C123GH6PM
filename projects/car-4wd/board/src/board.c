@@ -41,6 +41,15 @@ const bsp_pwm_config_t BOARD_PWM_CFG = {
     .clock_hz = 80000000,
 };
 
+static const bsp_qei_channel_t board_qei_channels[] = {
+    { QEI1_BASE, SYSCTL_PERIPH_QEI1 },
+    { QEI0_BASE, SYSCTL_PERIPH_QEI0 },
+};
+const bsp_qei_config_t BOARD_QEI_CFG = {
+    .channels = board_qei_channels,
+    .channel_count = 2,
+};
+
 const bsp_uart_config_t BOARD_UART_BT_CFG = { UART0_BASE, 115200 };
 
 const bsp_uart_config_t BOARD_UART_DEBUG_CFG = { UART7_BASE, 115200 };

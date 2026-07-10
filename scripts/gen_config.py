@@ -551,6 +551,14 @@ def encoder_get_count_expr(enc: dict, gpio_index: int) -> str:
     return "0"
 
 
+def encoder_reset_stmt(enc: dict, gpio_index: int) -> str:
+    if enc.get("interface") == "qei":
+        return f"bsp_qei_reset({enc['qei']}_BASE);"
+    if enc.get("interface") == "gpio":
+        return f"bsp_sw_qei_reset({gpio_index});"
+    return "(void)0;"
+
+
 def emit_timer_capture_init(encoders: list[dict]) -> list[str]:
     lines: list[str] = []
     for enc in encoders:
@@ -703,6 +711,19 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
                 body.append(f"    case {i}: return {encoder_get_count_expr(enc, 0)};")
         body += ["    default: return 0;", "    }", "}"]
         protos.append("int32_t Encoder_GetCount(uint8_t index);")
+        body += [
+            "",
+            "void Encoder_ResetCount(uint8_t index)",
+            "{",
+            "    switch (index) {",
+        ]
+        gpio_index = 0
+        for i, enc in enumerate(all_encoders):
+            body.append(f"    case {i}: {encoder_reset_stmt(enc, gpio_index)} break;")
+            if enc.get("interface") == "gpio":
+                gpio_index += 1
+        body += ["    default: break;", "    }", "}"]
+        protos.append("void Encoder_ResetCount(uint8_t index);")
 
     write_module("encoder", includes, body, protos, src_dir, header, section_title="Encoder", plan=combined)
 

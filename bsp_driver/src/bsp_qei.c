@@ -16,6 +16,8 @@
 #include "inc/hw_types.h"
 
 #define BSP_QEI_PERIPH_READY_US 100000U
+/** TM4C123：QEIMAXPOS=0 时位置在下一正向边沿即回绕，读数恒为 0 */
+#define BSP_QEI_MAX_POSITION      0xFFFFFFFFU
 
 static bool qei_channel_init(const bsp_qei_channel_t *ch)
 {
@@ -31,9 +33,9 @@ static bool qei_channel_init(const bsp_qei_channel_t *ch)
     QEIDisable(ch->qei_base);
     QEIConfigure(ch->qei_base,
                  QEI_CONFIG_CAPTURE_A_B | QEI_CONFIG_NO_RESET | QEI_CONFIG_QUADRATURE | QEI_CONFIG_NO_SWAP,
-                 0U);
+                 BSP_QEI_MAX_POSITION);
     QEIFilterConfigure(ch->qei_base, QEI_FILTCNT_2);
-    QEIFilterEnable(ch->qei_base);
+    QEIFilterDisable(ch->qei_base);
     QEIPositionSet(ch->qei_base, 0U);
     QEIEnable(ch->qei_base);
 

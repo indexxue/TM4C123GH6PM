@@ -3,13 +3,15 @@
   "encoder": [
     {
       "name": "M1",
-      "interface": "gpio",
+      "interface": "qei",
+      "qei": "QEI1",
       "pin_a": "PC5",
       "pin_b": "PC6"
     },
     {
       "name": "M2",
-      "interface": "gpio",
+      "interface": "qei",
+      "qei": "QEI0",
       "pin_a": "PD6",
       "pin_b": "PD7"
     },

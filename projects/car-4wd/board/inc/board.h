@@ -144,6 +144,7 @@
 #include "bsp_spi.h"
 #define BOARD_SYSCLK_HZ  80000000
 extern const bsp_pwm_config_t BOARD_PWM_CFG;
+extern const bsp_qei_config_t BOARD_QEI_CFG;
 extern const bsp_uart_config_t BOARD_UART_BT_CFG;
 extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;
 extern const bsp_i2c_config_t BOARD_I2C_CFG;
@@ -169,6 +170,7 @@ void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);
 /* --- Encoder --- */
 void Encoder_Init(void);
 int32_t Encoder_GetCount(uint8_t index);
+void Encoder_ResetCount(uint8_t index);
 
 /* --- Line --- */
 void Line_Init(void);
