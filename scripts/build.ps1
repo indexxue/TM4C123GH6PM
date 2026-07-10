@@ -97,6 +97,7 @@ function Get-BspSources {
         (Join-Path $BspSrc "bsp_adc.c"),
         (Join-Path $BspSrc "bsp_timer.c"),
         (Join-Path $BspSrc "bsp_qei.c"),
+        (Join-Path $BspSrc "bsp_sw_qei.c"),
         (Join-Path $BspSrc "bsp_dma.c"),
         (Join-Path $BspSrc "bsp_spi.c"),
         (Join-Path $BspSrc "bsp_dac.c"),

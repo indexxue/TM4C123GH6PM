@@ -82,8 +82,8 @@ docs/                   # 设计文档
 | 功能 | 接口 | 引脚/模块 |
 |------|------|-----------|
 | 4 路电机 PWM | Timer0/1 | PB6/PB7, PB4/PB5 @ 10 kHz |
-| 方向控制 | GPIO | PF4/PC7, PC4/PD4, PD5/PA6, PA7/PF0 |
-| 编码器 | QEI1/QEI0 | PC5/PC6 (M3), PD6/PD7 (M4) |
+| 方向控制 | GPIO | PF4/PC7 (M1), PC4/PA6 (M2), PA7/PF0 (M3), PF1/PF2 (M4) |
+| 编码器 | QEI1/QEI0 + GPIO 软件 | M1/M2 硬件 QEI：PC5/PC6、PD6/PD7；M3/M4 软件：PF3/PD4、PD5/PB0 |
 | 蓝牙 | UART0 | PA0/PA1 @ 115200 — **协议层**（遥控/上位机通信，非 CMD） |
 | 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
 | I2C 总线 | I2C0 软件（GPIO 位操作） | PB2/PB3 — MPU6050@0x69、QMC5883P@0x2C（暂无 OLED） |

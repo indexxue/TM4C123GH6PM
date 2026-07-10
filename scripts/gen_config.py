@@ -495,6 +495,38 @@ def add_qei_mux(plan: PinPlanner, enc: dict) -> None:
         )
 
 
+def gpio_port_base(port: str) -> str:
+    return f"GPIO_PORT{port}_BASE"
+
+
+def gpio_pin_mask(pin: str) -> str:
+    _port, num = parse_pin(pin)
+    return f"GPIO_PIN_{num}"
+
+
+def emit_sw_qei_register(gpio_encoders: list[dict]) -> list[str]:
+    lines: list[str] = []
+    for i, enc in enumerate(gpio_encoders):
+        pa = enc["pin_a"]
+        pb = enc["pin_b"]
+        lines += [
+            f"    static const bsp_sw_qei_channel_t sw_enc_{i} = {{",
+            f"        .pin_a = {{ {gpio_port_base(parse_pin(pa)[0])}, {gpio_pin_mask(pa)} }},",
+            f"        .pin_b = {{ {gpio_port_base(parse_pin(pb)[0])}, {gpio_pin_mask(pb)} }},",
+            f"    }};",
+            f"    (void)bsp_sw_qei_register({i}, &sw_enc_{i});",
+        ]
+    return lines
+
+
+def encoder_get_count_expr(enc: dict, gpio_index: int) -> str:
+    if enc.get("interface") == "qei":
+        return f"bsp_qei_get_position({enc['qei']}_BASE)"
+    if enc.get("interface") == "gpio":
+        return f"bsp_sw_qei_get_count({gpio_index})"
+    return "0"
+
+
 def emit_timer_capture_init(encoders: list[dict]) -> list[str]:
     lines: list[str] = []
     for enc in encoders:
@@ -582,10 +614,22 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
     plan = PinPlanner()
     timer_encoders: list[dict] = []
     qei_encoders: list[dict] = []
-    for enc in mod.get("encoder", []):
-        if enc.get("interface") == "qei":
+    gpio_encoders: list[dict] = []
+    all_encoders = mod.get("encoder", [])
+    includes = list(INCLUDES_ENCODER_BSP)
+    if any(enc.get("interface") == "gpio" for enc in all_encoders):
+        includes.append('#include "bsp_sw_qei.h"')
+
+    for enc in all_encoders:
+        iface = enc.get("interface", "timer")
+        if iface == "qei":
             qei_encoders.append(enc)
             add_qei_mux(plan, enc)
+        elif iface == "gpio":
+            gpio_encoders.append(enc)
+            for pin_key in ("pin_a", "pin_b"):
+                port, pin = parse_pin(enc[pin_key])
+                plan.add_pin(port, pin, "input", pull="up")
         else:
             timer_encoders.append(enc)
             for pin_key, channel in (("pin_a", "A"), ("pin_b", "B")):
@@ -595,26 +639,37 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
 
     body = ["void Encoder_Init(void) {"]
     body += plan.emit_gpio_setup()
+    if gpio_encoders:
+        body += emit_sw_qei_register(gpio_encoders)
     if timer_encoders:
         body += emit_timer_capture_init(timer_encoders)
     if qei_encoders:
         body += ["    bsp_qei_init(&BOARD_QEI_CFG);"]
+    if gpio_encoders:
+        body += ["    bsp_sw_qei_enable();"]
     body.append("}")
 
     protos = ["#include <stdint.h>", "void Encoder_Init(void);"]
-    if qei_encoders:
+    if all_encoders:
         body += [
             "",
             "int32_t Encoder_GetCount(uint8_t index)",
             "{",
             "    switch (index) {",
         ]
-        for i, enc in enumerate(qei_encoders):
-            body.append(f"    case {i}: return bsp_qei_get_position({enc['qei']}_BASE);")
+        gpio_index = 0
+        for i, enc in enumerate(all_encoders):
+            if enc.get("interface") == "gpio":
+                body.append(
+                    f"    case {i}: return {encoder_get_count_expr(enc, gpio_index)};"
+                )
+                gpio_index += 1
+            else:
+                body.append(f"    case {i}: return {encoder_get_count_expr(enc, 0)};")
         body += ["    default: return 0;", "    }", "}"]
         protos.append("int32_t Encoder_GetCount(uint8_t index);")
 
-    write_module("encoder", INCLUDES_ENCODER_BSP, body, protos, src_dir, header, section_title="Encoder", plan=plan)
+    write_module("encoder", includes, body, protos, src_dir, header, section_title="Encoder", plan=plan)
 
 
 def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardHeader) -> None:

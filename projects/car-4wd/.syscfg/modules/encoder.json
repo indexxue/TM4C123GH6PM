@@ -2,18 +2,30 @@
   "module": "encoder",
   "encoder": [
     {
-      "name": "M3",
+      "name": "M1",
       "interface": "qei",
       "qei": "QEI1",
       "pin_a": "PC5",
       "pin_b": "PC6"
     },
     {
-      "name": "M4",
+      "name": "M2",
       "interface": "qei",
       "qei": "QEI0",
       "pin_a": "PD6",
       "pin_b": "PD7"
+    },
+    {
+      "name": "M3",
+      "interface": "gpio",
+      "pin_a": "PF3",
+      "pin_b": "PD4"
+    },
+    {
+      "name": "M4",
+      "interface": "gpio",
+      "pin_a": "PD5",
+      "pin_b": "PB0"
     }
   ]
 }

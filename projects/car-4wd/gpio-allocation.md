@@ -9,19 +9,23 @@
 | PF4 | M1_IN1 | 输出 | Motor 1 direction |
 | PC7 | M1_IN2 | 输出 | Motor 1 direction |
 | PC4 | M2_IN1 | 输出 | Motor 2 direction |
-| PD4 | M2_IN2 | 输出 | Motor 2 direction |
-| PD5 | M3_IN1 | 输出 | Motor 3 direction |
-| PA6 | M3_IN2 | 输出 | Motor 3 direction |
-| PA7 | M4_IN1 | 输出 | Motor 4 direction |
-| PF0 | M4_IN2 | 输出 | Motor 4 direction |
+| PA6 | M2_IN2 | 输出 | Motor 2 direction |
+| PA7 | M3_IN1 | 输出 | Motor 3 direction |
+| PF0 | M3_IN2 | 输出 | Motor 3 direction |
+| PF1 | M4_IN1 | 输出 | Motor 4 direction |
+| PF2 | M4_IN2 | 输出 | Motor 4 direction |
 | PB6 | M1_PWM | 输出 | PWM0 CH0 |
 | PB7 | M2_PWM | 输出 | PWM0 CH1 |
 | PB4 | M3_PWM | 输出 | PWM0 CH2 |
 | PB5 | M4_PWM | 输出 | PWM0 CH3 |
-| PC5 | M3_ENCA | 输入 | QEI1 PHA |
-| PC6 | M3_ENCB | 输入 | QEI1 PHB |
-| PD6 | M4_ENCA | 输入 | QEI0 PHA |
-| PD7 | M4_ENCB | 输入 | QEI0 PHB |
+| PC5 | M1_ENCA | 输入 | QEI1 PHA |
+| PC6 | M1_ENCB | 输入 | QEI1 PHB |
+| PD6 | M2_ENCA | 输入 | QEI0 PHA |
+| PD7 | M2_ENCB | 输入 | QEI0 PHB |
+| PF3 | M3_ENCA | 输入 | SW encoder A |
+| PD4 | M3_ENCB | 输入 | SW encoder B |
+| PD5 | M4_ENCA | 输入 | SW encoder A |
+| PB0 | M4_ENCB | 输入 | SW encoder B |
 | PE3 | BAT_ADC | 输入 | ADC1 AIN0 battery |
 | PE2 | BTN_ADC | 输入 | ADC1 AIN1 button |
 | PD3 | LINE1 | 输入 | ADC1 AIN4 line 1 |
@@ -61,20 +65,24 @@
 | PF4 | M1_IN1 | 输出 |
 | PC7 | M1_IN2 | 输出 |
 | PC4 | M2_IN1 | 输出 |
-| PD4 | M2_IN2 | 输出 |
-| PD5 | M3_IN1 | 输出 |
-| PA6 | M3_IN2 | 输出 |
-| PA7 | M4_IN1 | 输出 |
-| PF0 | M4_IN2 | 输出 |
+| PA6 | M2_IN2 | 输出 |
+| PA7 | M3_IN1 | 输出 |
+| PF0 | M3_IN2 | 输出 |
+| PF1 | M4_IN1 | 输出 |
+| PF2 | M4_IN2 | 输出 |
 
-### 编码器 (QEI)
+### 编码器 (QEI + 软件)
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PC5 | M3_ENCA | 输入 |
-| PC6 | M3_ENCB | 输入 |
-| PD6 | M4_ENCA | 输入 |
-| PD7 | M4_ENCB | 输入 |
+| PC5 | M1_ENCA | 输入 |
+| PC6 | M1_ENCB | 输入 |
+| PD6 | M2_ENCA | 输入 |
+| PD7 | M2_ENCB | 输入 |
+| PF3 | M3_ENCA | 输入 |
+| PD4 | M3_ENCB | 输入 |
+| PD5 | M4_ENCA | 输入 |
+| PB0 | M4_ENCB | 输入 |
 
 ### 通信接口
 
