@@ -46,7 +46,7 @@
   "pinout_groups": {
     "motor": ["M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2", "M3_IN1", "M3_IN2", "M4_IN1", "M4_IN2", "M1_PWM", "M2_PWM", "M3_PWM", "M4_PWM"],
     "encoder": ["M1_ENCA", "M1_ENCB", "M2_ENCA", "M2_ENCB", "M3_ENCA", "M3_ENCB", "M4_ENCA", "M4_ENCB"],
-    "line": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5", "LINE6"],
+    "line": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5"],
     "button": ["BTN_ADC"],
     "comm": ["BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX"],
     "sensor": ["BAT_ADC", "ULTRA_TRIG", "ULTRA_ECHO"],
@@ -57,7 +57,7 @@
     "方向控制 (8 路)": ["M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2", "M3_IN1", "M3_IN2", "M4_IN1", "M4_IN2"],
     "编码器 (GPIO 软件 + RC 滤波)": ["M1_ENCA", "M1_ENCB", "M2_ENCA", "M2_ENCB", "M3_ENCA", "M3_ENCB", "M4_ENCA", "M4_ENCB"],
     "通信接口": ["BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX"],
-    "循迹传感器 (ADC)": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5", "LINE6"],
+    "循迹传感器 (ADC)": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5"],
     "其他传感器": ["BAT_ADC", "ULTRA_TRIG", "ULTRA_ECHO"],
     "人机交互": ["BTN_ADC", "BUZZER", "RGB_LED"]
   }

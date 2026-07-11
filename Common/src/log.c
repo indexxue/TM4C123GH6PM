@@ -353,6 +353,10 @@ void log_notify_scheduler_running(void)
 {
     if (log_mutex == NULL) {
         log_mutex = xSemaphoreCreateMutex();
+        if (log_mutex == NULL) {
+            bsp_uart_debug_puts("[log] mutex create failed\r\n");
+            return;
+        }
     }
     log_scheduler_running = pdTRUE;
 }

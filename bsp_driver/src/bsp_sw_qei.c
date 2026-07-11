@@ -1,6 +1,6 @@
 /**
  * @file bsp_sw_qei.c
- * @brief GPIO 轮询 + 4x 正交状态表软件编码器（RC 滤波板，纯 poll 不用边沿中断）
+ * @brief GPIO 边沿中断 + 轮询备份的软件正交解码（M3/M4 等无硬件 QEI 通道）
  */
 
 #include "bsp_sw_qei.h"
@@ -10,10 +10,11 @@
 #include "bsp_gpio.h"
 #include "driverlib/gpio.h"
 #include "driverlib/interrupt.h"
+#include "inc/hw_ints.h"
 #include "inc/hw_memmap.h"
 
 #define BSP_SW_QEI_MAX        4U
-/** 每轮 poll_all 的最大解码步数（四路公平轮转，高速电机须足够大） */
+/** poll 备份：每轮公平轮转最大步数 */
 #define BSP_SW_QEI_POLL_BURST 256U
 
 typedef struct {
@@ -40,23 +41,29 @@ static uint8_t sw_qei_read_state(const bsp_sw_qei_state_t *st)
     return (uint8_t)((a << 1U) | b);
 }
 
-static bool sw_qei_poll_one_step(bsp_sw_qei_state_t *st)
+static bool sw_qei_decode_step(bsp_sw_qei_state_t *st)
 {
-    uint8_t state = sw_qei_read_state(st);
-    uint8_t delta = (uint8_t)(st->prev_state ^ state);
+    uint8_t state;
+    uint8_t delta;
     uint8_t idx;
     int8_t step;
+    bool progressed = false;
+
+    IntMasterDisable();
+    state = sw_qei_read_state(st);
+    delta = (uint8_t)(st->prev_state ^ state);
 
     if (delta == 0U) {
+        IntMasterEnable();
         return false;
     }
 
-    /* A/B 同时翻转：漏采中间态，按上次有效方向补 1 步后重同步 */
     if (delta == 3U) {
         if (st->last_step != 0) {
             st->count += st->last_step;
         }
         st->prev_state = state;
+        IntMasterEnable();
         return true;
     }
 
@@ -66,9 +73,11 @@ static bool sw_qei_poll_one_step(bsp_sw_qei_state_t *st)
     if (step != 0) {
         st->count += step;
         st->last_step = step;
+        progressed = true;
     }
 
-    return true;
+    IntMasterEnable();
+    return progressed;
 }
 
 static void sw_qei_poll_channel(bsp_sw_qei_state_t *st)
@@ -76,7 +85,7 @@ static void sw_qei_poll_channel(bsp_sw_qei_state_t *st)
     uint16_t n;
 
     for (n = 0U; n < BSP_SW_QEI_POLL_BURST; n++) {
-        if (!sw_qei_poll_one_step(st)) {
+        if (!sw_qei_decode_step(st)) {
             break;
         }
     }
@@ -91,7 +100,7 @@ static void sw_qei_poll_all_fair(void)
     for (round = 0U; round < BSP_SW_QEI_POLL_BURST; round++) {
         progressed = false;
         for (i = 0U; i < BSP_SW_QEI_MAX; i++) {
-            if (s_sw_qei[i].used && sw_qei_poll_one_step(&s_sw_qei[i])) {
+            if (s_sw_qei[i].used && sw_qei_decode_step(&s_sw_qei[i])) {
                 progressed = true;
             }
         }
@@ -99,6 +108,63 @@ static void sw_qei_poll_all_fair(void)
             break;
         }
     }
+}
+
+static void sw_qei_port_handler(uint32_t port_base)
+{
+    uint32_t status;
+    uint8_t i;
+
+    status = GPIOIntStatus(port_base, true);
+    for (i = 0U; i < BSP_SW_QEI_MAX; i++) {
+        bsp_sw_qei_state_t *st = &s_sw_qei[i];
+        uint8_t hit_mask;
+
+        if (!st->used) {
+            continue;
+        }
+
+        hit_mask = 0U;
+        if (st->ch.pin_a.port_base == port_base) {
+            hit_mask |= st->ch.pin_a.pin_mask;
+        }
+        if (st->ch.pin_b.port_base == port_base) {
+            hit_mask |= st->ch.pin_b.pin_mask;
+        }
+        if ((status & hit_mask) != 0U) {
+            (void)sw_qei_decode_step(st);
+        }
+    }
+    GPIOIntClear(port_base, status);
+}
+
+static void sw_qei_portb_handler(void)
+{
+    sw_qei_port_handler(GPIO_PORTB_BASE);
+}
+
+static void sw_qei_portd_handler(void)
+{
+    sw_qei_port_handler(GPIO_PORTD_BASE);
+}
+
+static void sw_qei_portf_handler(void)
+{
+    sw_qei_port_handler(GPIO_PORTF_BASE);
+}
+
+static void sw_qei_arm_pin(const bsp_gpio_pin_t *pin)
+{
+    bsp_gpio_commit_locked_pins(pin->port_base, pin->pin_mask);
+    GPIOIntTypeSet(pin->port_base, pin->pin_mask, GPIO_BOTH_EDGES);
+    GPIOIntEnable(pin->port_base, pin->pin_mask);
+}
+
+static void sw_qei_enable_port(uint32_t port_base, void (*handler)(void), uint32_t irqn)
+{
+    GPIOIntRegister(port_base, handler);
+    IntPrioritySet(irqn, 0x80U);
+    IntEnable(irqn);
 }
 
 bool bsp_sw_qei_register(uint8_t index, const bsp_sw_qei_channel_t *ch)
@@ -120,10 +186,41 @@ bool bsp_sw_qei_register(uint8_t index, const bsp_sw_qei_channel_t *ch)
 
 void bsp_sw_qei_enable(void)
 {
-    /*
-     * RC 滤波 + 电机 PWM 噪声下 GPIO 边沿中断易误触发并打乱 prev_state，
-     * 四路编码器统一纯轮询；引脚输入与上拉由 Encoder_Init 配置。
-     */
+    uint8_t i;
+    bool port_b = false;
+    bool port_d = false;
+    bool port_f = false;
+
+    for (i = 0U; i < BSP_SW_QEI_MAX; i++) {
+        const bsp_sw_qei_state_t *st = &s_sw_qei[i];
+
+        if (!st->used) {
+            continue;
+        }
+
+        sw_qei_arm_pin(&st->ch.pin_a);
+        sw_qei_arm_pin(&st->ch.pin_b);
+
+        if (st->ch.pin_a.port_base == GPIO_PORTB_BASE || st->ch.pin_b.port_base == GPIO_PORTB_BASE) {
+            port_b = true;
+        }
+        if (st->ch.pin_a.port_base == GPIO_PORTD_BASE || st->ch.pin_b.port_base == GPIO_PORTD_BASE) {
+            port_d = true;
+        }
+        if (st->ch.pin_a.port_base == GPIO_PORTF_BASE || st->ch.pin_b.port_base == GPIO_PORTF_BASE) {
+            port_f = true;
+        }
+    }
+
+    if (port_b) {
+        sw_qei_enable_port(GPIO_PORTB_BASE, sw_qei_portb_handler, INT_GPIOB);
+    }
+    if (port_d) {
+        sw_qei_enable_port(GPIO_PORTD_BASE, sw_qei_portd_handler, INT_GPIOD);
+    }
+    if (port_f) {
+        sw_qei_enable_port(GPIO_PORTF_BASE, sw_qei_portf_handler, INT_GPIOF);
+    }
 }
 
 int32_t bsp_sw_qei_get_count(uint8_t index)

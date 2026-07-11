@@ -1,6 +1,6 @@
 /**
  * @file bsp_sw_qei.h
- * @brief GPIO 轮询 + 4x 正交状态表软件正交解码（RC 滤波板四路编码器）
+ * @brief GPIO 边沿中断 + 轮询备份软件正交解码（M3/M4 等无硬件 QEI 通道）
  */
 
 #ifndef BSP_DRIVER_SW_QEI_H

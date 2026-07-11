@@ -148,7 +148,7 @@ extern const bsp_qei_config_t BOARD_QEI_CFG;
 extern const bsp_uart_config_t BOARD_UART_BT_CFG;
 extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;
 extern const bsp_i2c_config_t BOARD_I2C_CFG;
-extern const bsp_adc_config_t BOARD_ADC_CFG;
+extern const bsp_adc_config_t BOARD_LINE_ADC_CFG;
 extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;
 extern const bsp_spi_config_t BOARD_SPI_CFG;
 
@@ -173,6 +173,9 @@ int32_t Encoder_GetCount(uint8_t index);
 void Encoder_ResetCount(uint8_t index);
 
 /* --- Line --- */
+#define LINE_SENSOR_COUNT 5U
+bool Line_IsReady(void);
+bool Line_Sample(uint16_t *out, size_t count);
 void Line_Init(void);
 
 /* --- Board --- */

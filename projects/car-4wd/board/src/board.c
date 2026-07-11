@@ -56,21 +56,18 @@ const bsp_uart_config_t BOARD_UART_DEBUG_CFG = { UART7_BASE, 115200 };
 
 const bsp_i2c_config_t BOARD_I2C_CFG = { I2C0_BASE, 400000 };
 
-static const bsp_adc_channel_t board_adc_channels[] = {
-    { 0, 0 },
-    { 1, 1 },
-    { 4, 2 },
-    { 5, 3 },
-    { 6, 4 },
-    { 7, 5 },
-    { 8, 6 },
-    { 9, 7 },
+static const bsp_adc_channel_t board_line_adc_channels[] = {
+    { 4, 0 },
+    { 5, 1 },
+    { 6, 2 },
+    { 7, 3 },
+    { 8, 4 },
 };
-const bsp_adc_config_t BOARD_ADC_CFG = {
-    .base = ADC1_BASE,
-    .sequence = 3,
-    .channels = board_adc_channels,
-    .channel_count = 8,
+const bsp_adc_config_t BOARD_LINE_ADC_CFG = {
+    .base = ADC0_BASE,
+    .sequence = 0,
+    .channels = board_line_adc_channels,
+    .channel_count = 5,
 };
 
 static const bsp_adc_channel_t board_battery_channel = { 0, 0 };
@@ -123,7 +120,6 @@ bool Board_Periph_Init(void) {
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_1);
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_5);
-    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_4);
     GPIOPinConfigure(GPIO_PA4_SSI0RX);
     GPIOPinConfigure(GPIO_PA5_SSI0TX);
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);
@@ -141,7 +137,7 @@ bool Board_Periph_Init(void) {
     if (!bsp_i2c_init(&BOARD_I2C_CFG)) {
         return false;
     }
-    if (!bsp_adc_init(&BOARD_ADC_CFG)) {
+    if (!bsp_adc_init(&BOARD_LINE_ADC_CFG)) {
         return false;
     }
     if (!bsp_adc_init(&BOARD_BATTERY_ADC_CFG)) {

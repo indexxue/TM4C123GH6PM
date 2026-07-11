@@ -59,6 +59,11 @@ function Get-NvsAppDefines {
     return @("-DNVS_RTOS_LOCK", "-DNVS_CMD_RAW_KV")
 }
 
+function Get-CarAppDefines {
+    # 四电机编码器同速排查：改为 -DAPP_ENC_DEBUG=1 开启
+    return @("-DAPP_ENC_DEBUG=0")
+}
+
 function Get-CbbSources {
     return @(
         (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
@@ -283,14 +288,14 @@ New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 switch ($Target) {
     "standalone" {
         Invoke-AppCodegen -CompileDb
-        Build-FirmwareTarget -Name $CarProject -LdScript (Join-Path $LdDir "tm4c123gh6pm.ld") -Sources (Get-AppSources) -ExtraDefines (Get-NvsAppDefines)
+        Build-FirmwareTarget -Name $CarProject -LdScript (Join-Path $LdDir "tm4c123gh6pm.ld") -Sources (Get-AppSources) -ExtraDefines ((Get-NvsAppDefines) + (Get-CarAppDefines))
     }
     "bootloader" {
         Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
     }
     "app" {
         Invoke-AppCodegen
-        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines)) -CheckImageSize
+        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines) + (Get-CarAppDefines)) -CheckImageSize
     }
     "factory" {
         Invoke-AppCodegen
@@ -299,7 +304,7 @@ switch ($Target) {
     "all" {
         Invoke-AppCodegen
         Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
-        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines)) -CheckImageSize
+        Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines) + (Get-CarAppDefines)) -CheckImageSize
         Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($FactoryDir) -CheckImageSize
     }
 }

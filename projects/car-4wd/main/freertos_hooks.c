@@ -28,7 +28,3 @@ void vApplicationMallocFailedHook(void)
     for (;;) {
     }
 }
-
-void vApplicationIdleHook(void)
-{
-}

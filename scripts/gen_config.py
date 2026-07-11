@@ -445,7 +445,11 @@ def append_periph_bind_section(
     if modules.get("i2c", {}).get("i2c"):
         lines.append("extern const bsp_i2c_config_t BOARD_I2C_CFG;")
     if modules.get("adc", {}).get("adc"):
-        lines.append("extern const bsp_adc_config_t BOARD_ADC_CFG;")
+        line_items = [
+            x for x in modules.get("adc", {}).get("adc", []) if x.get("role") == "line"
+        ]
+        if line_items:
+            lines.append("extern const bsp_adc_config_t BOARD_LINE_ADC_CFG;")
         battery_items = [
             x for x in modules.get("adc", {}).get("adc", []) if x.get("role") == "battery"
         ]
@@ -728,6 +732,11 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
     write_module("encoder", includes, body, protos, src_dir, header, section_title="Encoder", plan=combined)
 
 
+def line_adc_layout(modules: dict[str, dict]) -> list[dict]:
+    adc_items = modules.get("adc", {}).get("adc", [])
+    return [item for item in adc_items if item.get("role") == "line"]
+
+
 def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardHeader) -> None:
     labels = pin_label_map(gpio)
     adc_pins = adc_pin_set(modules)
@@ -737,6 +746,70 @@ def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardH
         if pin_label_to_str(p) in adc_pins:
             continue
         plan.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
+
+    line_items = line_adc_layout(modules)
+    if line_items:
+        includes = INCLUDES_GPIO + [
+            '#include <stddef.h>',
+            '#include "bsp_adc.h"',
+            '#include "bsp_uart.h"',
+        ]
+        body = [
+            f"#define LINE_SENSOR_COUNT {len(line_items)}U",
+            "",
+            "static bool s_line_adc_ready;",
+            "",
+            "bool Line_IsReady(void)",
+            "{",
+            "    return s_line_adc_ready;",
+            "}",
+            "",
+            "bool Line_Sample(uint16_t *out, size_t count)",
+            "{",
+            "    uint32_t raw[LINE_SENSOR_COUNT];",
+            "    size_t i;",
+            "    size_t n = (count < LINE_SENSOR_COUNT) ? count : LINE_SENSOR_COUNT;",
+            "",
+            "    if ((out == NULL) || !s_line_adc_ready) {",
+            "        return false;",
+            "    }",
+            "    for (i = 0U; i < count; i++) {",
+            "        out[i] = 0U;",
+            "    }",
+            "    if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {",
+            "        return false;",
+            "    }",
+            "    for (i = 0U; i < n; i++) {",
+            "        out[i] = (uint16_t)(raw[i] & 0xFFFFU);",
+            "    }",
+            "    return true;",
+            "}",
+            "",
+            "void Line_Init(void) {",
+            *plan.emit_gpio_setup(),
+            "    uint32_t raw[LINE_SENSOR_COUNT];",
+            "",
+            "    s_line_adc_ready = bsp_adc_init(&BOARD_LINE_ADC_CFG);",
+            "    if (!s_line_adc_ready) {",
+            '        bsp_uart_debug_puts("[line] adc init FAIL\\r\\n");',
+            "        return;",
+            "    }",
+            "    if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {",
+            '        bsp_uart_debug_puts("[line] adc boot sample FAIL\\r\\n");',
+            "        s_line_adc_ready = false;",
+            "        return;",
+            "    }",
+            '    bsp_uart_debug_puts("[line] adc boot sample OK\\r\\n");',
+            "}",
+        ]
+        protos = [
+            f"#define LINE_SENSOR_COUNT {len(line_items)}U",
+            "bool Line_IsReady(void);",
+            "bool Line_Sample(uint16_t *out, size_t count);",
+            "void Line_Init(void);",
+        ]
+        write_module("line", includes, body, protos, src_dir, header, section_title="Line", plan=plan)
+        return
 
     body = ["void Line_Init(void) {", *plan.emit_gpio_setup(), "}"]
     write_module("line", INCLUDES_GPIO, body, ["void Line_Init(void);"], src_dir, header, section_title="Line", plan=plan)
@@ -838,21 +911,24 @@ def emit_board_config_defs(modules: dict[str, dict], board: dict) -> list[str]:
         ]
 
     adc_items = modules.get("adc", {}).get("adc", [])
+    line_items = [item for item in adc_items if item.get("role") == "line"]
     if adc_items:
         adc_module = adc_items[0]["module"]
-        lines.append("static const bsp_adc_channel_t board_adc_channels[] = {")
-        for step, item in enumerate(adc_items):
-            lines.append(f"    {{ {item['channel']}, {step} }},")
-        lines.append("};")
-        lines += [
-            "const bsp_adc_config_t BOARD_ADC_CFG = {",
-            f"    .base = {adc_module}_BASE,",
-            "    .sequence = 3,",
-            "    .channels = board_adc_channels,",
-            f"    .channel_count = {len(adc_items)},",
-            "};",
-            "",
-        ]
+        if line_items:
+            line_module = line_items[0]["module"]
+            lines.append("static const bsp_adc_channel_t board_line_adc_channels[] = {")
+            for step, item in enumerate(line_items):
+                lines.append(f"    {{ {item['channel']}, {step} }},")
+            lines.append("};")
+            lines += [
+                "const bsp_adc_config_t BOARD_LINE_ADC_CFG = {",
+                f"    .base = {line_module}_BASE,",
+                "    .sequence = 0,",
+                "    .channels = board_line_adc_channels,",
+                f"    .channel_count = {len(line_items)},",
+                "};",
+                "",
+            ]
 
         battery_items = [x for x in adc_items if x.get("role") == "battery"]
         if battery_items:
@@ -972,8 +1048,10 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
         body.extend(emit_init_guard("bsp_i2c_init(&BOARD_I2C_CFG)"))
 
     if adc.get("adc"):
-        body.extend(emit_init_guard("bsp_adc_init(&BOARD_ADC_CFG)"))
         battery_items = [x for x in adc.get("adc", []) if x.get("role") == "battery"]
+        line_items = [x for x in adc.get("adc", []) if x.get("role") == "line"]
+        if line_items:
+            body.extend(emit_init_guard("bsp_adc_init(&BOARD_LINE_ADC_CFG)"))
         if battery_items:
             body.extend(emit_init_guard("bsp_adc_init(&BOARD_BATTERY_ADC_CFG)"))
 

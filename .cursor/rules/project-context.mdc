@@ -88,14 +88,31 @@ docs/                   # 设计文档
 | 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
 | I2C 总线 | I2C0 软件（GPIO 位操作） | PB2/PB3 — MPU6050@0x69、QMC5883P@0x2C（暂无 OLED） |
 | SPI / SSI0 | SSI0 | PA2~PA5 — 预留 SPI 外设 |
-| 电池电压 | ADC1 AIN0 | PE3 |
-| 按键 | ADC1 AIN1 | PE2（电阻分压采样） |
-| 循迹 | ADC1 AIN4~9 | PD3/PD2/PD1/PD0, PE5/PE4（6 路；除按键/电池外的全部 ADC 通道） |
+| 电池电压 | ADC1 SS2 AIN0 | PE3 |
+| 按键 | ADC1 SS0 AIN1 | PE2（电阻分压采样） |
+| 循迹 | **ADC0 SS0** AIN4~8 | PD3/PD2/PD1/PD0, PE5（**5 路** TCRT5000 模拟输出） |
 | 超声波 | GPIO | PC2 Trig, PC1 Echo |
 | 蜂鸣器 | GPIO | PB1 |
 | RGB LED | GPIO | PC3 (WS2812) |
 
 完整引脚表见 `docs/syscfg-io-allocation.md` 与编译生成的 `projects/<car>/gpio-allocation.md`。
+
+### ADC 分工（car-4wd）
+
+TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模块，但固件按模块拆分，避免 ADC1 多序列竞争：
+
+| 模块 | 序列 | 通道 | 用途 | 板级配置 |
+|------|------|------|------|----------|
+| ADC1 | SS0 | AIN1 | 按键 | `button.c` 内 `s_button_adc_cfg` |
+| ADC1 | SS2 | AIN0 | 电池 | `BOARD_BATTERY_ADC_CFG` |
+| **ADC0** | **SS0** | AIN4~8 | 循迹 ×5 | `BOARD_LINE_ADC_CFG` + `Line_Sample()` |
+
+- 配置源：`projects/car-4wd/.syscfg/modules/adc.json`（循迹项 `module: ADC0`）
+- 生成代码：`board.c`（`BOARD_LINE_ADC_CFG`）、`line.c`（`Line_Init` / `Line_Sample` / `Line_IsReady`）
+- 初始化顺序：`Board_Periph_Init()`（引脚 mux + ADC init）→ `Line_Init()`（`start.c`，须在 mux 之后）
+- 应用层：`app.c` 周期日志 `app: line adc=[...]` / `app: line det=[...]`（编码器周期日志默认 `APP_ENC_LOG_ENABLE=0` 关闭）
+- 协议遥测：`proto.c` 经 `BOARD_LINE_ADC_CFG` 推送 `LINE_SENSOR_COUNT` 路 ADC
+
 
 ## 串口与通信分工
 
@@ -111,9 +128,11 @@ docs/                   # 设计文档
 
 ## 当前开发状态
 
-平台层：量产 app 仅 UART7 日志；厂测 factory 使用 UART7 日志 + CMD；UART0 蓝牙协议层（待实现）；板级外设 init 已接通。
+平台层：量产 app UART7 日志；厂测 factory UART7 日志 + CMD；UART0 蓝牙协议层已接入；板级外设 init 已接通。
 
-**待实现**：编码器测速、PID、ADC 循迹与按键判读等业务逻辑。IMU/磁力计驱动与厂测读数已接入（I2C0 软件 I2C）。
+**已接通**：IMU/磁力计（I2C0 软件 I2C）；**ADC 循迹 5 路采样与阈值检测**（`Line_Sample` + `app_line_periodic_log`）；编码器计数（`bsp_sw_qei` / 硬件 QEI）。
+
+**待实现**：编码器测速、PID 速度/循迹闭环、按键业务逻辑。
 
 ## 开发约束
 
@@ -121,6 +140,7 @@ docs/                   # 设计文档
 - **I2C0 必须软件 I2C**：PB2/PB3 仅用 GPIO 开漏位操作；**禁止**对 I2C0 调用 `I2CMasterDisable/Enable` 等硬件寄存器（外设时钟未开时会卡死）
 - **不要提交**：`build/`（含 `ide-compile-db.json`）、`tools/`、`downloads/`、`sdk/`（除 `sdk/README.md`）
 - **不要手改** `projects/*/board/src/{motor,encoder,line,board}.c`（改对应 `.syscfg` 后重新编译）
+- **循迹 ADC**：走 **ADC0** 独立序列，勿与电池/按键共用 ADC1 多序列混采；无 ADC2
 - 提交前本地编译通过；提交信息简短中文/英文，说明做了什么/为什么
 - `build.ps1` 使用 `-mfloat-abi=hard` + FPU（以 PowerShell 脚本为准）
 

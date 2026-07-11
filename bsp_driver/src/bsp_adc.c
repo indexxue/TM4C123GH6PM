@@ -23,6 +23,8 @@
 #define BSP_ADC_LOCK_TIMEOUT_MS 50U
 
 static SemaphoreHandle_t s_adc1_mutex;
+static bool s_adc0_clock_configured;
+static bool s_adc1_clock_configured;
 
 static uint32_t adc_periph_from_base(uint32_t base)
 {
@@ -92,6 +94,29 @@ static uint32_t adc_ctl_for_channel(uint8_t channel)
     return ctl_table[channel];
 }
 
+static void adc_module_clock_init(uint32_t base)
+{
+    if (base == ADC0_BASE) {
+        if (!s_adc0_clock_configured) {
+            ADCClockConfigSet(ADC0_BASE, ADC_CLOCK_SRC_PLL | ADC_CLOCK_RATE_FULL, 4U);
+            s_adc0_clock_configured = true;
+        }
+        return;
+    }
+
+    if ((base == ADC1_BASE) && !s_adc1_clock_configured) {
+        ADCClockConfigSet(ADC1_BASE, ADC_CLOCK_SRC_PLL | ADC_CLOCK_RATE_FULL, 4U);
+        s_adc1_clock_configured = true;
+    }
+}
+
+static void adc_sequence_recover(const bsp_adc_config_t *cfg)
+{
+    ADCIntClear(cfg->base, cfg->sequence);
+    ADCSequenceDisable(cfg->base, cfg->sequence);
+    ADCSequenceEnable(cfg->base, cfg->sequence);
+}
+
 bool bsp_adc_init(const bsp_adc_config_t *cfg)
 {
     uint32_t periph;
@@ -115,16 +140,20 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
         return false;
     }
 
+    adc_module_clock_init(cfg->base);
     ADCReferenceSet(cfg->base, ADC_REF_INT);
     ADCSequenceDisable(cfg->base, cfg->sequence);
     ADCSequenceConfigure(cfg->base, cfg->sequence, ADC_TRIGGER_PROCESSOR, 0);
 
     for (i = 0U; i < cfg->channel_count; i++) {
         uint32_t ctl = adc_ctl_for_channel(cfg->channels[i].channel);
+        if (cfg->channel_count > 1U) {
+            ctl |= ADC_CTL_SHOLD_64;
+        }
         if (i == (cfg->channel_count - 1U)) {
             ctl |= ADC_CTL_END | ADC_CTL_IE;
         }
-        ADCSequenceStepConfigure(cfg->base, cfg->sequence, cfg->channels[i].step, ctl);
+        ADCSequenceStepConfigure(cfg->base, cfg->sequence, (uint32_t)i, ctl);
     }
 
     ADCSequenceEnable(cfg->base, cfg->sequence);
@@ -150,8 +179,12 @@ bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
     bsp_timeout_start_us(&timeout, BSP_ADC_SAMPLE_TIMEOUT_US);
     while (!ADCIntStatus(cfg->base, cfg->sequence, false)) {
         if (bsp_timeout_expired(&timeout)) {
+            adc_sequence_recover(cfg);
             adc_unlock(cfg->base);
             return false;
+        }
+        if (xTaskGetSchedulerState() != taskSCHEDULER_NOT_STARTED) {
+            taskYIELD();
         }
     }
 

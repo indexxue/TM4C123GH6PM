@@ -83,7 +83,7 @@
 #define PROTO_RX_PRIORITY           (2U)
 #define PROTO_RX_POLL_MS            (20U)
 
-#define PROTO_LINE_ADC_COUNT        6U
+#define PROTO_LINE_ADC_COUNT        LINE_SENSOR_COUNT
 #define PROTO_ENCODER_COUNT         4U
 
 /* -------------------------------------------------------------------------- */
@@ -487,7 +487,7 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
 
 static void proto_sample_line_adc(uint16_t *out, size_t count)
 {
-    uint32_t raw[8];
+    uint32_t raw[LINE_SENSOR_COUNT];
     size_t i;
 
     if ((out == NULL) || (count == 0U)) {
@@ -496,12 +496,11 @@ static void proto_sample_line_adc(uint16_t *out, size_t count)
     for (i = 0U; i < count; i++) {
         out[i] = 0U;
     }
-    if (!bsp_adc_sample(&BOARD_ADC_CFG, raw, 8U)) {
+    if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {
         return;
     }
-  /* BOARD_ADC_CFG: [0]=unused, [1]=button, [2..7]=line AIN4..9 */
-    for (i = 0U; (i < count) && ((i + 2U) < 8U); i++) {
-        out[i] = (uint16_t)(raw[i + 2U] & 0xFFFFU);
+    for (i = 0U; (i < count) && (i < LINE_SENSOR_COUNT); i++) {
+        out[i] = (uint16_t)(raw[i] & 0xFFFFU);
     }
 }
 
@@ -994,9 +993,17 @@ static void proto_parse_byte(uint8_t byte)
 
 static void proto_rx_task(void *arg)
 {
+    static bool s_stack_logged;
+
     (void)arg;
 
     for (;;) {
+        if (!s_stack_logged) {
+            s_stack_logged = true;
+            LOG_INFO("proto: stack hw proto_rx=%u words",
+                     (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
+
         char ch;
 
         if (UART_Getc(&ch) == 0) {
@@ -1077,6 +1084,8 @@ status_t proto_uart_service_start(void)
     if (xTaskCreate(proto_rx_task, PROTO_TASK_NAME_RX, PROTO_RX_STACK_WORDS, NULL,
                     PROTO_RX_PRIORITY, &s_rx_task) != pdPASS) {
         LOG_ERROR("proto: create rx task failed");
+        vSemaphoreDelete(s_tx_mutex);
+        s_tx_mutex = NULL;
         s_rx_task = NULL;
         return STATUS_FAIL;
     }

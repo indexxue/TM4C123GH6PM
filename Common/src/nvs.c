@@ -20,6 +20,8 @@
 #include "FreeRTOS.h"
 #include "semphr.h"
 #include "task.h"
+
+#include "bsp_uart.h"
 #endif
 
 #include <stddef.h>
@@ -74,6 +76,9 @@ static void nvs_lock(void)
     if (xTaskGetSchedulerState() == taskSCHEDULER_RUNNING) {
         if (s_nvs_mu == NULL) {
             s_nvs_mu = xSemaphoreCreateMutex();
+            if (s_nvs_mu == NULL) {
+                bsp_uart_debug_puts("[nvs] mutex create failed\r\n");
+            }
         }
         if (s_nvs_mu != NULL) {
             (void)xSemaphoreTake(s_nvs_mu, portMAX_DELAY);
