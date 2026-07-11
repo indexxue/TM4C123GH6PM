@@ -35,7 +35,7 @@
 /** |ω| 低于此值且 |a|≈1g 时用 accel 锁 roll/pitch、并允许 mag 校正 yaw */
 #define ATTITUDE_TILT_LOCK_MAX_DPS      15.0f
 /** |gz| 超过此值视为有意绕 yaw 转，暂停 mag 校正 */
-#define ATTITUDE_MAG_YAW_SKIP_GZ_DPS    8.0f
+#define ATTITUDE_MAG_YAW_SKIP_GZ_DPS    7.0f
 /** |gx|/|gy| 超过此值视为在 roll/pitch 转，暂停 mag 校正 */
 #define ATTITUDE_MAG_YAW_SKIP_XY_DPS    5.0f
 /** mag yaw 融合系数（50Hz 下约 0.12 可抵消 ~2°/s 零偏漂移） */
