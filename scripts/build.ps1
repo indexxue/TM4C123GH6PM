@@ -60,8 +60,7 @@ function Get-NvsAppDefines {
 }
 
 function Get-CarAppDefines {
-    # 四电机编码器同速排查：改为 -DAPP_ENC_DEBUG=1 开启
-    return @("-DAPP_ENC_DEBUG=0")
+    return @()
 }
 
 function Get-CbbSources {

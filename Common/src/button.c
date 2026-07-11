@@ -13,11 +13,12 @@
 
 #define BTN_NUM 3
 
-/* PE2 / ADC1 AIN1：10k 上拉至 3.3V，按键电阻 10k / 5.1k / 1k 至 GND */
-#define BTN_ADC_RAW_RELEASE_MIN   2800U
-#define BTN_ADC_RAW_THRESH_UP_OK  1650U
-#define BTN_ADC_RAW_THRESH_OK_DN   900U
-#define BTN_ADC_RAW_THRESH_DN_MIN  250U
+/* PE2 / ADC1 AIN1：10k 上拉至 3.3V，按键电阻 10k / 5.1k / 2k 至 GND */
+#define BTN_ADC_RAW_WINDOW          200U
+#define BTN_ADC_RAW_UP_CENTER       2048U   /* 10k → ~1.65 V */
+#define BTN_ADC_RAW_OK_CENTER       1382U   /* 5.1k → ~1.11 V */
+#define BTN_ADC_RAW_DN_CENTER        683U   /* 2k → ~0.55 V */
+#define BTN_ADC_RAW_RELEASE_CENTER  4095U   /* 松开 → ~3.30 V */
 
 static const bsp_adc_channel_t s_button_adc_channel = { 1U, 0U };
 static const bsp_adc_config_t s_button_adc_cfg = {
@@ -49,19 +50,31 @@ static btn_event_e last_button_event = BTN_EVENT_NONE;
 static btn_id_e s_adc_pressed_id = BTN_ID_MAX_NUMBER;
 static uint32_t s_adc_last_raw = 0U;
 
+static bool button_adc_in_window(uint32_t raw, uint32_t center)
+{
+    uint32_t lo = (center > BTN_ADC_RAW_WINDOW) ? (center - BTN_ADC_RAW_WINDOW) : 0U;
+    uint32_t hi = center + BTN_ADC_RAW_WINDOW;
+
+    if (hi > 4095U) {
+        hi = 4095U;
+    }
+
+    return (raw >= lo) && (raw <= hi);
+}
+
 static btn_id_e button_adc_decode(uint32_t raw)
 {
-    if (raw >= BTN_ADC_RAW_RELEASE_MIN) {
-        return BTN_ID_MAX_NUMBER;
-    }
-    if (raw >= BTN_ADC_RAW_THRESH_UP_OK) {
+    if (button_adc_in_window(raw, BTN_ADC_RAW_UP_CENTER)) {
         return BTN_ID_UP;
     }
-    if (raw >= BTN_ADC_RAW_THRESH_OK_DN) {
+    if (button_adc_in_window(raw, BTN_ADC_RAW_OK_CENTER)) {
         return BTN_ID_OK;
     }
-    if (raw >= BTN_ADC_RAW_THRESH_DN_MIN) {
+    if (button_adc_in_window(raw, BTN_ADC_RAW_DN_CENTER)) {
         return BTN_ID_DN;
+    }
+    if (button_adc_in_window(raw, BTN_ADC_RAW_RELEASE_CENTER)) {
+        return BTN_ID_MAX_NUMBER;
     }
     return BTN_ID_MAX_NUMBER;
 }
