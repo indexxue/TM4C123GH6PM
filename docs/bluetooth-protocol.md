@@ -132,11 +132,12 @@ roll        f32
 pitch       f32
 yaw         f32
 enc[4]      s32
-line_adc[6] u16
+line_adc[N] u16   /* N = LINE_SENSOR_COUNT，car-4wd 为 5 */
 uptime_ms   u32
+distance_mm u16   /* 超声波距离；9999 = 未连接/未就绪/测距失败 */
 ```
 
-未就绪字段（如编码器）填 0。
+未就绪字段（如编码器）填 0；超声波无模块或测距失败时 `distance_mm = 9999`。
 
 ### 5.3 SUBSCRIBE
 
@@ -145,7 +146,7 @@ mask        u32     /* 通道位图，见 §5.4 */
 hz_att      u8      /* CH_ATTITUDE 频率，0=默认 50 */
 hz_enc      u8      /* CH_ENCODER，0=默认 20 */
 hz_line     u8      /* CH_LINE_ADC，0=默认 20 */
-reserved    u8
+hz_ultra    u8      /* CH_ULTRASONIC，0=默认 10 */
 ```
 
 **通道位：**
@@ -156,8 +157,9 @@ reserved    u8
 | 1 | CH_ATTITUDE | 1 | f32 roll, pitch, yaw |
 | 2 | CH_ENCODER | 2 | s32[4] |
 | 3 | CH_LINE_ADC | 3 | u16[6] |
+| 4 | CH_ULTRASONIC | 4 | u16 distance_mm（9999=未连接） |
 
-v1 PC 默认订阅：`CH_ATTITUDE @ 50 Hz` + `CH_LINE_ADC @ 20 Hz`。
+v1 PC 默认订阅：`CH_ATTITUDE @ 50 Hz` + `CH_LINE_ADC @ 20 Hz`（超声波为可选，不强制订阅；快照 `GET_TELEMETRY` 始终含 `distance_mm`）。
 
 ### 5.4 TELEMETRY_PUSH（主动推送）
 
@@ -166,6 +168,13 @@ channel_id  u8
 uptime_ms   u32
 payload     …       /* 按 channel_id 解析 */
 ```
+
+| channel_id | payload |
+|------------|---------|
+| 1 | f32 roll, pitch, yaw |
+| 2 | s32 enc[4] |
+| 3 | u16 line_adc[N] |
+| 4 | u16 distance_mm（9999=未连接） |
 
 ### 5.5 PARAM_LIST_RSP
 

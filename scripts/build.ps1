@@ -68,7 +68,8 @@ function Get-CbbSources {
     return @(
         (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
         (Join-Path $CbbDir "mpu6050\mpu6050.c"),
-        (Join-Path $CbbDir "ws2812b\ws2812b.c")
+        (Join-Path $CbbDir "ws2812b\ws2812b.c"),
+        (Join-Path $CbbDir "hc_sr04\hc_sr04.c")
     )
 }
 
@@ -76,7 +77,8 @@ function Get-CbbIncludes {
     return @(
         (Join-Path $CbbDir "qmc5883p"),
         (Join-Path $CbbDir "mpu6050"),
-        (Join-Path $CbbDir "ws2812b")
+        (Join-Path $CbbDir "ws2812b"),
+        (Join-Path $CbbDir "hc_sr04")
     )
 }
 
@@ -147,6 +149,7 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "cfg.c"),
         (Join-Path $CommonSrc "imu.c"),
         (Join-Path $CommonSrc "magnetometer.c"),
+        (Join-Path $CommonSrc "ultrasonic.c"),
         (Join-Path $CommonSrc "attitude.c"),
         (Join-Path $CommonSrc "proto.c"),
         (Join-Path $CommonSrc "led_scene.c")

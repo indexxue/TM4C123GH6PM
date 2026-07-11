@@ -35,6 +35,39 @@ git submodule update --init --recursive
 
 ---
 
+## 蓝牙上位机（proto_client）
+
+固件量产 App 启动后会拉起 **UART0 蓝牙协议层**（`Common/src/proto.c`，115200 @ PA0/PA1）。PC 侧工具在 **`tools/proto_client/`**（与 ARM 工具链同目录，本地存在；协议细节见 [docs/bluetooth-protocol.md](docs/bluetooth-protocol.md)）。
+
+### 串口分工
+
+| 接口 | 用途 |
+|------|------|
+| **UART7**（PE1，115200） | 开发日志、厂测 `cmd` 命令行 |
+| **UART0 / 蓝牙 HC-05**（115200） | 二进制协议：遥测、参数、遥控 |
+
+上位机请连接 **蓝牙虚拟 COM**，不要占用 UART7。
+
+### 安装依赖
+
+需 **Python 3.10+** 与 pip：
+
+```powershell
+cd tools\proto_client
+python -m pip install -r requirements.txt
+```
+
+依赖：`pyserial`、`PySide6`、`pyqtgraph`。
+
+### 启动 GUI
+
+```powershell
+cd tools\proto_client
+.\run.cmd                 # 安装依赖并启动主界面
+```
+
+---
+
 ## 烧录
 
 ### 前置条件
@@ -61,7 +94,7 @@ git submodule update --init --recursive
 
 ### J-Link 烧录（推荐）
 
-根目录执行 `.\flash-jlink.cmd`，等价于 `scripts/flash-jlink.ps1`。  
+根目录执行 `.\flash-jlink.cmd`，等价于 `scripts/flash-jlink.ps1`。
 `.bin` 按目标自动写偏移；`.elf` 由链接地址决定偏移。
 
 #### 1. Standalone（快速调试）
@@ -120,7 +153,7 @@ Boot 已在片上时，**只烧 app** 即可：
 [boot] no app
 ```
 
-说明 Boot 正常、APP_A / APP_B 已被擦成 `0xFF`（无有效向量表），Boot 停住不跳转。  
+说明 Boot 正常、APP_A / APP_B 已被擦成 `0xFF`（无有效向量表），Boot 停住不跳转。
 确认无误后再烧 app / factory：
 
 ```powershell
@@ -155,7 +188,7 @@ Boot 已在片上时，**只烧 app** 即可：
 .\flash.cmd -Target standalone
 ```
 
-`flash.cmd` 走 TI UniFlash（需本机安装 UniFlash 9.x 与根目录 `TM4C123GH6PM.ccxml`）。  
+`flash.cmd` 走 TI UniFlash（需本机安装 UniFlash 9.x 与根目录 `TM4C123GH6PM.ccxml`）。
 分区多镜像更建议用 **J-Link** 分段烧录；详见 [docs/build.md](docs/build.md)。
 
 ### 烧录后验证（分区模式）
@@ -195,6 +228,7 @@ Common/             公共模块（log、start、device_profile、nvs、cmd…�
 | 文档 | 内容 |
 |------|------|
 | **[docs/build.md](docs/build.md)** | 编译、构建、烧录 |
+| [docs/bluetooth-protocol.md](docs/bluetooth-protocol.md) | UART0 蓝牙二进制协议与 PC 工具 |
 | [docs/syscfg-io-allocation.md](docs/syscfg-io-allocation.md) | 四轮/两轮引脚 |
 | [docs/resource-allocation.md](docs/resource-allocation.md) | 定时器/DMA/中断 |
 | [docs/project-overview.md](docs/project-overview.md) | 项目快照 |

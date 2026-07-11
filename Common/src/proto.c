@@ -12,8 +12,8 @@
 #include "device_profile.h"
 #include "log.h"
 #include "nvs.h"
-
-#include "bsp_adc.h"
+#include "led_scene.h"
+#include "ultrasonic.h"
 
 #include "FreeRTOS.h"
 #include "semphr.h"
@@ -65,14 +65,20 @@
 #define PROTO_CH_ATTITUDE           (1U << 1)
 #define PROTO_CH_ENCODER            (1U << 2)
 #define PROTO_CH_LINE_ADC           (1U << 3)
+#define PROTO_CH_ULTRASONIC         (1U << 4)
 
 #define PROTO_PUSH_CH_ATTITUDE      1U
 #define PROTO_PUSH_CH_ENCODER       2U
 #define PROTO_PUSH_CH_LINE_ADC      3U
+#define PROTO_PUSH_CH_ULTRASONIC    4U
 
 #define PROTO_DEFAULT_HZ_ATT        50U
-#define PROTO_DEFAULT_HZ_ENC        20U
-#define PROTO_DEFAULT_HZ_LINE       20U
+#define PROTO_DEFAULT_HZ_ENC          20U
+#define PROTO_DEFAULT_HZ_LINE         20U
+#define PROTO_DEFAULT_HZ_ULTRA      10U
+
+/** 超声波未连接/未就绪/测距失败时的占位距离（mm） */
+#define PROTO_ULTRA_INVALID_MM      9999U
 
 #define PROTO_DRIVE_TIMEOUT_MS      500U
 #define PROTO_DRIVE_THROTTLE_MAX    1000
@@ -111,10 +117,15 @@ static struct {
     uint8_t hz_att;
     uint8_t hz_enc;
     uint8_t hz_line;
+    uint8_t hz_ultra;
     uint32_t acc_att_ms;
     uint32_t acc_enc_ms;
     uint32_t acc_line_ms;
+    uint32_t acc_ultra_ms;
 } s_sub;
+
+static bool_t s_ultra_ready;
+static bool_t s_ultra_init_attempted;
 
 static volatile bool s_drive_active;
 static volatile bool s_drive_stop_req;
@@ -487,7 +498,6 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
 
 static void proto_sample_line_adc(uint16_t *out, size_t count)
 {
-    uint32_t raw[LINE_SENSOR_COUNT];
     size_t i;
 
     if ((out == NULL) || (count == 0U)) {
@@ -496,12 +506,42 @@ static void proto_sample_line_adc(uint16_t *out, size_t count)
     for (i = 0U; i < count; i++) {
         out[i] = 0U;
     }
-    if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {
+    if (!device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
         return;
     }
-    for (i = 0U; (i < count) && (i < LINE_SENSOR_COUNT); i++) {
-        out[i] = (uint16_t)(raw[i] & 0xFFFFU);
+    (void)Line_Sample(out, count);
+}
+
+static uint16_t proto_sample_ultrasonic_mm(void)
+{
+    uint16_t mm = PROTO_ULTRA_INVALID_MM;
+    status_t st;
+
+    if (!device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        return PROTO_ULTRA_INVALID_MM;
     }
+
+    /* PC1=Echo/SWDIO：boot 灯效结束后再 init，避免占用 SWD 影响烧录 */
+    if (s_ultra_init_attempted == FALSE) {
+        if (led_scene_is_active()) {
+            return PROTO_ULTRA_INVALID_MM;
+        }
+        s_ultra_init_attempted = TRUE;
+        if (ultrasonic_init() != STATUS_OK) {
+            return PROTO_ULTRA_INVALID_MM;
+        }
+        s_ultra_ready = TRUE;
+    }
+
+    if (s_ultra_ready == FALSE) {
+        return PROTO_ULTRA_INVALID_MM;
+    }
+
+    st = ultrasonic_measure_mm(&mm);
+    if (st != STATUS_OK) {
+        return PROTO_ULTRA_INVALID_MM;
+    }
+    return mm;
 }
 
 static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
@@ -518,7 +558,7 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     float yaw = 0.0f;
     uint8_t i;
     const uint16_t need = (uint16_t)(2U + 1U + 12U + (uint16_t)(4 * PROTO_ENCODER_COUNT) +
-                                     (uint16_t)(2U * PROTO_LINE_ADC_COUNT) + 4U);
+                                     (uint16_t)(2U * PROTO_LINE_ADC_COUNT) + 4U + 2U);
 
     if ((out == NULL) || (out_max < need)) {
         return 0U;
@@ -548,10 +588,16 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
         proto_put_u32(&out[15U + (i * 4U)], (uint32_t)enc[i]);
     }
-    for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
-        proto_put_u16(&out[31U + (i * 2U)], line_adc[i]);
+    {
+        const uint16_t line_off = (uint16_t)(15U + (4U * PROTO_ENCODER_COUNT));
+        const uint16_t uptime_off = (uint16_t)(line_off + (2U * PROTO_LINE_ADC_COUNT));
+
+        for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
+            proto_put_u16(&out[line_off + (i * 2U)], line_adc[i]);
+        }
+        proto_put_u32(&out[uptime_off], proto_uptime_ms());
+        proto_put_u16(&out[uptime_off + 4U], proto_sample_ultrasonic_mm());
     }
-    proto_put_u32(&out[43], proto_uptime_ms());
     return need;
 }
 
@@ -618,6 +664,17 @@ static void proto_push_encoder(void)
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
         proto_put_u32(&payload[5U + (i * 4U)], (uint32_t)cfg_encoder_count(i));
     }
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static void proto_push_ultrasonic(void)
+{
+    uint8_t payload[5U + 2U];
+    uint16_t mm = proto_sample_ultrasonic_mm();
+
+    payload[0] = PROTO_PUSH_CH_ULTRASONIC;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    proto_put_u16(&payload[5], mm);
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
@@ -728,9 +785,11 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     s_sub.hz_att = payload[4];
     s_sub.hz_enc = payload[5];
     s_sub.hz_line = payload[6];
+    s_sub.hz_ultra = payload[7];
     s_sub.acc_att_ms = 0U;
     s_sub.acc_enc_ms = 0U;
     s_sub.acc_line_ms = 0U;
+    s_sub.acc_ultra_ms = 0U;
     proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
 }
 
@@ -1060,6 +1119,13 @@ void proto_telemetry_tick(uint32_t period_ms)
             proto_push_line_adc();
         }
     }
+    if ((s_sub.mask & PROTO_CH_ULTRASONIC) != 0U) {
+        s_sub.acc_ultra_ms += period_ms;
+        if (s_sub.acc_ultra_ms >= proto_period_ms_for(s_sub.hz_ultra, PROTO_DEFAULT_HZ_ULTRA)) {
+            s_sub.acc_ultra_ms = 0U;
+            proto_push_ultrasonic();
+        }
+    }
 }
 
 status_t proto_uart_service_start(void)
@@ -1080,6 +1146,9 @@ status_t proto_uart_service_start(void)
     s_sub.hz_att = PROTO_DEFAULT_HZ_ATT;
     s_sub.hz_line = PROTO_DEFAULT_HZ_LINE;
     s_sub.hz_enc = PROTO_DEFAULT_HZ_ENC;
+    s_sub.hz_ultra = PROTO_DEFAULT_HZ_ULTRA;
+    s_ultra_ready = FALSE;
+    s_ultra_init_attempted = FALSE;
 
     if (xTaskCreate(proto_rx_task, PROTO_TASK_NAME_RX, PROTO_RX_STACK_WORDS, NULL,
                     PROTO_RX_PRIORITY, &s_rx_task) != pdPASS) {

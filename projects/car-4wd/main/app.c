@@ -49,11 +49,10 @@
 #define APP_CTRL_PERIOD_MS          (20U)
 #define APP_HEARTBEAT_PERIOD_MS     (20000U)
 #define APP_ENC_LOG_PERIOD_MS       (1000U)
-/** 暂时关闭编码器周期日志；巡线调试时保持 0 */
+/** 暂时关闭编码器周期日志 */
 #ifndef APP_ENC_LOG_ENABLE
 #define APP_ENC_LOG_ENABLE          (0)
 #endif
-#define APP_LINE_LOG_PERIOD_MS      (1000U)
 
 #define APP_ENC_MOTOR_COUNT         (4U)
 /** 相同 RPM 符号（Motor_SetSpeed 当前为固定 50%% PWM，rpm 仅表方向） */
@@ -80,7 +79,6 @@ static uint32_t s_heartbeat_elapsed_ms;
 #if APP_ENC_LOG_ENABLE || APP_ENC_DEBUG
 static uint32_t s_enc_log_elapsed_ms;
 #endif
-static uint32_t s_line_log_elapsed_ms;
 
 #if APP_ENC_DEBUG
 typedef enum {
@@ -148,51 +146,6 @@ static void app_encoder_periodic_log(void)
 #endif
 }
 #endif
-
-/** TCRT5000 模拟输出：黑线反射弱，ADC 低于阈值判为在线上 */
-static void app_line_periodic_log(void)
-{
-    uint16_t adc[LINE_SENSOR_COUNT];
-    uint8_t detect[LINE_SENSOR_COUNT];
-    int32_t pos = 0;
-    uint8_t on_count = 0U;
-    uint8_t i;
-
-    if (!Line_IsReady()) {
-        LOG_WARN("app: line sample failed (adc not ready)");
-        return;
-    }
-
-    if (!Line_Sample(adc, LINE_SENSOR_COUNT)) {
-        LOG_WARN("app: line sample failed (adc0 timeout)");
-        return;
-    }
-
-    for (i = 0U; i < LINE_SENSOR_COUNT; i++) {
-        uint16_t th = cfg_line_threshold(i);
-        int8_t weight = (int8_t)i - (int8_t)(LINE_SENSOR_COUNT / 2U);
-
-        detect[i] = (adc[i] < th) ? 1U : 0U;
-        if (detect[i] != 0U) {
-            pos += (int32_t)weight;
-            on_count++;
-        }
-    }
-
-    if (on_count > 0U) {
-        pos /= (int32_t)on_count;
-    } else {
-        pos = 99;
-    }
-
-    LOG_INFO("app: line adc=[%u,%u,%u,%u,%u]",
-             (unsigned)adc[0], (unsigned)adc[1], (unsigned)adc[2],
-             (unsigned)adc[3], (unsigned)adc[4]);
-    LOG_INFO("app: line det=[%u,%u,%u,%u,%u] pos=%ld%s",
-             (unsigned)detect[0], (unsigned)detect[1], (unsigned)detect[2],
-             (unsigned)detect[3], (unsigned)detect[4],
-             (long)pos, (on_count == 0U) ? " lost" : "");
-}
 
 #if APP_ENC_DEBUG
 static void app_enc_debug_apply_motors(int32_t rpm)
@@ -407,30 +360,6 @@ static void app_user_init(void)
 #endif
     }
 
-    if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
-        uint16_t line_probe[LINE_SENSOR_COUNT];
-        uint32_t btn_raw = 0U;
-
-        if (button_adc_raw_get(&btn_raw)) {
-            LOG_INFO("app: btn adc probe raw=%lu", (unsigned long)btn_raw);
-        } else {
-            LOG_WARN("app: btn adc probe failed");
-        }
-
-        if (!Line_IsReady()) {
-            LOG_WARN("app: line adc not ready (init/boot sample failed)");
-        } else if (Line_Sample(line_probe, LINE_SENSOR_COUNT)) {
-            LOG_INFO("app: line ready sensors=%u adc=[%u,%u,%u,%u,%u]",
-                     (unsigned)LINE_SENSOR_COUNT,
-                     (unsigned)line_probe[0], (unsigned)line_probe[1],
-                     (unsigned)line_probe[2], (unsigned)line_probe[3],
-                     (unsigned)line_probe[4]);
-        } else {
-            LOG_WARN("app: line ready sensors=%u but runtime sample failed",
-                     (unsigned)LINE_SENSOR_COUNT);
-        }
-    }
-
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         LOG_INFO("app: heap free=%u min_ever=%u",
                  (unsigned)xPortGetFreeHeapSize(),
@@ -464,15 +393,6 @@ static void app_on_timer(void)
         }
     }
 #endif
-
-    if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE) &&
-        device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
-        s_line_log_elapsed_ms += APP_CTRL_PERIOD_MS;
-        if (s_line_log_elapsed_ms >= APP_LINE_LOG_PERIOD_MS) {
-            s_line_log_elapsed_ms -= APP_LINE_LOG_PERIOD_MS;
-            app_line_periodic_log();
-        }
-    }
 
 #if APP_ENC_DEBUG
     app_enc_debug_tick();

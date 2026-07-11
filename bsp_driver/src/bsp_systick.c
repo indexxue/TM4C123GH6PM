@@ -67,6 +67,18 @@ uint32_t bsp_get_tick_ms(void)
     return (uint32_t)(xTaskGetTickCount() * portTICK_PERIOD_MS);
 }
 
+uint32_t bsp_get_tick_us(void)
+{
+    uint32_t clock_hz = bsp_clock_get_hz();
+    uint32_t cycles_per_us = (clock_hz > 0U) ? (clock_hz / 1000000U) : 0U;
+
+    if (!s_dwt_ready || (cycles_per_us == 0U)) {
+        return 0U;
+    }
+
+    return DWT_CYCCNT / cycles_per_us;
+}
+
 void bsp_timeout_start_us(bsp_timeout_t *t, uint32_t timeout_us)
 {
     uint32_t clock_hz;
