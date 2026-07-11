@@ -12,6 +12,9 @@
 | 电机驱动 | TB6612FNG | 2 块（四轮）/ 1 块（两轮） | GPIO + PWM | ~15 |
 | 蓝牙 | HC-05 | 1 | UART | ~15 |
 | IMU | MPU6050 | 1 | I2C | ~8 |
+| 磁力计 | QMC5883P | 1 | I2C（与 IMU 同总线） | ~5 |
+
+姿态/航向解算选型见 **[attitude-fusion.md](attitude-fusion.md)**（推荐 Fusion 或 tilt+heading 解耦，勿仅依赖 2009 版 Mahony 状态机）。
 | 超声波 | HC-SR04P (3.3V) | 1~2 | GPIO | ~6 |
 | 循迹 | TCRT5000 模块 | 5~6 | ADC 模拟 | ~12 |
 | OLED | SSD1306 128×64 | 1 | I2C | ~10 |

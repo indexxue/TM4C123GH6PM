@@ -128,9 +128,9 @@ caps        u32        /* 能力位图 */
 ```
 batt_mv     u16
 batt_pct    u8
-roll        f32
-pitch       f32
-yaw         f32
+roll        i16     /* -180~180，度 */
+pitch       i16     /* -180~180，度 */
+yaw         i16     /* -180~180，度 */
 enc[4]      s32
 line_adc[N] u16   /* N = LINE_SENSOR_COUNT，car-4wd 为 5 */
 uptime_ms   u32
@@ -154,7 +154,7 @@ hz_ultra    u8      /* CH_ULTRASONIC，0=默认 10 */
 | bit | 名称 | 推送 channel_id | 默认载荷 |
 |-----|------|-----------------|----------|
 | 0 | CH_BATT | — | 仅快照，不可订阅 |
-| 1 | CH_ATTITUDE | 1 | f32 roll, pitch, yaw |
+| 1 | CH_ATTITUDE | 1 | i16 roll, pitch, yaw（均为 -180~180°） |
 | 2 | CH_ENCODER | 2 | s32[4] |
 | 3 | CH_LINE_ADC | 3 | u16[6] |
 | 4 | CH_ULTRASONIC | 4 | u16 distance_mm（9999=未连接） |
@@ -171,7 +171,7 @@ payload     …       /* 按 channel_id 解析 */
 
 | channel_id | payload |
 |------------|---------|
-| 1 | f32 roll, pitch, yaw |
+| 1 | i16 roll, pitch, yaw（均为 -180~180°） |
 | 2 | s32 enc[4] |
 | 3 | u16 line_adc[N] |
 | 4 | u16 distance_mm（9999=未连接） |

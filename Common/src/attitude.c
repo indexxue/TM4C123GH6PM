@@ -1,29 +1,364 @@
 /**
  * @file    attitude.c
- * @brief   Madgwick AHRS 九轴姿态解算封装
+ * @brief   九轴姿态解算（x-io Fusion 封装）
+ *
+ * 小车策略（docs/attitude-fusion.md §4 方案 B）：
+ * - roll/pitch：Fusion 6-DOF（gyro+accel），不用 mag 参与四元数融合
+ * - 静止时：accel 锁定 tilt，避免 roll/pitch 漂移
+ * - yaw：FusionCompass 倾斜补偿罗盘；平放非快速转 yaw 时持续校正（对抗 gz 零偏）
  */
 
 #include "attitude.h"
 
-#include "MadgwickAHRS.h"
+#include "FusionAhrs.h"
+#include "FusionBias.h"
+#include "FusionCompass.h"
+#include "FusionRemap.h"
+#include "nvs.h"
 
 #include <math.h>
 
-/** MPU6050 上电默认：±2g */
+/** MPU6050：±2g */
 #define ATTITUDE_ACCEL_LSB_PER_G 16384.0f
-/** MPU6050 上电默认：±250 °/s */
+/** MPU6050：±250 °/s */
 #define ATTITUDE_GYRO_LSB_PER_DPS 131.0f
-#define ATTITUDE_DEG2RAD 0.01745329252f
-#define ATTITUDE_BETA_GAIN 0.1f
+#define ATTITUDE_GYRO_RANGE_DPS   250.0f
+
+#define ATTITUDE_AHRS_GAIN              0.5f
+#define ATTITUDE_ACCEL_REJECTION_DEG    10.0f
+#define ATTITUDE_RECOVERY_SECONDS       5.0f
+#define ATTITUDE_BIAS_STATIONARY_DPS    2.0f
+#define ATTITUDE_BIAS_STATIONARY_SEC    3.0f
+
+/** 合加速度接近 1g */
+#define ATTITUDE_ACCEL_NORM_TOL_G       0.15f
+/** |ω| 低于此值且 |a|≈1g 时用 accel 锁 roll/pitch、并允许 mag 校正 yaw */
+#define ATTITUDE_TILT_LOCK_MAX_DPS      15.0f
+/** |gz| 超过此值视为有意绕 yaw 转，暂停 mag 校正 */
+#define ATTITUDE_MAG_YAW_SKIP_GZ_DPS    8.0f
+/** |gx|/|gy| 超过此值视为在 roll/pitch 转，暂停 mag 校正 */
+#define ATTITUDE_MAG_YAW_SKIP_XY_DPS    5.0f
+/** mag yaw 融合系数（50Hz 下约 0.12 可抵消 ~2°/s 零偏漂移） */
+#define ATTITUDE_MAG_YAW_ALPHA          0.12f
+
+#define ATTITUDE_MAG_NORM_JUMP          0.22f
+#define ATTITUDE_MAG_NORM_ALPHA         0.05f
+
+#define ATTITUDE_EARTH_CONVENTION       FusionConventionNwu
+
+/** 实机确认 PCB 朝向后修改（FusionRemap.h） */
+#define ATTITUDE_IMU_REMAP              FusionRemapAlignmentPXPYPZ
+#define ATTITUDE_MAG_REMAP              FusionRemapAlignmentPXPYPZ
+
+static FusionAhrs s_ahrs;
+static FusionBias s_bias;
 
 static bool_t s_ready;
+static bool_t s_tilt_seeded;
+static bool_t s_mag_trust;
+static bool_t s_mag_norm_ready;
+static float s_mag_norm_ema;
 
-static int16_t attitude_deg_to_x10(float deg)
+static float s_prev_roll_deg;
+static float s_prev_pitch_deg;
+static float s_prev_yaw_deg;
+static bool_t s_euler_prev_valid;
+
+static FusionQuaternion attitude_quat_from_euler_rad(float roll, float pitch, float yaw)
+{
+    float cr = cosf(roll * 0.5f);
+    float sr = sinf(roll * 0.5f);
+    float cp = cosf(pitch * 0.5f);
+    float sp = sinf(pitch * 0.5f);
+    float cy = cosf(yaw * 0.5f);
+    float sy = sinf(yaw * 0.5f);
+    FusionQuaternion q;
+
+    q.element.w = cr * cp * cy + sr * sp * sy;
+    q.element.x = sr * cp * cy - cr * sp * sy;
+    q.element.y = cr * sp * cy + sr * cp * sy;
+    q.element.z = cr * cp * sy - sr * sp * cy;
+    return q;
+}
+
+static bool_t attitude_tilt_rad_from_accel(FusionVector accelerometer, float *roll, float *pitch)
+{
+    float norm = FusionVectorNorm(accelerometer);
+
+    if (norm < 0.5f) {
+        return FALSE;
+    }
+
+    accelerometer = FusionVectorScale(accelerometer, 1.0f / norm);
+    *roll = atan2f(accelerometer.axis.y, accelerometer.axis.z);
+    *pitch = atan2f(-accelerometer.axis.x,
+                     sqrtf((accelerometer.axis.y * accelerometer.axis.y) +
+                           (accelerometer.axis.z * accelerometer.axis.z)));
+    return TRUE;
+}
+
+static bool_t attitude_accel_is_gravity(FusionVector accelerometer)
+{
+    float norm = FusionVectorNorm(accelerometer);
+
+    return fabsf(norm - 1.0f) <= ATTITUDE_ACCEL_NORM_TOL_G;
+}
+
+static float attitude_gyro_peak_dps(FusionVector gyroscope)
+{
+    float peak = fabsf(gyroscope.axis.x);
+
+    if (fabsf(gyroscope.axis.y) > peak) {
+        peak = fabsf(gyroscope.axis.y);
+    }
+    if (fabsf(gyroscope.axis.z) > peak) {
+        peak = fabsf(gyroscope.axis.z);
+    }
+    return peak;
+}
+
+static FusionVector attitude_raw_to_gyro_dps(const imu_sample_t *imu)
+{
+    FusionVector v;
+
+    v.axis.x = (float)imu->gx / ATTITUDE_GYRO_LSB_PER_DPS;
+    v.axis.y = (float)imu->gy / ATTITUDE_GYRO_LSB_PER_DPS;
+    v.axis.z = (float)imu->gz / ATTITUDE_GYRO_LSB_PER_DPS;
+    return FusionRemap(v, ATTITUDE_IMU_REMAP);
+}
+
+static FusionVector attitude_raw_to_accel_g(const imu_sample_t *imu)
+{
+    FusionVector v;
+
+    v.axis.x = (float)imu->ax / ATTITUDE_ACCEL_LSB_PER_G;
+    v.axis.y = (float)imu->ay / ATTITUDE_ACCEL_LSB_PER_G;
+    v.axis.z = (float)imu->az / ATTITUDE_ACCEL_LSB_PER_G;
+    return FusionRemap(v, ATTITUDE_IMU_REMAP);
+}
+
+static FusionVector attitude_raw_to_mag(const magnetometer_sample_t *mag)
+{
+    FusionVector v;
+
+    v.axis.x = (float)mag->mx;
+    v.axis.y = (float)mag->my;
+    v.axis.z = (float)mag->mz;
+    return FusionRemap(v, ATTITUDE_MAG_REMAP);
+}
+
+static bool_t attitude_mag_sample_ok(int16_t mx, int16_t my, int16_t mz)
+{
+    float norm = sqrtf((float)mx * (float)mx + (float)my * (float)my + (float)mz * (float)mz);
+
+    if (norm < 1.0f) {
+        s_mag_trust = FALSE;
+        return FALSE;
+    }
+
+    if (s_mag_norm_ready == FALSE) {
+        s_mag_norm_ema = norm;
+        s_mag_norm_ready = TRUE;
+        s_mag_trust = TRUE;
+        return TRUE;
+    }
+
+    if (fabsf(norm - s_mag_norm_ema) > (s_mag_norm_ema * ATTITUDE_MAG_NORM_JUMP)) {
+        s_mag_trust = FALSE;
+        return FALSE;
+    }
+
+    s_mag_norm_ema += ATTITUDE_MAG_NORM_ALPHA * (norm - s_mag_norm_ema);
+    s_mag_trust = TRUE;
+    return TRUE;
+}
+
+static void attitude_apply_fusion_settings(float sample_hz)
+{
+    FusionAhrsSettings ahrs_settings = {
+        .sampleRate = sample_hz,
+        .convention = ATTITUDE_EARTH_CONVENTION,
+        .gain = ATTITUDE_AHRS_GAIN,
+        .gyroscopeRange = ATTITUDE_GYRO_RANGE_DPS,
+        .accelerationRejection = ATTITUDE_ACCEL_REJECTION_DEG,
+        .magneticRejection = 0.0f,
+        .recoveryTriggerPeriod = (unsigned int)(ATTITUDE_RECOVERY_SECONDS * sample_hz),
+    };
+    FusionBiasSettings bias_settings = {
+        .sampleRate = sample_hz,
+        .stationaryThreshold = ATTITUDE_BIAS_STATIONARY_DPS,
+        .stationaryPeriod = ATTITUDE_BIAS_STATIONARY_SEC,
+    };
+
+    FusionAhrsInitialise(&s_ahrs);
+    FusionAhrsSetSettings(&s_ahrs, &ahrs_settings);
+    FusionBiasInitialise(&s_bias);
+    FusionBiasSetSettings(&s_bias, &bias_settings);
+}
+
+static void attitude_load_nvs_gyro_offset(void)
+{
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+    FusionVector offset = {
+        .axis.x = cfg->imu_offset.gyro[0],
+        .axis.y = cfg->imu_offset.gyro[1],
+        .axis.z = cfg->imu_offset.gyro[2],
+    };
+
+    FusionBiasSetOffset(&s_bias, offset);
+}
+
+static float attitude_wrap_deg_180(float deg)
+{
+    while (deg > 180.0f) {
+        deg -= 360.0f;
+    }
+    while (deg < -180.0f) {
+        deg += 360.0f;
+    }
+    return deg;
+}
+
+static int16_t attitude_deg_to_int16(float deg)
 {
     if (deg >= 0.0f) {
-        return (int16_t)(deg * 10.0f + 0.5f);
+        return (int16_t)(deg + 0.5f);
     }
-    return (int16_t)(deg * 10.0f - 0.5f);
+    return (int16_t)(deg - 0.5f);
+}
+
+static int16_t attitude_deg_smooth_int(float deg, float *prev_deg)
+{
+    float d = attitude_wrap_deg_180(deg);
+    float delta;
+    float out;
+
+    if (s_euler_prev_valid == FALSE) {
+        out = d;
+    } else {
+        delta = d - *prev_deg;
+        while (delta > 180.0f) {
+            delta -= 360.0f;
+        }
+        while (delta < -180.0f) {
+            delta += 360.0f;
+        }
+        out = attitude_wrap_deg_180(*prev_deg + delta);
+    }
+
+    *prev_deg = out;
+    return attitude_deg_to_int16(out);
+}
+
+static void attitude_seed_tilt(FusionVector accelerometer, float yaw_deg)
+{
+    float roll;
+    float pitch;
+    FusionQuaternion q;
+
+    if (attitude_tilt_rad_from_accel(accelerometer, &roll, &pitch) == FALSE) {
+        return;
+    }
+
+    q = attitude_quat_from_euler_rad(roll, pitch, FusionDegreesToRadians(yaw_deg));
+    FusionAhrsSetQuaternion(&s_ahrs, q);
+    s_tilt_seeded = TRUE;
+    s_euler_prev_valid = FALSE;
+}
+
+static void attitude_lock_tilt_preserve_yaw(FusionVector accelerometer)
+{
+    float roll;
+    float pitch;
+    float yaw_deg;
+    FusionEuler euler;
+    FusionQuaternion q;
+
+    if (attitude_tilt_rad_from_accel(accelerometer, &roll, &pitch) == FALSE) {
+        return;
+    }
+
+    euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&s_ahrs));
+    yaw_deg = euler.angle.yaw;
+    q = attitude_quat_from_euler_rad(roll, pitch, FusionDegreesToRadians(yaw_deg));
+    FusionAhrsSetQuaternion(&s_ahrs, q);
+}
+
+static void attitude_blend_yaw_from_compass(FusionVector accelerometer, FusionVector magnetometer)
+{
+    float heading;
+    float yaw_deg;
+    float yaw_new;
+    FusionEuler euler;
+
+    heading = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+    euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&s_ahrs));
+    yaw_deg = euler.angle.yaw;
+    yaw_new = yaw_deg + (ATTITUDE_MAG_YAW_ALPHA * attitude_wrap_deg_180(heading - yaw_deg));
+    FusionAhrsSetHeading(&s_ahrs, yaw_new);
+}
+
+static bool_t attitude_can_blend_mag_yaw(FusionVector gyroscope, float gyro_peak_dps, bool_t gravity)
+{
+    if ((gravity == FALSE) || (gyro_peak_dps >= ATTITUDE_TILT_LOCK_MAX_DPS)) {
+        return FALSE;
+    }
+    if ((fabsf(gyroscope.axis.x) >= ATTITUDE_MAG_YAW_SKIP_XY_DPS) ||
+        (fabsf(gyroscope.axis.y) >= ATTITUDE_MAG_YAW_SKIP_XY_DPS)) {
+        return FALSE;
+    }
+    if (fabsf(gyroscope.axis.z) >= ATTITUDE_MAG_YAW_SKIP_GZ_DPS) {
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static void attitude_update_fusion(const imu_sample_t *imu, const magnetometer_sample_t *mag)
+{
+    FusionVector gyroscope;
+    FusionVector accelerometer;
+    FusionVector magnetometer = FUSION_VECTOR_ZERO;
+    float gyro_peak_dps;
+    bool_t gravity;
+    bool_t mag_yaw_ok;
+    bool_t mag_ok = FALSE;
+
+    gyroscope = attitude_raw_to_gyro_dps(imu);
+    accelerometer = attitude_raw_to_accel_g(imu);
+    gyroscope = FusionBiasUpdate(&s_bias, gyroscope);
+    gyro_peak_dps = attitude_gyro_peak_dps(gyroscope);
+    gravity = attitude_accel_is_gravity(accelerometer);
+
+    if (mag != NULL) {
+        mag_ok = attitude_mag_sample_ok(mag->mx, mag->my, mag->mz);
+        if (mag_ok != FALSE) {
+            magnetometer = attitude_raw_to_mag(mag);
+        }
+    }
+
+    if (s_tilt_seeded == FALSE) {
+        float yaw_seed = 0.0f;
+
+        if (mag_ok != FALSE) {
+            yaw_seed = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+        }
+        attitude_seed_tilt(accelerometer, yaw_seed);
+    }
+
+    /* 6-DOF：mag 不参与四元数融合，避免磁干扰带动 roll/pitch 绕圈漂移 */
+    FusionAhrsUpdateNoMagnetometer(&s_ahrs, gyroscope, accelerometer);
+
+    if (gravity && (gyro_peak_dps < ATTITUDE_TILT_LOCK_MAX_DPS)) {
+        attitude_lock_tilt_preserve_yaw(accelerometer);
+    }
+
+    mag_yaw_ok = attitude_can_blend_mag_yaw(gyroscope, gyro_peak_dps, gravity);
+    if (mag_yaw_ok && (mag_ok != FALSE)) {
+        attitude_blend_yaw_from_compass(accelerometer, magnetometer);
+        s_mag_trust = TRUE;
+    } else if (mag_ok != FALSE) {
+        s_mag_trust = TRUE;
+    }
 }
 
 status_t attitude_init(float sample_hz)
@@ -32,7 +367,17 @@ status_t attitude_init(float sample_hz)
         return STATUS_INVALID_ARG;
     }
 
-    MadgwickAHRS_init(sample_hz, ATTITUDE_BETA_GAIN);
+    attitude_apply_fusion_settings(sample_hz);
+    attitude_load_nvs_gyro_offset();
+
+    s_tilt_seeded = FALSE;
+    s_mag_norm_ema = 0.0f;
+    s_mag_norm_ready = FALSE;
+    s_mag_trust = TRUE;
+    s_euler_prev_valid = FALSE;
+    s_prev_roll_deg = 0.0f;
+    s_prev_pitch_deg = 0.0f;
+    s_prev_yaw_deg = 0.0f;
     s_ready = TRUE;
     return STATUS_OK;
 }
@@ -42,18 +387,32 @@ bool_t attitude_is_ready(void)
     return s_ready;
 }
 
+status_t attitude_get_status(attitude_status_t *status)
+{
+    if (status == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+
+    status->mag_trust = s_mag_trust;
+    status->gyro_bias_ready = (s_bias.timer >= s_bias.timeout) ? TRUE : FALSE;
+    return STATUS_OK;
+}
+
+status_t attitude_update_from_imu(const imu_sample_t *imu)
+{
+    if (s_ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    if (imu == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+
+    attitude_update_fusion(imu, NULL);
+    return STATUS_OK;
+}
+
 status_t attitude_update_from_sensors(const imu_sample_t *imu, const magnetometer_sample_t *mag)
 {
-    float gx;
-    float gy;
-    float gz;
-    float ax;
-    float ay;
-    float az;
-    float mx;
-    float my;
-    float mz;
-
     if (s_ready == FALSE) {
         return STATUS_INVALID_STATE;
     }
@@ -61,27 +420,27 @@ status_t attitude_update_from_sensors(const imu_sample_t *imu, const magnetomete
         return STATUS_INVALID_ARG;
     }
 
-    ax = (float)imu->ax / ATTITUDE_ACCEL_LSB_PER_G;
-    ay = (float)imu->ay / ATTITUDE_ACCEL_LSB_PER_G;
-    az = (float)imu->az / ATTITUDE_ACCEL_LSB_PER_G;
+    attitude_update_fusion(imu, mag);
+    return STATUS_OK;
+}
 
-    gx = ((float)imu->gx / ATTITUDE_GYRO_LSB_PER_DPS) * ATTITUDE_DEG2RAD;
-    gy = ((float)imu->gy / ATTITUDE_GYRO_LSB_PER_DPS) * ATTITUDE_DEG2RAD;
-    gz = ((float)imu->gz / ATTITUDE_GYRO_LSB_PER_DPS) * ATTITUDE_DEG2RAD;
+status_t attitude_update_step(const imu_sample_t *imu, const magnetometer_sample_t *mag)
+{
+    if (s_ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    if (imu == NULL) {
+        return STATUS_INVALID_ARG;
+    }
 
-    mx = (float)mag->mx;
-    my = (float)mag->my;
-    mz = (float)mag->mz;
-
-    MadgwickAHRSupdate(gx, gy, gz, ax, ay, az, mx, my, mz);
+    attitude_update_fusion(imu, mag);
     return STATUS_OK;
 }
 
 status_t attitude_get_euler(attitude_euler_t *euler)
 {
-    float roll_deg = 0.0f;
-    float pitch_deg = 0.0f;
-    float yaw_deg = 0.0f;
+    FusionQuaternion quat;
+    FusionEuler angles;
 
     if (s_ready == FALSE) {
         return STATUS_INVALID_STATE;
@@ -90,12 +449,12 @@ status_t attitude_get_euler(attitude_euler_t *euler)
         return STATUS_INVALID_ARG;
     }
 
-    if (!MadgwickAHRS_get_euler_deg(&roll_deg, &pitch_deg, &yaw_deg)) {
-        return STATUS_FAIL;
-    }
+    quat = FusionAhrsGetQuaternion(&s_ahrs);
+    angles = FusionQuaternionToEuler(quat);
 
-    euler->roll_x10 = attitude_deg_to_x10(roll_deg);
-    euler->pitch_x10 = attitude_deg_to_x10(pitch_deg);
-    euler->yaw_x10 = attitude_deg_to_x10(yaw_deg);
+    euler->roll = attitude_deg_smooth_int(angles.angle.roll, &s_prev_roll_deg);
+    euler->pitch = attitude_deg_smooth_int(angles.angle.pitch, &s_prev_pitch_deg);
+    euler->yaw = attitude_deg_smooth_int(angles.angle.yaw, &s_prev_yaw_deg);
+    s_euler_prev_valid = TRUE;
     return STATUS_OK;
 }

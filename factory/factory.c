@@ -183,14 +183,14 @@ static void factory_sensors_test_log(void)
 
     if ((imu_ok != FALSE) && (mag_ok != FALSE)) {
         if (attitude_init(FACTORY_ATT_SAMPLE_HZ) == STATUS_OK) {
-            LOG_INFO("factory:att madgwick ready %dHz 9dof", (int)FACTORY_ATT_SAMPLE_HZ);
+            LOG_INFO("factory:att mahony ready %dHz 9dof", (int)FACTORY_ATT_SAMPLE_HZ);
             if ((imu_read_sample(&imu) == STATUS_OK) && (magnetometer_read_sample(&mag) == STATUS_OK) &&
                 (attitude_update_from_sensors(&imu, &mag) == STATUS_OK)) {
                 attitude_euler_t euler;
 
                 if (attitude_get_euler(&euler) == STATUS_OK) {
-                    LOG_INFO("factory:att roll=%d pitch=%d yaw=%d (0.1deg)",
-                             (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+                    LOG_INFO("factory:att roll=%d pitch=%d yaw=%d deg",
+                             (int)euler.roll, (int)euler.pitch, (int)euler.yaw);
                 }
             }
         } else {
@@ -228,8 +228,8 @@ static void factory_attitude_periodic(void)
     s_log_div = 0U;
 
     if (attitude_get_euler(&euler) == STATUS_OK) {
-        LOG_INFO("factory:att roll=%d pitch=%d yaw=%d (0.1deg)",
-                 (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+        LOG_INFO("factory:att roll=%d pitch=%d yaw=%d deg",
+                 (int)euler.roll, (int)euler.pitch, (int)euler.yaw);
     }
 }
 
@@ -278,15 +278,15 @@ static void factory_cmd_att(int argc, const char *argv[])
         return;
     }
 
-    (void)snprintf(buf, sizeof(buf), "roll=%d pitch=%d yaw=%d (0.1deg)",
-                   (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+    (void)snprintf(buf, sizeof(buf), "roll=%d pitch=%d yaw=%d deg",
+                   (int)euler.roll, (int)euler.pitch, (int)euler.yaw);
     cmd_reply_ok("att", buf);
 }
 
 static void factory_cmd_register(void)
 {
     (void)cmd_register("ftm", factory_cmd_ftm, "ftm [version] factory status");
-    (void)cmd_register("att", factory_cmd_att, "att read euler angles (0.1deg)");
+    (void)cmd_register("att", factory_cmd_att, "att read euler angles (deg)");
 }
 
 /* -------------------------------------------------------------------------- */

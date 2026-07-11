@@ -27,7 +27,7 @@
 
 #define PROTO_SOF0                  0x54U
 #define PROTO_SOF1                  0x4DU
-#define PROTO_VER                   0x01U
+#define PROTO_VER                   0x02U
 #define PROTO_HEADER_SIZE           7U
 #define PROTO_MAX_PAYLOAD           256U
 #define PROTO_RESPONSE_BIT          0x8000U
@@ -193,12 +193,9 @@ static void proto_put_u32(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)((v >> 24) & 0xFFU);
 }
 
-static void proto_put_f32(uint8_t *p, float v)
+static void proto_put_i16(uint8_t *p, int16_t v)
 {
-    uint32_t bits;
-
-    (void)memcpy(&bits, &v, sizeof(bits));
-    proto_put_u32(p, bits);
+    proto_put_u16(p, (uint16_t)v);
 }
 
 static uint16_t proto_get_u16(const uint8_t *p)
@@ -553,11 +550,11 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     int32_t enc[PROTO_ENCODER_COUNT];
     uint8_t batt_pct = 0U;
     uint16_t batt_mv = 0U;
-    float roll = 0.0f;
-    float pitch = 0.0f;
-    float yaw = 0.0f;
+    int16_t roll = 0;
+    int16_t pitch = 0;
+    int16_t yaw = 0;
     uint8_t i;
-    const uint16_t need = (uint16_t)(2U + 1U + 12U + (uint16_t)(4 * PROTO_ENCODER_COUNT) +
+    const uint16_t need = (uint16_t)(2U + 1U + 6U + (uint16_t)(4 * PROTO_ENCODER_COUNT) +
                                      (uint16_t)(2U * PROTO_LINE_ADC_COUNT) + 4U + 2U);
 
     if ((out == NULL) || (out_max < need)) {
@@ -570,9 +567,9 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     batt_pct = info.percent;
 
     if (attitude_is_ready() && (attitude_get_euler(&euler) == STATUS_OK)) {
-        roll = (float)euler.roll_x10 / 10.0f;
-        pitch = (float)euler.pitch_x10 / 10.0f;
-        yaw = (float)euler.yaw_x10 / 10.0f;
+        roll = euler.roll;
+        pitch = euler.pitch;
+        yaw = euler.yaw;
     }
 
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
@@ -582,14 +579,14 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
 
     proto_put_u16(&out[0], batt_mv);
     out[2] = batt_pct;
-    proto_put_f32(&out[3], roll);
-    proto_put_f32(&out[7], pitch);
-    proto_put_f32(&out[11], yaw);
+    proto_put_i16(&out[3], roll);
+    proto_put_i16(&out[5], pitch);
+    proto_put_i16(&out[7], yaw);
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
-        proto_put_u32(&out[15U + (i * 4U)], (uint32_t)enc[i]);
+        proto_put_u32(&out[9U + (i * 4U)], (uint32_t)enc[i]);
     }
     {
-        const uint16_t line_off = (uint16_t)(15U + (4U * PROTO_ENCODER_COUNT));
+        const uint16_t line_off = (uint16_t)(9U + (4U * PROTO_ENCODER_COUNT));
         const uint16_t uptime_off = (uint16_t)(line_off + (2U * PROTO_LINE_ADC_COUNT));
 
         for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
@@ -619,23 +616,23 @@ static uint32_t proto_period_ms_for(uint8_t hz, uint8_t default_hz)
 static void proto_push_attitude(void)
 {
     attitude_euler_t euler = {0};
-    uint8_t payload[5U + 12U];
-    float roll = 0.0f;
-    float pitch = 0.0f;
-    float yaw = 0.0f;
+    uint8_t payload[5U + 6U];
+    int16_t roll = 0;
+    int16_t pitch = 0;
+    int16_t yaw = 0;
 
     if (attitude_is_ready()) {
         (void)attitude_get_euler(&euler);
-        roll = (float)euler.roll_x10 / 10.0f;
-        pitch = (float)euler.pitch_x10 / 10.0f;
-        yaw = (float)euler.yaw_x10 / 10.0f;
+        roll = euler.roll;
+        pitch = euler.pitch;
+        yaw = euler.yaw;
     }
 
     payload[0] = PROTO_PUSH_CH_ATTITUDE;
     proto_put_u32(&payload[1], proto_uptime_ms());
-    proto_put_f32(&payload[5], roll);
-    proto_put_f32(&payload[9], pitch);
-    proto_put_f32(&payload[13], yaw);
+    proto_put_i16(&payload[5], roll);
+    proto_put_i16(&payload[7], pitch);
+    proto_put_i16(&payload[9], yaw);
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 

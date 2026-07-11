@@ -83,13 +83,15 @@ function Get-CbbIncludes {
 
 function Get-ThirdPartySources {
     return @(
-        (Join-Path $ThirdPartyDir "madgwick\MadgwickAHRS.c")
+        (Join-Path $ThirdPartyDir "Fusion\Fusion\FusionAhrs.c"),
+        (Join-Path $ThirdPartyDir "Fusion\Fusion\FusionBias.c"),
+        (Join-Path $ThirdPartyDir "Fusion\Fusion\FusionCompass.c")
     )
 }
 
 function Get-ThirdPartyIncludes {
     return @(
-        (Join-Path $ThirdPartyDir "madgwick")
+        (Join-Path $ThirdPartyDir "Fusion\Fusion")
     )
 }
 

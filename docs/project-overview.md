@@ -64,6 +64,7 @@ App_Start();    /* projects/<car>/main/app.c：业务任务 */
 | [resource-allocation.md](resource-allocation.md) | 定时器/DMA/中断 |
 | [car-chassis-reference.md](car-chassis-reference.md) | TivaWare API 参考 |
 | [peripheral-selection.md](peripheral-selection.md) | 外设模块选型 |
+| [attitude-fusion.md](attitude-fusion.md) | 小车姿态/航向解算调研与选型 |
 | [flash-partition.md](flash-partition.md) | Flash 分区 |
 | [factory-partition-plan.md](factory-partition-plan.md) | 厂测切换计划 |
 

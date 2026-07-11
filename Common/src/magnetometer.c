@@ -102,3 +102,18 @@ status_t magnetometer_read_sample(magnetometer_sample_t *sample)
     st = qmc5883p_read_raw(&s_dev, &sample->mx, &sample->my, &sample->mz);
     return magnetometer_status_from_qmc(st);
 }
+
+status_t magnetometer_read_sample_fast(magnetometer_sample_t *sample)
+{
+    qmc5883p_status_t st;
+
+    if (s_ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    if (sample == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+
+    st = qmc5883p_read_raw_nowait(&s_dev, &sample->mx, &sample->my, &sample->mz);
+    return magnetometer_status_from_qmc(st);
+}

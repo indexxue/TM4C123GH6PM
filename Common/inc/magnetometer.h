@@ -22,5 +22,7 @@ typedef struct {
 status_t magnetometer_init(void);
 bool_t magnetometer_is_ready(void);
 status_t magnetometer_read_sample(magnetometer_sample_t *sample);
+/** 连续模式非阻塞读，供姿态周期任务使用（勿在厂测首读路径使用） */
+status_t magnetometer_read_sample_fast(magnetometer_sample_t *sample);
 
 #endif /* MAGNETOMETER_H */

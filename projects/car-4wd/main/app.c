@@ -42,8 +42,9 @@
 
 /** 姿态解算采样率 = 1 / app_tmr 周期 */
 #define APP_ATT_SAMPLE_HZ           (1000.0f / (float)APP_CTRL_PERIOD_MS)
-/** 每 N 个控制周期打印一次姿态（20ms * 1000 = 20s） */
-#define APP_ATT_LOG_INTERVAL        (1000U)
+/** 姿态角度日志周期（ms） */
+#define APP_ATT_LOG_PERIOD_MS       (1000U)
+#define APP_ATT_LOG_INTERVAL        (APP_ATT_LOG_PERIOD_MS / APP_CTRL_PERIOD_MS)
 #define APP_LED_SCENE_TICK_MS       (50U)
 
 /* -------------------------------------------------------------------------- */
@@ -74,64 +75,135 @@ static void app_heartbeat_log(void)
 /* IMU / 磁力计 / 姿态（I2C0 软件 I2C，地址见 imu.h / magnetometer.h）         */
 /* -------------------------------------------------------------------------- */
 
-static void app_sensors_init(void)
+static void app_attitude_log_euler(const attitude_euler_t *euler)
+{
+    if (euler == NULL) {
+        return;
+    }
+
+    LOG_INFO("app:att roll=%d pitch=%d yaw=%d deg",
+             (int)euler->roll, (int)euler->pitch, (int)euler->yaw);
+}
+
+static void app_attitude_log_status_once(void)
+{
+    static bool_t s_logged;
+    attitude_status_t status;
+
+    if (s_logged != FALSE) {
+        return;
+    }
+    if (attitude_get_status(&status) != STATUS_OK) {
+        return;
+    }
+    if (status.gyro_bias_ready == FALSE) {
+        return;
+    }
+
+    s_logged = TRUE;
+    LOG_INFO("app:att yaw opt ready mag_trust=%u gyro_bias=1",
+             (unsigned)status.mag_trust);
+}
+
+static bool_t app_sensors_boot_sample(void)
 {
     imu_sample_t imu;
     magnetometer_sample_t mag;
+    attitude_euler_t euler;
+
+    if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample_fast(&mag) != STATUS_OK) ||
+        (attitude_update_step(&imu, &mag) != STATUS_OK)) {
+        return FALSE;
+    }
+    if (attitude_get_euler(&euler) == STATUS_OK) {
+        app_attitude_log_euler(&euler);
+    }
+    return TRUE;
+}
+
+static bool_t app_sensors_try_init(bool_t is_retry)
+{
     status_t st;
 
     if (!device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
-        return;
+        return FALSE;
+    }
+    if (imu_is_ready() && magnetometer_is_ready() && attitude_is_ready()) {
+        return TRUE;
     }
 
-    st = imu_init();
-    if (st != STATUS_OK) {
-        LOG_WARN("app:imu init failed (%d)", (int)st);
-        return;
-    }
-    LOG_INFO("app:imu ready addr=0x%02X", (unsigned)IMU_I2C_ADDR_DEFAULT);
-
-    st = magnetometer_init();
-    if (st != STATUS_OK) {
-        LOG_WARN("app:mag init failed (%d)", (int)st);
-        return;
-    }
-    LOG_INFO("app:mag ready addr=0x%02X", (unsigned)MAGNETOMETER_I2C_ADDR_DEFAULT);
-
-    if (attitude_init(APP_ATT_SAMPLE_HZ) != STATUS_OK) {
-        LOG_WARN("app:att init failed");
-        return;
-    }
-    LOG_INFO("app:att madgwick ready %dHz 9dof", (int)APP_ATT_SAMPLE_HZ);
-
-    if ((imu_read_sample(&imu) == STATUS_OK) && (magnetometer_read_sample(&mag) == STATUS_OK) &&
-        (attitude_update_from_sensors(&imu, &mag) == STATUS_OK)) {
-        attitude_euler_t euler;
-
-        if (attitude_get_euler(&euler) == STATUS_OK) {
-            LOG_INFO("app:att roll=%d pitch=%d yaw=%d (0.1deg)",
-                     (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+    if (!imu_is_ready()) {
+        st = imu_init();
+        if (st != STATUS_OK) {
+            if (!is_retry) {
+                LOG_WARN("app:imu init failed (%d)", (int)st);
+            }
+            return FALSE;
         }
+        LOG_INFO("app:imu ready addr=0x%02X%s",
+                 (unsigned)IMU_I2C_ADDR_DEFAULT,
+                 is_retry ? " (retry)" : "");
     }
+
+    if (!magnetometer_is_ready()) {
+        st = magnetometer_init();
+        if (st != STATUS_OK) {
+            LOG_WARN("app:mag init failed (%d)%s", (int)st, is_retry ? " (retry)" : "");
+            return FALSE;
+        }
+        LOG_INFO("app:mag ready addr=0x%02X%s",
+                 (unsigned)MAGNETOMETER_I2C_ADDR_DEFAULT,
+                 is_retry ? " (retry)" : "");
+    }
+
+    if (!attitude_is_ready()) {
+        if (attitude_init(APP_ATT_SAMPLE_HZ) != STATUS_OK) {
+            LOG_WARN("app:att init failed%s", is_retry ? " (retry)" : "");
+            return FALSE;
+        }
+        LOG_INFO("app:att mahony %dHz stable=accel align rotate=gyro%s",
+                 (int)APP_ATT_SAMPLE_HZ,
+                 is_retry ? " (retry)" : "");
+        (void)app_sensors_boot_sample();
+    }
+
+    return TRUE;
+}
+
+static void app_sensors_init(void)
+{
+    (void)app_sensors_try_init(FALSE);
 }
 
 static void app_attitude_periodic(void)
 {
     static uint32_t s_log_div;
+    static uint32_t s_init_retry_div;
 
     imu_sample_t imu;
     magnetometer_sample_t mag;
     attitude_euler_t euler;
+    const magnetometer_sample_t *mag_ptr = NULL;
 
     if (!attitude_is_ready()) {
+        s_init_retry_div++;
+        if (s_init_retry_div >= APP_ATT_LOG_INTERVAL) {
+            s_init_retry_div = 0U;
+            (void)app_sensors_try_init(TRUE);
+        }
         return;
     }
-    if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample(&mag) != STATUS_OK)) {
+    if (imu_read_sample(&imu) != STATUS_OK) {
         return;
     }
-    if (attitude_update_from_sensors(&imu, &mag) != STATUS_OK) {
+    if (magnetometer_read_sample_fast(&mag) == STATUS_OK) {
+        mag_ptr = &mag;
+    }
+    if (attitude_update_step(&imu, mag_ptr) != STATUS_OK) {
         return;
     }
+
+    app_attitude_log_status_once();
 
     if (!device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         return;
@@ -144,8 +216,7 @@ static void app_attitude_periodic(void)
     s_log_div = 0U;
 
     if (attitude_get_euler(&euler) == STATUS_OK) {
-        LOG_INFO("app:att roll=%d pitch=%d yaw=%d (0.1deg)",
-                 (int)euler.roll_x10, (int)euler.pitch_x10, (int)euler.yaw_x10);
+        app_attitude_log_euler(&euler);
     }
 }
 
@@ -160,12 +231,12 @@ static void app_user_init(void)
 
     battery_init();
 
+    /* I2C0 软件 I2C 须在 proto_rx 与其它 vTaskDelay 之前完成，避免总线时序被打断 */
+    app_sensors_init();
+
     if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
         Line_Init();
     }
-
-    /* I2C0 软件 I2C 须在 proto_rx 与其它 vTaskDelay 之前完成，避免总线时序被打断 */
-    app_sensors_init();
 
     st = proto_uart_service_start();
     if (st != STATUS_OK) {
