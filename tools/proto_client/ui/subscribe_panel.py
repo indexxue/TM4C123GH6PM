@@ -60,6 +60,21 @@ class SubscribePanel(QGroupBox):
         if not available:
             self._chk_rpm.setChecked(False)
 
+    def apply_mask(self, mask: int) -> None:
+        """同步勾选状态（连接后自动订阅时调用，不触发 changed）。"""
+        self._chk_batt.blockSignals(True)
+        self._chk_line.blockSignals(True)
+        self._chk_ultra.blockSignals(True)
+        self._chk_rpm.blockSignals(True)
+        self._chk_batt.setChecked(bool(mask & int(proto.TelChannel.BATT)))
+        self._chk_line.setChecked(bool(mask & int(proto.TelChannel.LINE_ADC)))
+        self._chk_ultra.setChecked(bool(mask & int(proto.TelChannel.ULTRASONIC)))
+        self._chk_rpm.setChecked(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
+        self._chk_batt.blockSignals(False)
+        self._chk_line.blockSignals(False)
+        self._chk_ultra.blockSignals(False)
+        self._chk_rpm.blockSignals(False)
+
     def reset(self) -> None:
         for chk in (self._chk_batt, self._chk_line, self._chk_ultra, self._chk_rpm):
             chk.setChecked(False)

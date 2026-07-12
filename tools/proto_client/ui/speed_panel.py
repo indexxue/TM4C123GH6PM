@@ -24,6 +24,8 @@ from ui.param_panel import ParamEditor
 
 class SpeedControlPanel(QGroupBox):
     MOTOR_NAMES = ["M1", "M2", "M3", "M4"]
+    DEFAULT_RPM = 100
+    RPM_STEP = 50
 
     def __init__(
         self,
@@ -39,6 +41,7 @@ class SpeedControlPanel(QGroupBox):
         self._spd_limit_editor = spd_limit_editor
         self._on_clear_plot = on_clear_plot
         self._target = [0, 0, 0, 0]
+        self._motor_count = proto.MOTOR_COUNT_MAX
 
         root = QVBoxLayout(self)
 
@@ -57,32 +60,31 @@ class SpeedControlPanel(QGroupBox):
         self._mode.addItem("四轮 (format=2)", 2)
         cmd_form.addRow("模式", self._mode)
 
-        self._lr_hint = QLabel("左右模式：左=M1+M3，右=M2+M4（非 M1/M2 对）")
+        self._lr_hint = QLabel()
         self._lr_hint.setWordWrap(True)
         self._lr_hint.setStyleSheet("color: palette(mid);")
         cmd_form.addRow(self._lr_hint)
 
         self._motor_id = QSpinBox()
-        self._motor_id.setRange(1, 4)
-        self._rpm_single = QSpinBox()
-        self._rpm_single.setRange(-500, 500)
-        self._rpm_single.setValue(100)
-        cmd_form.addRow("电机 ID", self._motor_id)
-        cmd_form.addRow("RPM", self._rpm_single)
+        self._rpm_single = self._make_rpm_spin()
+        self._motor_id_row = QLabel("电机 ID")
+        self._rpm_single_row = QLabel("RPM")
+        cmd_form.addRow(self._motor_id_row, self._motor_id)
+        cmd_form.addRow(self._rpm_single_row, self._rpm_single)
 
-        self._rpm_left = QSpinBox()
-        self._rpm_left.setRange(-500, 500)
-        self._rpm_left.setValue(50)
-        self._rpm_right = QSpinBox()
-        self._rpm_right.setRange(-500, 500)
-        self._rpm_right.setValue(50)
-        cmd_form.addRow("左组 RPM (M1+M3)", self._rpm_left)
-        cmd_form.addRow("右组 RPM (M2+M4)", self._rpm_right)
+        self._rpm_left = self._make_rpm_spin()
+        self._rpm_right = self._make_rpm_spin()
+        self._rpm_left_row = QLabel("左组 RPM")
+        self._rpm_right_row = QLabel("右组 RPM")
+        cmd_form.addRow(self._rpm_left_row, self._rpm_left)
+        cmd_form.addRow(self._rpm_right_row, self._rpm_right)
 
-        self._rpm_m = [QSpinBox() for _ in range(4)]
+        self._rpm_m = [self._make_rpm_spin() for _ in range(4)]
+        self._rpm_m_rows: list[QLabel] = []
         for i, sp in enumerate(self._rpm_m):
-            sp.setRange(-500, 500)
-            cmd_form.addRow(f"{self.MOTOR_NAMES[i]} RPM", sp)
+            row_lbl = QLabel(f"{self.MOTOR_NAMES[i]} RPM")
+            self._rpm_m_rows.append(row_lbl)
+            cmd_form.addRow(row_lbl, sp)
 
         btn_row = QHBoxLayout()
         self._btn_apply = QPushButton("下发 SET_SPEED")
@@ -107,6 +109,39 @@ class SpeedControlPanel(QGroupBox):
         self._btn_clear.clicked.connect(self._clear_plot)
         self._mode.currentIndexChanged.connect(self._update_mode_visibility)
 
+        self._update_mode_visibility()
+        self.set_motor_count(self._motor_count)
+
+    @staticmethod
+    def _make_rpm_spin() -> QSpinBox:
+        sp = QSpinBox()
+        sp.setRange(-500, 500)
+        sp.setSingleStep(SpeedControlPanel.RPM_STEP)
+        sp.setValue(SpeedControlPanel.DEFAULT_RPM)
+        return sp
+
+    def set_motor_count(self, count: int) -> None:
+        count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
+        self._motor_count = count
+        self._motor_id.setRange(1, count)
+        if self._motor_id.value() > count:
+            self._motor_id.setValue(1)
+        for i in range(proto.MOTOR_COUNT_MAX):
+            show = i < count
+            self._rpm_m_rows[i].setVisible(show)
+            self._rpm_m[i].setVisible(show)
+        if count == 2:
+            self._lr_hint.setText("左右模式：左=M1，右=M2（format=1 走 chassis LR）")
+            self._rpm_left_row.setText("左 RPM (M1)")
+            self._rpm_right_row.setText("右 RPM (M2)")
+            self._mode.setItemText(1, "左右 (format=1)")
+            self._mode.setItemText(2, "双轮 (format=2)")
+        else:
+            self._lr_hint.setText("左右模式：左=M1+M3，右=M2+M4")
+            self._rpm_left_row.setText("左组 RPM (M1+M3)")
+            self._rpm_right_row.setText("右组 RPM (M2+M4)")
+            self._mode.setItemText(1, "左右 (format=1)")
+            self._mode.setItemText(2, "四轮 (format=2)")
         self._update_mode_visibility()
 
     @property
@@ -145,7 +180,9 @@ class SpeedControlPanel(QGroupBox):
             self._target = [left, right, left, right]
             payload = proto.build_set_speed_lr(left, right)
         else:
-            rpms = [sp.value() for sp in self._rpm_m]
+            rpms = [sp.value() for sp in self._rpm_m[: self._motor_count]]
+            if self._motor_count == 2:
+                rpms.extend([0, 0])
             self._target = rpms
             payload = proto.build_set_speed_four(*rpms)
         self._worker.request_set_speed(payload)
@@ -161,7 +198,7 @@ class SpeedControlPanel(QGroupBox):
     def _step_m1(self) -> None:
         self._mode.setCurrentIndex(0)
         self._motor_id.setValue(1)
-        self._rpm_single.setValue(100)
+        self._rpm_single.setValue(self.DEFAULT_RPM)
         self._apply_speed()
 
     def _clear_plot(self) -> None:
@@ -173,14 +210,22 @@ class SpeedControlPanel(QGroupBox):
 
     def _update_mode_visibility(self) -> None:
         mode = self._mode.currentData()
-        if mode == 1:
-            self._rpm_left.setValue(50)
-            self._rpm_right.setValue(50)
+        self._motor_id_row.setVisible(mode == 0)
+        self._motor_id.setVisible(mode == 0)
         self._motor_id.setEnabled(mode == 0)
+        self._rpm_single_row.setVisible(mode == 0)
+        self._rpm_single.setVisible(mode == 0)
         self._rpm_single.setEnabled(mode == 0)
+        self._rpm_left_row.setVisible(mode == 1)
+        self._rpm_left.setVisible(mode == 1)
         self._rpm_left.setEnabled(mode == 1)
+        self._rpm_right_row.setVisible(mode == 1)
+        self._rpm_right.setVisible(mode == 1)
         self._rpm_right.setEnabled(mode == 1)
         self._lr_hint.setVisible(mode == 1)
-        for sp in self._rpm_m:
-            sp.setEnabled(mode == 2)
+        for i, sp in enumerate(self._rpm_m):
+            show = mode == 2 and i < self._motor_count
+            self._rpm_m_rows[i].setVisible(show)
+            sp.setVisible(show)
+            sp.setEnabled(show)
         self._notify_target_lines()

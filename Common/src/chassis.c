@@ -32,6 +32,11 @@
 #define CHASSIS_PID_SIGN_FIX_MIN_RPM  5.0f
 #endif
 
+#ifndef CHASSIS_FF_GAIN
+/** 前馈占空缩放：<1 减轻模型偏乐观导致的稳态偏高，余量交给 PI */
+#define CHASSIS_FF_GAIN  0.90f
+#endif
+
 static pid_t s_pid[CHASSIS_MOTOR_COUNT];
 static f32_t s_target_rpm[CHASSIS_MOTOR_COUNT];
 static f32_t s_ramped_rpm[CHASSIS_MOTOR_COUNT];
@@ -173,7 +178,7 @@ static void chassis_motor_output(u8_t motor_id, f32_t target_rpm, f32_t measured
     chassis_pid_setpoint_process(target_rpm, measured_rpm, &pid_sp, &pid_pv);
     pid_out = pid_update(&s_pid[motor_id - 1U], pid_sp, pid_pv, dt_s);
     duty_ff = motion_rpm_to_duty_permille(fabsf(target_rpm));
-    duty_f = (f32_t)duty_ff + pid_out;
+    duty_f = ((f32_t)duty_ff * CHASSIS_FF_GAIN) + pid_out;
 
     if (duty_f < 0.0f) {
         duty_f = 0.0f;

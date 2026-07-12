@@ -557,7 +557,10 @@ class SerialWorker(QThread):
             self.log.emit("连接就绪；姿态+编码器固件常驻推送，其它通道在仪表盘订阅")
             if baudrate >= 115200:
                 self.log.emit("提示: 若 SET_SPEED 仍超时，可尝试波特率 57600 或 9600")
-            self._apply_subscription_now(0)
+            optional = 0
+            if self._hello_info.caps & int(proto.Cap.SPEED_LOOP):
+                optional |= int(proto.TelChannel.MOTOR_RPM)
+            self._apply_subscription_now(optional)
 
         if ping_frame is not None:
             self._touch_link()
@@ -590,8 +593,7 @@ class SerialWorker(QThread):
         return self._seq
 
     def _expected_response_cmd(self, req_cmd: int) -> int:
-        if req_cmd == int(proto.Cmd.SUBSCRIBE):
-            return int(proto.Cmd.TELEMETRY_PUSH)
+        # SUBSCRIBE 应答 cmd = SUBSCRIBE|RESPONSE_BIT，与 TELEMETRY_PUSH 同为 0x8011
         return proto._response_cmd(req_cmd)
 
     def _post_request(self, cmd: int, payload: bytes = b"",

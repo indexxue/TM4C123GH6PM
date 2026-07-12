@@ -46,7 +46,9 @@ tools/proto_client/
 | 遥控 | DRIVE / DRIVE_STOP |
 | 右侧参数 | schema.json 全部 NVS 参数读写 |
 
-连接成功后自动 SUBSCRIBE：姿态 + 循迹；若固件 caps 含 `SPEED_LOOP` 则追加 **MOTOR_RPM** 推送。
+连接成功后自动 SUBSCRIBE：姿态 + 编码器；若固件 caps 含 `SPEED_LOOP` 则**自动**订阅 **MOTOR_RPM** 推送。
+
+「姿态 / 循迹 / 速度」→「转速 / 调试」页：M1~M4 独立曲线（可勾选显示/隐藏），支持 **两轮 / 四轮** 车型切换（HELLO `hw_rev` 自动识别）。
 
 ## CLI
 

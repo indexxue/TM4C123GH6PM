@@ -196,12 +196,17 @@ class MainWindow(QMainWindow):
             f"proto={info.proto_ver}  fw={info.fw_version}  hw_rev={info.hw_rev}  "
             f"caps={proto.caps_text(info.caps)}"
         )
-        self._dashboard.subscribe_panel.set_rpm_available(bool(info.caps & int(proto.Cap.SPEED_LOOP)))
+        has_speed = bool(info.caps & int(proto.Cap.SPEED_LOOP))
+        self._dashboard.subscribe_panel.set_rpm_available(has_speed)
+        motor_count = proto.motor_count_for_hw_rev(info.hw_rev)
+        self._plot.set_motor_count(motor_count)
         if info.proto_ver < proto.PROTO_VER:
             self._append_log(f"提示: 固件 proto_ver={info.proto_ver}，姿态按 v1 f32 解析")
 
     def _on_optional_subscription(self, mask: int) -> None:
         self._dashboard.set_optional_channels(mask)
+        self._dashboard.subscribe_panel.apply_mask(mask)
+        self._plot.set_rpm_subscribed(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
 
     def _on_link_alive(self, alive: bool) -> None:
         if alive:

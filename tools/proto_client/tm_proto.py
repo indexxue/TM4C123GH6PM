@@ -90,6 +90,17 @@ CHANNEL_ID_LINE_ADC = 3
 CHANNEL_ID_ULTRASONIC = 4
 CHANNEL_ID_MOTOR_RPM = 5
 
+HW_REV_CAR_4WD_V1 = 0
+HW_REV_CAR_2WD_V1 = 1
+MOTOR_COUNT_MAX = 4
+
+
+def motor_count_for_hw_rev(hw_rev: int) -> int:
+    """与固件 nvs.h NVS_HW_REV_* 一致。"""
+    if hw_rev == HW_REV_CAR_2WD_V1:
+        return 2
+    return MOTOR_COUNT_MAX
+
 
 class ErrCode(IntEnum):
     UNKNOWN_CMD = 0x02

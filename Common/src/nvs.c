@@ -892,7 +892,7 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
                       : NVS_HW_REV_CAR_4WD_V1;
 
     cfg->pid_speed.kp = 1.0f;
-    cfg->pid_speed.ki = 0.0f;
+    cfg->pid_speed.ki = 0.20f;
     cfg->pid_speed.kd = 0.0f;
     cfg->pid_line.kp = 2.0f;
     cfg->pid_line.ki = 0.0f;

@@ -9,6 +9,8 @@ import pyqtgraph as pg
 import tm_proto as proto
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
+    QCheckBox,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -110,6 +112,13 @@ class PlotTab(QWidget):
         self._time_origin: Optional[float] = None
         self._charts_paused = False
         self._last_att = (0.0, 0.0, 0.0)
+        self._motor_count = proto.MOTOR_COUNT_MAX
+        self._rpm_subscribed = False
+        self._motor_visible = [True] * proto.MOTOR_COUNT_MAX
+        self._rpm_targets = [0] * proto.MOTOR_COUNT_MAX
+        self._rpm_target_mode = 0
+        self._rpm_target_motor_id = 1
+        self._last_rpms = [0] * proto.MOTOR_COUNT_MAX
 
         root = QVBoxLayout(self)
         root.addWidget(self._build_toolbar())
@@ -210,15 +219,14 @@ class PlotTab(QWidget):
         layout = QVBoxLayout(page)
 
         self._plot_enc = pg.PlotWidget(title="编码器计数")
-        self._plot_enc.addLegend(offset=(10, 10))
+        enc_legend = self._plot_enc.addLegend(offset=(10, 10))
         self._plot_enc.setLabel("left", "counts")
         self._plot_enc.setLabel("bottom", "时间", units="s")
         self._plot_enc.showGrid(x=True, y=True, alpha=0.3)
         self._enc_curves = []
         for i, name in enumerate(self.MOTOR_NAMES):
-            curve = self._plot_enc.plot(
-                pen=pg.mkPen(self.MOTOR_COLORS[i], width=2), name=name
-            )
+            curve = self._plot_enc.plot(pen=pg.mkPen(self.MOTOR_COLORS[i], width=2))
+            enc_legend.addItem(curve, name)
             self._enc_curves.append(curve)
         layout.addWidget(self._plot_enc, stretch=1)
 
@@ -226,7 +234,7 @@ class PlotTab(QWidget):
         layout.addWidget(self._lbl_enc_live)
 
         self._enc_time: list[float] = []
-        self._enc_data: list[list[float]] = [[] for _ in range(4)]
+        self._enc_data: list[list[float]] = [[] for _ in range(proto.MOTOR_COUNT_MAX)]
         self._views.addTab(page, "编码器")
 
     def _build_rpm_view(
@@ -239,25 +247,48 @@ class PlotTab(QWidget):
         layout = QHBoxLayout(page)
 
         chart_col = QVBoxLayout()
-        self._plot_rpm = pg.PlotWidget(title="轮速 RPM（需订阅「电机 RPM」）")
-        self._plot_rpm.addLegend(offset=(10, 10))
+
+        self._lbl_rpm_hint = QLabel("等待订阅电机 RPM…")
+        self._lbl_rpm_hint.setStyleSheet("color: #c8860a;")
+        chart_col.addWidget(self._lbl_rpm_hint)
+
+        motor_bar = QHBoxLayout()
+        motor_bar.addWidget(QLabel("车型"))
+        self._motor_count_combo = QComboBox()
+        self._motor_count_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
+        self._motor_count_combo.addItem("两轮 (M1~M2)", 2)
+        self._motor_count_combo.currentIndexChanged.connect(self._on_motor_count_combo)
+        motor_bar.addWidget(self._motor_count_combo)
+        motor_bar.addSpacing(12)
+        motor_bar.addWidget(QLabel("显示曲线"))
+        self._motor_checks: list[QCheckBox] = []
+        for i, name in enumerate(self.MOTOR_NAMES):
+            chk = QCheckBox(name)
+            chk.setChecked(True)
+            chk.toggled.connect(lambda checked, idx=i: self._on_motor_visibility(idx, checked))
+            motor_bar.addWidget(chk)
+            self._motor_checks.append(chk)
+        motor_bar.addStretch()
+        chart_col.addLayout(motor_bar)
+
+        self._plot_rpm = pg.PlotWidget(title="轮速 RPM")
+        rpm_legend = self._plot_rpm.addLegend(offset=(10, 10))
         self._plot_rpm.setLabel("left", "RPM")
         self._plot_rpm.setLabel("bottom", "时间", units="s")
         self._plot_rpm.showGrid(x=True, y=True, alpha=0.3)
+        self._plot_rpm.enableAutoRange(axis="y")
         self._rpm_curves = []
-        self._target_lines = []
+        self._target_curves = []
         for i, name in enumerate(self.MOTOR_NAMES):
-            curve = self._plot_rpm.plot(
-                pen=pg.mkPen(self.MOTOR_COLORS[i], width=2), name=name
-            )
+            color = self.MOTOR_COLORS[i]
+            curve = self._plot_rpm.plot(pen=pg.mkPen(color, width=2))
+            rpm_legend.addItem(curve, f"{name} 实测")
             self._rpm_curves.append(curve)
-            line = pg.InfiniteLine(
-                angle=0,
-                pen=pg.mkPen(self.MOTOR_COLORS[i], width=1, style=Qt.PenStyle.DashLine),
+            tgt_curve = self._plot_rpm.plot(
+                pen=pg.mkPen(color, width=2, style=Qt.PenStyle.DashLine),
             )
-            line.setVisible(False)
-            self._plot_rpm.addItem(line)
-            self._target_lines.append(line)
+            rpm_legend.addItem(tgt_curve, f"{name} 目标")
+            self._target_curves.append(tgt_curve)
         chart_col.addWidget(self._plot_rpm, stretch=1)
 
         self._lbl_rpm_live = QLabel("M1=—  M2=—  M3=—  M4=—")
@@ -275,8 +306,97 @@ class PlotTab(QWidget):
         layout.addWidget(self._speed_panel, stretch=1)
 
         self._rpm_time: list[float] = []
-        self._rpm_data: list[list[float]] = [[] for _ in range(4)]
+        self._rpm_data: list[list[float]] = [[] for _ in range(proto.MOTOR_COUNT_MAX)]
         self._views.addTab(page, "转速 / 调试")
+        self._apply_motor_count_ui()
+
+    def set_motor_count(self, count: int) -> None:
+        count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
+        if count == self._motor_count:
+            return
+        self._motor_count = count
+        idx = self._motor_count_combo.findData(count)
+        if idx >= 0:
+            self._motor_count_combo.blockSignals(True)
+            self._motor_count_combo.setCurrentIndex(idx)
+            self._motor_count_combo.blockSignals(False)
+        self._apply_motor_count_ui()
+
+    def set_rpm_subscribed(self, subscribed: bool) -> None:
+        self._rpm_subscribed = subscribed
+        if subscribed:
+            self._lbl_rpm_hint.setText(
+                "电机 RPM 已订阅 — 实线=实测，同色虚线=目标"
+            )
+            self._lbl_rpm_hint.setStyleSheet("color: #2d7a2d;")
+        else:
+            self._lbl_rpm_hint.setText(
+                "未订阅电机 RPM：在仪表盘勾选「电机 RPM」并点「应用订阅」"
+            )
+            self._lbl_rpm_hint.setStyleSheet("color: #c8860a; font-weight: bold;")
+
+    def _on_motor_count_combo(self) -> None:
+        count = self._motor_count_combo.currentData()
+        if count is None:
+            return
+        self._motor_count = int(count)
+        self._apply_motor_count_ui()
+
+    def _on_motor_visibility(self, motor_index: int, visible: bool) -> None:
+        if 0 <= motor_index < len(self._motor_visible):
+            self._motor_visible[motor_index] = visible
+            if not self._charts_paused:
+                self._redraw_rpm()
+
+    def _apply_motor_count_ui(self) -> None:
+        for i in range(proto.MOTOR_COUNT_MAX):
+            active = i < self._motor_count
+            was_disabled = not self._motor_checks[i].isEnabled()
+            self._motor_checks[i].setEnabled(active)
+            if not active:
+                self._motor_checks[i].blockSignals(True)
+                self._motor_checks[i].setChecked(False)
+                self._motor_checks[i].blockSignals(False)
+                self._motor_visible[i] = False
+            else:
+                if was_disabled:
+                    self._motor_checks[i].setChecked(True)
+                self._motor_visible[i] = self._motor_checks[i].isChecked()
+            self._rpm_curves[i].setVisible(active and self._motor_visible[i])
+        self._speed_panel.set_motor_count(self._motor_count)
+        self._lbl_enc_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
+        self._lbl_rpm_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
+        if not self._charts_paused:
+            self._redraw_encoder()
+            self._redraw_rpm()
+
+    def _format_motor_live_text(
+        self,
+        values: list[Optional[int]],
+        targets: Optional[list[int]] = None,
+    ) -> str:
+        parts: list[str] = []
+        for i in range(self._motor_count):
+            if values[i] is None:
+                parts.append(f"{self.MOTOR_NAMES[i]}=—")
+                continue
+            text = f"{self.MOTOR_NAMES[i]}={values[i]}"
+            if targets is not None and self._target_visible(i):
+                tgt = targets[i]
+                delta = int(values[i]) - int(tgt)
+                text += f"→{tgt}(Δ{delta:+d})"
+            parts.append(text)
+        return "  ".join(parts)
+
+    def _target_visible(self, motor_index: int) -> bool:
+        if motor_index >= self._motor_count or not self._motor_visible[motor_index]:
+            return False
+        tgt = self._rpm_targets[motor_index]
+        if tgt == 0:
+            return False
+        if self._rpm_target_mode == 0:
+            return self._rpm_target_motor_id == motor_index + 1
+        return True
 
     def reset(self) -> None:
         self._time_origin = None
@@ -300,8 +420,9 @@ class PlotTab(QWidget):
 
         self.reset_encoder_plot()
         self.reset_rpm_plot()
-        self._lbl_enc_live.setText("M1=—  M2=—  M3=—  M4=—")
-        self._lbl_rpm_live.setText("M1=—  M2=—  M3=—  M4=—")
+        self._lbl_enc_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
+        self._lbl_rpm_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
+        self.set_rpm_subscribed(False)
         self._redraw_all()
 
     def reset_encoder_plot(self) -> None:
@@ -315,6 +436,8 @@ class PlotTab(QWidget):
         self._rpm_time.clear()
         for series in self._rpm_data:
             series.clear()
+        self._rpm_targets = [0] * proto.MOTOR_COUNT_MAX
+        self._last_rpms = [0] * proto.MOTOR_COUNT_MAX
         if not self._charts_paused:
             self._redraw_rpm()
 
@@ -361,15 +484,49 @@ class PlotTab(QWidget):
         n = min(len(self._enc_time), *(len(s) for s in self._enc_data)) if self._enc_time else 0
         xs = self._enc_time[-n:] if n else []
         for i, curve in enumerate(self._enc_curves):
-            curve.setData(xs, self._enc_data[i][-n:] if n else [])
+            active = i < self._motor_count
+            curve.setVisible(active)
+            if active and n:
+                curve.setData(xs, self._enc_data[i][-n:])
+            else:
+                curve.setData([], [])
         self._set_time_window(self._plot_enc, self._enc_time)
 
     def _redraw_rpm(self) -> None:
         n = min(len(self._rpm_time), *(len(s) for s in self._rpm_data)) if self._rpm_time else 0
         xs = self._rpm_time[-n:] if n else []
+        y_vals: list[float] = []
         for i, curve in enumerate(self._rpm_curves):
-            curve.setData(xs, self._rpm_data[i][-n:] if n else [])
+            active = i < self._motor_count and self._motor_visible[i]
+            curve.setVisible(active)
+            tgt_curve = self._target_curves[i]
+            show_target = self._target_visible(i)
+            if active and n:
+                ys = self._rpm_data[i][-n:]
+                curve.setData(xs, ys)
+                y_vals.extend(ys)
+            else:
+                curve.setData([], [])
+            tgt_curve.setVisible(show_target)
+            if show_target and xs:
+                tgt = float(self._rpm_targets[i])
+                tgt_curve.setData(xs, [tgt] * len(xs))
+                y_vals.append(tgt)
+            else:
+                tgt_curve.setData([], [])
         self._set_time_window(self._plot_rpm, self._rpm_time)
+        if y_vals:
+            y_min = min(y_vals)
+            y_max = max(y_vals)
+            if y_min == y_max:
+                pad = max(10.0, abs(y_min) * 0.1 + 5.0)
+                self._plot_rpm.setYRange(y_min - pad, y_max + pad, padding=0.02)
+            else:
+                pad = max(5.0, (y_max - y_min) * 0.1)
+                self._plot_rpm.setYRange(y_min - pad, y_max + pad, padding=0.02)
+        self._lbl_rpm_live.setText(
+            self._format_motor_live_text(self._last_rpms, self._rpm_targets)
+        )
 
     def _redraw_all(self) -> None:
         self._redraw_attitude()
@@ -411,33 +568,38 @@ class PlotTab(QWidget):
             self._redraw_line()
 
     def on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
-        self._lbl_enc_live.setText(
-            "  ".join(f"{self.MOTOR_NAMES[i]}={counts[i]}" for i in range(4))
-        )
+        self._lbl_enc_live.setText(self._format_motor_live_text(list(counts)))
         t = self._plot_time_s()
         self._enc_time.append(t)
-        for i in range(4):
+        for i in range(proto.MOTOR_COUNT_MAX):
             self._enc_data[i].append(float(counts[i]))
         self._trim_series(self._enc_time, *self._enc_data)
         if not self._charts_paused:
             self._redraw_encoder()
 
     def on_motor_rpm(self, rpms: tuple[int, int, int, int]) -> None:
-        self._lbl_rpm_live.setText(
-            "  ".join(f"{self.MOTOR_NAMES[i]}={rpms[i]}" for i in range(4))
-        )
+        self._last_rpms = list(rpms)
         t = self._plot_time_s()
         self._rpm_time.append(t)
-        for i in range(4):
+        for i in range(proto.MOTOR_COUNT_MAX):
             self._rpm_data[i].append(float(rpms[i]))
         self._trim_series(self._rpm_time, *self._rpm_data)
         if not self._charts_paused:
             self._redraw_rpm()
+        else:
+            self._lbl_rpm_live.setText(
+                self._format_motor_live_text(self._last_rpms, self._rpm_targets)
+            )
 
     def _update_target_lines(self, target: list[int], mode: int, motor_id: int) -> None:
-        for i, line in enumerate(self._target_lines):
-            line.setValue(float(target[i]))
-            if mode == 0:
-                line.setVisible(motor_id == i + 1)
-            else:
-                line.setVisible(True)
+        self._rpm_targets = list(target[: proto.MOTOR_COUNT_MAX])
+        while len(self._rpm_targets) < proto.MOTOR_COUNT_MAX:
+            self._rpm_targets.append(0)
+        self._rpm_target_mode = int(mode)
+        self._rpm_target_motor_id = int(motor_id)
+        if not self._charts_paused:
+            self._redraw_rpm()
+        else:
+            self._lbl_rpm_live.setText(
+                self._format_motor_live_text(self._last_rpms, self._rpm_targets)
+            )
