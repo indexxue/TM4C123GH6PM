@@ -95,7 +95,10 @@
 #define PROTO_DEFAULT_HZ_MOTOR_RPM  10U
 #define PROTO_PUSH_SUPPRESS_MS      280U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
-#define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 650U
+#define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 350U
+
+/** 与 app.c APP_CTRL_PERIOD_MS 一致，SET_SPEED 后立即 tick 用 */
+#define PROTO_CHASSIS_TICK_MS       20U
 
 /** 超声波未连接/未就绪/测距失败时的占位距离（mm） */
 #define PROTO_ULTRA_INVALID_MM      9999U
@@ -106,8 +109,8 @@
 
 #define PROTO_TASK_NAME_RX          "proto_rx"
 #define PROTO_RX_STACK_WORDS        (768U)
-#define PROTO_RX_PRIORITY           (3U)
-#define PROTO_RX_POLL_MS            (5U)
+#define PROTO_RX_PRIORITY           (4U)
+#define PROTO_RX_POLL_MS            (1U)
 #define PROTO_RX_GATE_MS            (30U)
 #define PROTO_RX_GATE_CMD_MS        120U
 
@@ -1266,6 +1269,7 @@ static void proto_handle_set_speed(uint8_t seq, const uint8_t *payload, uint16_t
     } else {
         proto_suppress_pushes(PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS);
     }
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
     proto_reply_ack(PROTO_CMD_SET_SPEED, seq, NULL, 0U);
 }
 
@@ -1278,6 +1282,7 @@ static void proto_handle_speed_stop(uint8_t seq)
     chassis_stop();
     s_drive_active = false;
     s_drive_stop_req = false;
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
     proto_reply_ack(PROTO_CMD_SPEED_STOP, seq, NULL, 0U);
 }
 

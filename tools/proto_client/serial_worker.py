@@ -424,8 +424,10 @@ class SerialWorker(QThread):
         if len(frame_bytes) >= 7:
             plen = frame_bytes[4] | (frame_bytes[5] << 8)
             if plen > 0:
-                # 载荷越长 HC-05 越容易截断/CRC 损坏，适当拉长发送间隔
-                time.sleep(0.025 + min(plen, 32) * 0.004)
+                if proto.HC05_SAFE_TX:
+                    time.sleep(0.025 + min(plen, 32) * 0.004)
+                else:
+                    time.sleep(0.008 + min(plen, 32) * 0.0015)
         return True
 
     def _wait_rx_quiet(self, quiet_s: float = 0.06, timeout_s: float = 0.6) -> None:
@@ -612,8 +614,8 @@ class SerialWorker(QThread):
                 with self._pending_lock:
                     self._pending.pop(seq, None)
                 return None
-            if duplicate_tx:
-                time.sleep(0.08)
+            if duplicate_tx and proto.HC05_SAFE_TX:
+                time.sleep(proto.SET_SPEED_DUP_TX_INTERVAL_S)
                 if not self._write_frame(frame_bytes):
                     with self._pending_lock:
                         self._pending.pop(seq, None)
@@ -660,8 +662,8 @@ class SerialWorker(QThread):
                 with self._pending_lock:
                     self._pending.pop(seq, None)
                 return None
-            if duplicate_tx:
-                time.sleep(0.08)
+            if duplicate_tx and proto.HC05_SAFE_TX:
+                time.sleep(proto.SET_SPEED_DUP_TX_INTERVAL_S)
                 if not self._write_frame(frame_bytes):
                     with self._pending_lock:
                         self._pending.pop(seq, None)
@@ -819,7 +821,11 @@ class SerialWorker(QThread):
         if self._speed_attempt == 0:
             self._begin_critical()
             fmt = payload[0] if payload else 0
-            quiet_s = 0.12 if fmt else 0.06
+            quiet_s = (
+                proto.SET_SPEED_QUIET_S_FMT_LR
+                if fmt == 1
+                else proto.SET_SPEED_QUIET_S_FMT0
+            )
             self._wait_rx_quiet(quiet_s=quiet_s, timeout_s=1.0)
         else:
             self._flush_serial_input()
@@ -848,7 +854,7 @@ class SerialWorker(QThread):
             payload,
             on_response=on_response,
             timeout=timeout_s,
-            duplicate_tx=True,
+            duplicate_tx=proto.HC05_SAFE_TX,
         )
 
     def _post_speed_stop(self) -> None:
@@ -863,7 +869,7 @@ class SerialWorker(QThread):
             b"",
             on_response=on_response,
             timeout=4.0,
-            duplicate_tx=True,
+            duplicate_tx=proto.HC05_SAFE_TX,
         )
 
     def _finish_set_speed(self, frame: Optional[proto.Frame]) -> None:
