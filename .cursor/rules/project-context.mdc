@@ -83,7 +83,7 @@ docs/                   # 设计文档
 |------|------|-----------|
 | 4 路电机 PWM | Timer0/1 | PB6/PB7, PB4/PB5 @ 10 kHz |
 | 方向控制 | GPIO | PF4/PC7 (M1), PC4/PA6 (M2), PA7/PF0 (M3), PF1/PF2 (M4) |
-| 编码器 | GPIO 软件（`bsp_sw_qei`） | 四路均为软件正交解码；M1 PC5/PC6、M2 PD6/PD7、M3 PF3/PD4、M4 PD5/PB0 |
+| 编码器 | M1/M2 **硬件 QEI**（PC5/6、PD6/7）；M3/M4 **软件 QEI**（PF3/PD4、PD5/PB0） | 板级已去 RC 滤波，M1/M2 走硬件正交解码 |
 | 蓝牙 | UART0 | PA0/PA1 @ 115200 — **协议层**（遥控/上位机通信，非 CMD） |
 | 调试串口 | UART7 | PE0 RX / PE1 TX @ 115200 — **日志 + CMD 命令行** |
 | I2C 总线 | I2C0 软件（GPIO 位操作） | PB2/PB3 — MPU6050@0x69、QMC5883P@0x2C（暂无 OLED） |
@@ -111,7 +111,7 @@ TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模�
 - 生成代码：`board.c`（`BOARD_LINE_ADC_CFG`）、`line.c`（`Line_Init` / `Line_Sample` / `Line_IsReady`）
 - 初始化顺序：`Board_Periph_Init()`（引脚 mux + ADC init）→ `Line_Init()`（`start.c`，须在 mux 之后）
 - 应用层：`app.c` 周期日志 `app: line adc=[...]` / `app: line det=[...]`（编码器周期日志默认 `APP_ENC_LOG_ENABLE=0` 关闭）
-- 协议遥测：`proto.c` 经 `BOARD_LINE_ADC_CFG` 推送 `LINE_SENSOR_COUNT` 路 ADC
+- 协议：**姿态+编码器常驻推送**；电量/循迹/超声/RPM 按需 `SUBSCRIBE`（上位机仪表盘勾选）
 
 
 ## 串口与通信分工
@@ -130,9 +130,9 @@ TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模�
 
 平台层：量产 app UART7 日志；厂测 factory UART7 日志 + CMD；UART0 蓝牙协议层已接入；板级外设 init 已接通。
 
-**已接通**：IMU/磁力计（I2C0 软件 I2C）；**ADC 循迹 5 路采样与阈值检测**（`Line_Sample` + `app_line_periodic_log`）；编码器计数（`bsp_sw_qei` / 硬件 QEI）。
+**已接通**：IMU/磁力计（I2C0 软件 I2C）；**ADC 循迹 5 路采样与阈值检测**；**编码器计数与差分测速**（M1/M2 硬件 QEI + M3/M4 软件 QEI，`motion.c` + `chassis.c` 速度环）。
 
-**待实现**：编码器测速、PID 速度/循迹闭环、按键业务逻辑。
+**待实现**：循迹闭环、按键业务逻辑。
 
 ## 开发约束
 
@@ -146,10 +146,11 @@ TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模�
 
 ## 编码器硬件说明（car-4wd）
 
-- **板级 RC 滤波**：每路编码器 A/B 相在进 MCU 前串联 **RC 低通滤波**；边沿被钝化后 **硬件 QEI 模块实测不计数**（GPIO 读 ab 与软件解码仍有效）。
-- **M2 引脚 PD6/PD7**：手册规定 **QEI0 PhA0/PhB0** 映射 PD6/PD7，**芯片支持**；其中 **PD7 默认为 NMI 锁定引脚**，须 `GPIOUnlockPin`/`bsp_gpio_commit_locked_pins` 后才能作 GPIO/QEI（M1 的 PC5/PC6 无此问题）。
-- **固件策略**：`car-4wd` 四路编码器统一走 **`bsp_sw_qei`**（GPIO 边沿中断 + 4x 正交表）；`bsp_qei` 保留给 **car-2wd** 等无 RC 滤波、可硬件 QEI 的板型。
-- **验证**：手转对应电机时 `Encoder_GetCount(0..3)` 应对应 M1..M4 变化；500 ms 采样偏稀，启动验证阶段会 1 ms 轮询 `bsp_sw_qei_poll`。
+- **板级**：编码器 A/B 相 **已无 RC 滤波**（原 RC 会钝化边沿导致硬件 QEI 不计数）。
+- **M1/M2**：**硬件 QEI**（M1→QEI1/PC5+PC6，M2→QEI0/PD6+PD7；PD7 须 `GPIOUnlockPin`）。
+- **M3/M4**：**`bsp_sw_qei`**（GPIO 边沿中断 + 4x 正交表）；`app_tmr` 1 ms 轮询 `bsp_sw_qei_poll_all` 作备份。
+- **配置源**：`projects/car-4wd/.syscfg/modules/encoder.json`（`interface: qei` / `gpio`），**勿手改** `encoder.c`。
+- **验证**：手转电机时 `Encoder_GetCount(0..3)` 应对应 M1..M4 变化；上位机订阅 **ENCODER** 通道或 GET_TELEMETRY 看计数。。
 
 ## 厂测启动卡死排障（高频）
 

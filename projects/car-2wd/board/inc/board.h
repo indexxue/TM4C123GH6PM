@@ -141,6 +141,7 @@ bool Board_Ultra_Init(void);
 void UART_Putc(char c);
 void UART_Puts(const char* s);
 int UART_Getc(char *c);
+void UART_Flush(void);
 void UART_Debug_Putc(char c);
 void UART_Debug_Puts(const char* s);
 int UART_Debug_Getc(char *c);

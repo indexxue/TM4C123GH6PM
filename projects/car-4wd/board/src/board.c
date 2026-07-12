@@ -11,6 +11,7 @@
 #include "driverlib/pin_map.h"
 #include "driverlib/sysctl.h"
 #include "driverlib/timer.h"
+#include "driverlib/uart.h"
 #include "inc/hw_memmap.h"
 #include "board.h"
 
@@ -171,6 +172,10 @@ void UART_Puts(const char* s) {
 }
 int UART_Getc(char *c) {
     return bsp_uart_getc(UART0_BASE, c);
+}
+void UART_Flush(void) {
+    while (UARTBusy(UART0_BASE)) {
+    }
 }
 
 void UART_Debug_Putc(char c) {

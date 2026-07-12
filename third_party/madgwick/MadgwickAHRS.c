@@ -30,6 +30,11 @@ void MadgwickAHRS_init(float sample_hz, float beta_gain)
     MadgwickAHRS_reset();
 }
 
+void MadgwickAHRS_set_beta(float beta_gain)
+{
+    s_beta = beta_gain;
+}
+
 void MadgwickAHRS_reset(void)
 {
     s_q0 = 1.0f;

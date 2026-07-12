@@ -59,6 +59,22 @@ int32_t cfg_encoder_count(uint8_t index)
     return raw;
 }
 
+int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta)
+{
+    const nvs_cfg_t *n = nvs_cfg_get();
+    u32_t bit;
+
+    if (wheel_index >= NVS_CFG_ENCODER_MAX) {
+        return delta;
+    }
+
+    bit = 1U << wheel_index;
+    if ((n->encoder_dir_mask & bit) != 0U) {
+        return -delta;
+    }
+    return delta;
+}
+
 uint16_t cfg_line_threshold(uint8_t sensor_index)
 {
     const nvs_cfg_t *n = nvs_cfg_get();

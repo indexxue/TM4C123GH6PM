@@ -8,6 +8,7 @@
 #include "attitude.h"
 #include "battery.h"
 #include "board.h"
+#include "chassis.h"
 #include "cfg.h"
 #include "device_profile.h"
 #include "log.h"
@@ -16,8 +17,12 @@
 #include "ultrasonic.h"
 
 #include "FreeRTOS.h"
+#include "queue.h"
 #include "semphr.h"
 #include "task.h"
+
+#include "driverlib/uart.h"
+#include "inc/hw_memmap.h"
 
 #include <string.h>
 
@@ -47,6 +52,8 @@
 #define PROTO_CMD_PARAM_WRITE       0x0022U
 #define PROTO_CMD_DRIVE             0x0030U
 #define PROTO_CMD_DRIVE_STOP        0x0031U
+#define PROTO_CMD_SET_SPEED         0x0032U
+#define PROTO_CMD_SPEED_STOP        0x0033U
 
 #define PROTO_ERR_UNKNOWN_CMD       0x02U
 #define PROTO_ERR_BAD_LEN           0x03U
@@ -61,21 +68,34 @@
 #define PROTO_CAP_PARAM_RW          (1U << 1)
 #define PROTO_CAP_SUBSCRIBE         (1U << 2)
 #define PROTO_CAP_DRIVE             (1U << 3)
+#define PROTO_CAP_SPEED_LOOP        (1U << 4)
 
+#define PROTO_CH_BATTERY            (1U << 0)
 #define PROTO_CH_ATTITUDE           (1U << 1)
 #define PROTO_CH_ENCODER            (1U << 2)
 #define PROTO_CH_LINE_ADC           (1U << 3)
 #define PROTO_CH_ULTRASONIC         (1U << 4)
+#define PROTO_CH_MOTOR_RPM          (1U << 5)
 
+#define PROTO_BASE_MASK             (PROTO_CH_ATTITUDE | PROTO_CH_ENCODER)
+#define PROTO_OPTIONAL_MASK         (PROTO_CH_BATTERY | PROTO_CH_LINE_ADC | PROTO_CH_ULTRASONIC | PROTO_CH_MOTOR_RPM)
+
+#define PROTO_PUSH_CH_BATTERY       0U
 #define PROTO_PUSH_CH_ATTITUDE      1U
 #define PROTO_PUSH_CH_ENCODER       2U
 #define PROTO_PUSH_CH_LINE_ADC      3U
 #define PROTO_PUSH_CH_ULTRASONIC    4U
+#define PROTO_PUSH_CH_MOTOR_RPM     5U
 
-#define PROTO_DEFAULT_HZ_ATT        50U
-#define PROTO_DEFAULT_HZ_ENC          20U
-#define PROTO_DEFAULT_HZ_LINE         20U
-#define PROTO_DEFAULT_HZ_ULTRA      10U
+#define PROTO_DEFAULT_HZ_ATT        10U
+#define PROTO_DEFAULT_HZ_ENC        5U
+#define PROTO_DEFAULT_HZ_BATT       1U
+#define PROTO_DEFAULT_HZ_LINE         5U
+#define PROTO_DEFAULT_HZ_ULTRA      5U
+#define PROTO_DEFAULT_HZ_MOTOR_RPM  10U
+#define PROTO_PUSH_SUPPRESS_MS      280U
+#define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
+#define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 650U
 
 /** 超声波未连接/未就绪/测距失败时的占位距离（mm） */
 #define PROTO_ULTRA_INVALID_MM      9999U
@@ -86,8 +106,16 @@
 
 #define PROTO_TASK_NAME_RX          "proto_rx"
 #define PROTO_RX_STACK_WORDS        (768U)
-#define PROTO_RX_PRIORITY           (2U)
-#define PROTO_RX_POLL_MS            (20U)
+#define PROTO_RX_PRIORITY           (3U)
+#define PROTO_RX_POLL_MS            (5U)
+#define PROTO_RX_GATE_MS            (30U)
+#define PROTO_RX_GATE_CMD_MS        120U
+
+#define PROTO_TASK_NAME_TX          "proto_tx"
+#define PROTO_TX_STACK_WORDS        (512U)
+#define PROTO_TX_PRIORITY           (2U)
+#define PROTO_TX_QUEUE_LEN          (16U)
+#define PROTO_TX_MAX_FRAME          (2U + PROTO_HEADER_SIZE + PROTO_MAX_PAYLOAD + 2U)
 
 #define PROTO_LINE_ADC_COUNT        LINE_SENSOR_COUNT
 #define PROTO_ENCODER_COUNT         4U
@@ -108,20 +136,35 @@ typedef struct {
 /* 模块状态                                                                   */
 /* -------------------------------------------------------------------------- */
 
+typedef struct {
+    uint16_t len;
+    uint8_t bytes[PROTO_TX_MAX_FRAME];
+} proto_tx_item_t;
+
 static TaskHandle_t s_rx_task;
+static TaskHandle_t s_tx_task;
+static QueueHandle_t s_tx_queue;
 static SemaphoreHandle_t s_tx_mutex;
 static volatile bool_t s_echo_mode;
 
 static struct {
-    uint32_t mask;
+    bool_t active;
     uint8_t hz_att;
     uint8_t hz_enc;
-    uint8_t hz_line;
-    uint8_t hz_ultra;
     uint32_t acc_att_ms;
     uint32_t acc_enc_ms;
+} s_base;
+
+static struct {
+    uint32_t mask;
+    uint8_t hz_batt;
+    uint8_t hz_line;
+    uint8_t hz_ultra;
+    uint8_t hz_motor_rpm;
+    uint32_t acc_batt_ms;
     uint32_t acc_line_ms;
     uint32_t acc_ultra_ms;
+    uint32_t acc_motor_rpm_ms;
 } s_sub;
 
 static bool_t s_ultra_ready;
@@ -145,7 +188,13 @@ static struct {
     uint16_t body_len;
 } s_parser;
 
-static uint8_t s_tx_frame[2U + PROTO_HEADER_SIZE + PROTO_MAX_PAYLOAD + 2U];
+static volatile uint32_t s_rx_gate_until_ms;
+static volatile uint32_t s_push_suppress_until_ms;
+
+static bool_t proto_host_rx_active(void);
+static void proto_rx_gate_hold(void);
+static bool_t proto_push_blocked(void);
+static void proto_suppress_pushes(uint32_t ms);
 
 /* -------------------------------------------------------------------------- */
 /* CRC16-CCITT-FALSE                                                          */
@@ -198,6 +247,11 @@ static void proto_put_i16(uint8_t *p, int16_t v)
     proto_put_u16(p, (uint16_t)v);
 }
 
+static void proto_put_i32(uint8_t *p, int32_t v)
+{
+    proto_put_u32(p, (uint32_t)v);
+}
+
 static uint16_t proto_get_u16(const uint8_t *p)
 {
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
@@ -214,6 +268,11 @@ static int16_t proto_get_i16(const uint8_t *p)
     return (int16_t)proto_get_u16(p);
 }
 
+static int32_t proto_get_i32(const uint8_t *p)
+{
+    return (int32_t)proto_get_u32(p);
+}
+
 /* -------------------------------------------------------------------------- */
 /* UART0 发送                                                                 */
 /* -------------------------------------------------------------------------- */
@@ -228,23 +287,105 @@ static void proto_uart_write_locked(const uint8_t *data, uint16_t len)
     for (i = 0U; i < len; i++) {
         UART_Putc((char)data[i]);
     }
+    UART_Flush();
 }
 
-static void proto_send_frame(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len,
-                             uint8_t extra_flags)
+static bool_t proto_tx_lock(void)
+{
+    if (s_tx_mutex == NULL) {
+        return TRUE;
+    }
+    return xSemaphoreTake(s_tx_mutex, portMAX_DELAY) == pdTRUE;
+}
+
+static void proto_tx_unlock(void)
+{
+    if (s_tx_mutex != NULL) {
+        (void)xSemaphoreGive(s_tx_mutex);
+    }
+}
+
+static void proto_tx_task(void *arg)
+{
+    proto_tx_item_t item;
+
+    (void)arg;
+
+    for (;;) {
+        if (xQueueReceive(s_tx_queue, &item, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+        while (proto_host_rx_active()) {
+            vTaskDelay(pdMS_TO_TICKS(1U));
+        }
+        if (!proto_tx_lock()) {
+            continue;
+        }
+        proto_uart_write_locked(item.bytes, item.len);
+        proto_tx_unlock();
+    }
+}
+
+static bool_t proto_uart_rx_pending(void)
+{
+    return UARTCharsAvail(UART0_BASE) ? TRUE : FALSE;
+}
+
+static void proto_rx_gate_hold(void)
+{
+    s_rx_gate_until_ms = proto_uptime_ms() + PROTO_RX_GATE_MS;
+}
+
+static void proto_rx_gate_hold_cmd(void)
+{
+    s_rx_gate_until_ms = proto_uptime_ms() + PROTO_RX_GATE_CMD_MS;
+}
+
+static bool_t proto_push_blocked(void)
+{
+    if (proto_host_rx_active()) {
+        return TRUE;
+    }
+    if (proto_uptime_ms() < s_push_suppress_until_ms) {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static void proto_suppress_pushes(uint32_t ms)
+{
+    s_push_suppress_until_ms = proto_uptime_ms() + ms;
+}
+
+static bool_t proto_host_rx_active(void)
+{
+    if (s_parser.state != PROTO_PARSE_SOF0) {
+        return TRUE;
+    }
+    if (proto_uart_rx_pending()) {
+        return TRUE;
+    }
+    if (proto_uptime_ms() < s_rx_gate_until_ms) {
+        return TRUE;
+    }
+    return FALSE;
+}
+
+static bool_t proto_build_frame(uint8_t *frame, uint16_t *total_out, uint16_t cmd, uint8_t seq,
+                                const uint8_t *payload, uint16_t len, uint8_t extra_flags)
 {
     uint8_t *body;
     uint16_t crc;
     uint16_t total;
     uint8_t flags = (uint8_t)(PROTO_FLAG_DIR_DEVICE | extra_flags);
 
-    if (len > PROTO_MAX_PAYLOAD) {
-        return;
+    if ((frame == NULL) || (total_out == NULL) || (len > PROTO_MAX_PAYLOAD)) {
+        return FALSE;
     }
 
-    s_tx_frame[0] = PROTO_SOF0;
-    s_tx_frame[1] = PROTO_SOF1;
-    body = &s_tx_frame[2];
+    frame[0] = PROTO_SOF0;
+    frame[1] = PROTO_SOF1;
+    body = &frame[2];
     body[0] = PROTO_VER;
     body[1] = flags;
     proto_put_u16(&body[2], len);
@@ -257,24 +398,79 @@ static void proto_send_frame(uint16_t cmd, uint8_t seq, const uint8_t *payload, 
     crc = proto_crc16_ccitt_false(body, (uint16_t)(PROTO_HEADER_SIZE + len));
     proto_put_u16(&body[7 + len], crc);
     total = (uint16_t)(2U + PROTO_HEADER_SIZE + len + 2U);
+    *total_out = total;
+    return TRUE;
+}
 
-    if (s_tx_mutex != NULL) {
-        (void)xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(100U));
+static bool_t proto_enqueue_frame_bytes(const uint8_t *frame, uint16_t len, bool_t to_front)
+{
+    proto_tx_item_t item;
+    BaseType_t ok;
+
+    if ((frame == NULL) || (len == 0U) || (len > PROTO_TX_MAX_FRAME) || (s_tx_queue == NULL)) {
+        return FALSE;
     }
-    proto_uart_write_locked(s_tx_frame, total);
-    if (s_tx_mutex != NULL) {
-        (void)xSemaphoreGive(s_tx_mutex);
+
+    item.len = len;
+    (void)memcpy(item.bytes, frame, len);
+    if (to_front) {
+        ok = xQueueSendToFront(s_tx_queue, &item, pdMS_TO_TICKS(20U));
+    } else {
+        ok = xQueueSend(s_tx_queue, &item, pdMS_TO_TICKS(20U));
     }
+    if (ok != pdTRUE) {
+        LOG_WARN("proto: tx queue full drop %uB", (unsigned)len);
+        return FALSE;
+    }
+    return TRUE;
+}
+
+static bool_t proto_uart_send_frame(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len,
+                                    uint8_t extra_flags, bool_t immediate, bool_t queue_front)
+{
+    uint8_t frame[PROTO_TX_MAX_FRAME];
+    uint16_t total;
+
+    if (!proto_build_frame(frame, &total, cmd, seq, payload, len, extra_flags)) {
+        return FALSE;
+    }
+
+    if (immediate) {
+        if (!proto_tx_lock()) {
+            return FALSE;
+        }
+        proto_uart_write_locked(frame, total);
+        proto_tx_unlock();
+        return TRUE;
+    }
+
+    return proto_enqueue_frame_bytes(frame, total, queue_front);
+}
+
+static bool_t proto_send_frame(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len,
+                               uint8_t extra_flags)
+{
+    return proto_uart_send_frame(cmd, seq, payload, len, extra_flags, FALSE, FALSE);
 }
 
 static void proto_reply_ack(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
-    proto_send_frame((uint16_t)(cmd | PROTO_RESPONSE_BIT), seq, payload, len, 0U);
+    uint16_t rsp_cmd = (uint16_t)(cmd | PROTO_RESPONSE_BIT);
+
+    if (!proto_uart_send_frame(rsp_cmd, seq, payload, len, 0U, TRUE, FALSE)) {
+        LOG_WARN("proto: reply ack immediate fail cmd=0x%04x seq=%u", (unsigned)cmd, (unsigned)seq);
+        (void)proto_uart_send_frame(rsp_cmd, seq, payload, len, 0U, FALSE, TRUE);
+    }
 }
 
 static void proto_reply_nak(uint16_t cmd, uint8_t seq, uint8_t err_code)
 {
-    proto_send_frame((uint16_t)(cmd | PROTO_RESPONSE_BIT), seq, &err_code, 1U, PROTO_FLAG_NAK);
+    uint16_t rsp_cmd = (uint16_t)(cmd | PROTO_RESPONSE_BIT);
+
+    if (!proto_uart_send_frame(rsp_cmd, seq, &err_code, 1U, PROTO_FLAG_NAK, TRUE, FALSE)) {
+        LOG_WARN("proto: reply nak immediate fail cmd=0x%04x seq=%u", (unsigned)cmd, (unsigned)seq);
+        (void)proto_uart_send_frame(rsp_cmd, seq, &err_code, 1U, PROTO_FLAG_NAK, FALSE, TRUE);
+    }
 }
 
 static void proto_push_frame(const uint8_t *payload, uint16_t len)
@@ -306,7 +502,11 @@ static status_t proto_write_pid_speed(const uint8_t *data, uint16_t len)
         return STATUS_INVALID_ARG;
     }
     (void)memcpy(&pid, data, sizeof(pid));
-    return nvs_param_set_pid_speed(&pid, NVS_WRITE_SRC_PROTOCOL);
+    if (nvs_param_set_pid_speed(&pid, NVS_WRITE_SRC_PROTOCOL) == STATUS_OK) {
+        chassis_reload_pid_gains();
+        return STATUS_OK;
+    }
+    return STATUS_FAIL;
 }
 
 static status_t proto_write_pid_line(const uint8_t *data, uint16_t len)
@@ -351,6 +551,17 @@ static status_t proto_write_motor_dir(const uint8_t *data, uint16_t len)
     }
     (void)memcpy(&mask, data, sizeof(mask));
     return nvs_param_set_motor_dir_mask(mask, NVS_WRITE_SRC_PROTOCOL);
+}
+
+static status_t proto_write_encoder_dir(const uint8_t *data, uint16_t len)
+{
+    u32_t mask;
+
+    if ((data == NULL) || (len != sizeof(u32_t))) {
+        return STATUS_INVALID_ARG;
+    }
+    (void)memcpy(&mask, data, sizeof(mask));
+    return nvs_param_set_encoder_dir_mask(mask, NVS_WRITE_SRC_PROTOCOL);
 }
 
 static status_t proto_write_imu_offset(const uint8_t *data, uint16_t len)
@@ -408,6 +619,7 @@ static const proto_param_desc_t s_param_table[] = {
     { NVS_PARAM_SPD_LIMIT,    (uint8_t)sizeof(nvs_spd_limit_t),    proto_write_spd_limit },
     { NVS_PARAM_KINEMATICS,   (uint8_t)sizeof(nvs_kinematics_t),  proto_write_kinematics },
     { NVS_PARAM_MOTOR_DIR,    (uint8_t)sizeof(u32_t),              proto_write_motor_dir },
+    { NVS_PARAM_ENCODER_DIR,  (uint8_t)sizeof(u32_t),              proto_write_encoder_dir },
     { NVS_PARAM_IMU_OFFSET,   (uint8_t)sizeof(nvs_imu_offset_t),   proto_write_imu_offset },
     { NVS_PARAM_LINE_THRESHOLD, (uint8_t)sizeof(nvs_line_threshold_t), proto_write_line_threshold },
     { NVS_PARAM_ENCODER_ZERO, (uint8_t)sizeof(nvs_encoder_zero_t), proto_write_encoder_zero },
@@ -469,6 +681,9 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
     case NVS_PARAM_MOTOR_DIR:
         (void)memcpy(out, &cfg->motor_dir_mask, sizeof(cfg->motor_dir_mask));
         return (uint16_t)sizeof(cfg->motor_dir_mask);
+    case NVS_PARAM_ENCODER_DIR:
+        (void)memcpy(out, &cfg->encoder_dir_mask, sizeof(cfg->encoder_dir_mask));
+        return (uint16_t)sizeof(cfg->encoder_dir_mask);
     case NVS_PARAM_IMU_OFFSET:
         (void)memcpy(out, &cfg->imu_offset, sizeof(cfg->imu_offset));
         return (uint16_t)sizeof(cfg->imu_offset);
@@ -541,12 +756,26 @@ static uint16_t proto_sample_ultrasonic_mm(void)
     return mm;
 }
 
+static uint8_t proto_line_detect_mask(void)
+{
+    uint16_t line_adc[PROTO_LINE_ADC_COUNT];
+    uint8_t mask = 0U;
+    uint8_t i;
+
+    proto_sample_line_adc(line_adc, PROTO_LINE_ADC_COUNT);
+    for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
+        if (line_adc[i] < cfg_line_threshold(i)) {
+            mask |= (uint8_t)(1U << i);
+        }
+    }
+    return mask;
+}
+
 static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
 {
     battery_voltage_t batt = {0};
     battery_info_t info = {0};
     attitude_euler_t euler = {0};
-    uint16_t line_adc[PROTO_LINE_ADC_COUNT];
     int32_t enc[PROTO_ENCODER_COUNT];
     uint8_t batt_pct = 0U;
     uint16_t batt_mv = 0U;
@@ -554,8 +783,7 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     int16_t pitch = 0;
     int16_t yaw = 0;
     uint8_t i;
-    const uint16_t need = (uint16_t)(2U + 1U + 6U + (uint16_t)(4 * PROTO_ENCODER_COUNT) +
-                                     (uint16_t)(2U * PROTO_LINE_ADC_COUNT) + 4U + 2U);
+    const uint16_t need = (uint16_t)(2U + 1U + 6U + (uint16_t)(4 * PROTO_ENCODER_COUNT) + 1U + 4U + 2U);
 
     if ((out == NULL) || (out_max < need)) {
         return 0U;
@@ -575,7 +803,6 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
         enc[i] = cfg_encoder_count(i);
     }
-    proto_sample_line_adc(line_adc, PROTO_LINE_ADC_COUNT);
 
     proto_put_u16(&out[0], batt_mv);
     out[2] = batt_pct;
@@ -587,11 +814,9 @@ static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
     }
     {
         const uint16_t line_off = (uint16_t)(9U + (4U * PROTO_ENCODER_COUNT));
-        const uint16_t uptime_off = (uint16_t)(line_off + (2U * PROTO_LINE_ADC_COUNT));
+        const uint16_t uptime_off = (uint16_t)(line_off + 1U);
 
-        for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
-            proto_put_u16(&out[line_off + (i * 2U)], line_adc[i]);
-        }
+        out[line_off] = proto_line_detect_mask();
         proto_put_u32(&out[uptime_off], proto_uptime_ms());
         proto_put_u16(&out[uptime_off + 4U], proto_sample_ultrasonic_mm());
     }
@@ -636,21 +861,6 @@ static void proto_push_attitude(void)
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
-static void proto_push_line_adc(void)
-{
-    uint8_t payload[5U + (2U * PROTO_LINE_ADC_COUNT)];
-    uint16_t line_adc[PROTO_LINE_ADC_COUNT];
-    uint8_t i;
-
-    proto_sample_line_adc(line_adc, PROTO_LINE_ADC_COUNT);
-    payload[0] = PROTO_PUSH_CH_LINE_ADC;
-    proto_put_u32(&payload[1], proto_uptime_ms());
-    for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
-        proto_put_u16(&payload[5U + (i * 2U)], line_adc[i]);
-    }
-    proto_push_frame(payload, (uint16_t)sizeof(payload));
-}
-
 static void proto_push_encoder(void)
 {
     uint8_t payload[5U + (4U * PROTO_ENCODER_COUNT)];
@@ -660,6 +870,44 @@ static void proto_push_encoder(void)
     proto_put_u32(&payload[1], proto_uptime_ms());
     for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
         proto_put_u32(&payload[5U + (i * 4U)], (uint32_t)cfg_encoder_count(i));
+    }
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static void proto_push_battery(void)
+{
+    battery_voltage_t batt = {0};
+    battery_info_t info = {0};
+    uint8_t payload[5U + 3U];
+
+    (void)battery_percent_update();
+    (void)battery_info_read(&info, &batt);
+    payload[0] = PROTO_PUSH_CH_BATTERY;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    proto_put_u16(&payload[5], batt.current_mv);
+    payload[7] = info.percent;
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static void proto_push_line_adc(void)
+{
+    uint8_t payload[5U + 1U];
+
+    payload[0] = PROTO_PUSH_CH_LINE_ADC;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    payload[5] = proto_line_detect_mask();
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static void proto_push_motor_rpm(void)
+{
+    uint8_t payload[5U + (4U * 4U)];
+    uint8_t i;
+
+    payload[0] = PROTO_PUSH_CH_MOTOR_RPM;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    for (i = 0U; i < PROTO_ENCODER_COUNT; i++) {
+        proto_put_i32(&payload[5U + (i * 4U)], chassis_get_wheel_rpm((uint8_t)(i + 1U)));
     }
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
@@ -681,38 +929,16 @@ static void proto_push_ultrasonic(void)
 
 static void proto_motor_all_stop(void)
 {
-    uint8_t i;
-
-    if (!device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
-        return;
-    }
-    for (i = 1U; i <= 4U; i++) {
-        Motor_SetSpeed(i, 0);
-    }
+    chassis_stop();
 }
 
 static void proto_apply_drive(int16_t throttle, int16_t steer)
 {
-    const nvs_spd_limit_t *lim;
-    int32_t base_rpm;
-    int32_t turn_rpm;
-    int32_t left;
-    int32_t right;
-
     if (!device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         return;
     }
 
-    lim = cfg_spd_limit();
-    base_rpm = (int32_t)(((float)throttle / (float)PROTO_DRIVE_THROTTLE_MAX) * lim->max_rpm);
-    turn_rpm = (int32_t)(((float)steer / (float)PROTO_DRIVE_STEER_MAX) * lim->max_rpm * 0.5f);
-    left = base_rpm - turn_rpm;
-    right = base_rpm + turn_rpm;
-
-    Motor_SetSpeed(1U, cfg_motor_rpm(1U, left));
-    Motor_SetSpeed(2U, cfg_motor_rpm(2U, right));
-    Motor_SetSpeed(3U, cfg_motor_rpm(3U, left));
-    Motor_SetSpeed(4U, cfg_motor_rpm(4U, right));
+    chassis_set_drive((int32_t)throttle, (int32_t)steer, PROTO_DRIVE_THROTTLE_MAX, PROTO_DRIVE_STEER_MAX);
 }
 
 static void proto_drive_stop_internal(void)
@@ -731,6 +957,9 @@ static uint32_t proto_caps(void)
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         caps |= PROTO_CAP_DRIVE;
+    }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
+        caps |= PROTO_CAP_SPEED_LOOP;
     }
     return caps;
 }
@@ -773,21 +1002,65 @@ static void proto_handle_get_telemetry(uint8_t seq)
 
 static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t len)
 {
-    if (len < 8U) {
+    uint32_t mask;
+    uint8_t hz_att;
+    uint8_t hz_enc;
+    uint8_t hz_line;
+    uint8_t hz_ultra;
+    uint8_t hz_motor_rpm;
+
+    if (len < 4U) {
         proto_reply_nak(PROTO_CMD_SUBSCRIBE, seq, PROTO_ERR_BAD_LEN);
         return;
     }
 
-    s_sub.mask = proto_get_u32(&payload[0]);
-    s_sub.hz_att = payload[4];
-    s_sub.hz_enc = payload[5];
-    s_sub.hz_line = payload[6];
-    s_sub.hz_ultra = payload[7];
-    s_sub.acc_att_ms = 0U;
-    s_sub.acc_enc_ms = 0U;
+    LOG_INFO("proto: subscribe req seq=%u len=%u", (unsigned)seq, (unsigned)len);
+
+    mask = proto_get_u32(&payload[0]);
+    if (len >= 8U) {
+        hz_att = payload[4];
+        hz_enc = payload[5];
+        hz_line = payload[6];
+        hz_ultra = payload[7];
+    } else {
+        hz_att = PROTO_DEFAULT_HZ_ATT;
+        hz_enc = 0U;
+        hz_line = PROTO_DEFAULT_HZ_LINE;
+        hz_ultra = 0U;
+    }
+    if (len >= 9U) {
+        hz_motor_rpm = payload[8];
+    } else if ((mask & PROTO_CH_MOTOR_RPM) != 0U) {
+        hz_motor_rpm = PROTO_DEFAULT_HZ_MOTOR_RPM;
+    } else {
+        hz_motor_rpm = 0U;
+    }
+
+    /* 先 ACK 再开推送，避免与应答争用 TX 互斥/共享缓冲 */
+    proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
+    LOG_INFO("proto: subscribe ack seq=%u mask=0x%08lx opt=0x%08lx",
+             (unsigned)seq, (unsigned long)mask,
+             (unsigned long)(mask & PROTO_OPTIONAL_MASK));
+
+    if ((mask & PROTO_CH_ATTITUDE) != 0U) {
+        s_base.hz_att = proto_effective_hz(hz_att, PROTO_DEFAULT_HZ_ATT);
+    }
+    if ((mask & PROTO_CH_ENCODER) != 0U) {
+        s_base.hz_enc = proto_effective_hz(hz_enc, PROTO_DEFAULT_HZ_ENC);
+    }
+    s_base.active = TRUE;
+
+    s_sub.mask = mask & PROTO_OPTIONAL_MASK;
+    if ((s_sub.mask & PROTO_CH_BATTERY) != 0U) {
+        s_sub.hz_batt = PROTO_DEFAULT_HZ_BATT;
+    }
+    s_sub.hz_line = hz_line;
+    s_sub.hz_ultra = hz_ultra;
+    s_sub.hz_motor_rpm = hz_motor_rpm;
+    s_sub.acc_batt_ms = 0U;
     s_sub.acc_line_ms = 0U;
     s_sub.acc_ultra_ms = 0U;
-    proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
+    s_sub.acc_motor_rpm_ms = 0U;
 }
 
 static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16_t len)
@@ -799,7 +1072,15 @@ static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16
         return;
     }
     mask = proto_get_u32(payload);
-    s_sub.mask &= ~mask;
+    if (mask == 0xFFFFFFFFU) {
+        s_sub.mask = 0U;
+    } else {
+        s_sub.mask &= ~(mask & PROTO_OPTIONAL_MASK);
+    }
+    s_sub.acc_batt_ms = 0U;
+    s_sub.acc_line_ms = 0U;
+    s_sub.acc_ultra_ms = 0U;
+    s_sub.acc_motor_rpm_ms = 0U;
     proto_reply_ack(PROTO_CMD_UNSUBSCRIBE, seq, NULL, 0U);
 }
 
@@ -930,8 +1211,85 @@ static void proto_handle_drive_stop(uint8_t seq)
     proto_reply_ack(PROTO_CMD_DRIVE_STOP, seq, NULL, 0U);
 }
 
+static void proto_handle_set_speed(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    uint8_t format;
+
+    if ((proto_caps() & PROTO_CAP_SPEED_LOOP) == 0U) {
+        proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 1U) {
+        proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+
+    format = payload[0];
+    switch (format) {
+    case 0U:
+        if (len < 6U) {
+            proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        if ((payload[1] < 1U) || (payload[1] > PROTO_ENCODER_COUNT)) {
+            proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+            return;
+        }
+        chassis_set_wheel_rpm(payload[1], proto_get_i32(&payload[2]));
+        break;
+    case 1U:
+        if (len < 9U) {
+            proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        chassis_set_lr_rpm(proto_get_i32(&payload[1]), proto_get_i32(&payload[5]));
+        break;
+    case 2U:
+        if (len < 17U) {
+            proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        chassis_set_wheel_rpm(1U, proto_get_i32(&payload[1]));
+        chassis_set_wheel_rpm(2U, proto_get_i32(&payload[5]));
+        chassis_set_wheel_rpm(3U, proto_get_i32(&payload[9]));
+        chassis_set_wheel_rpm(4U, proto_get_i32(&payload[13]));
+        break;
+    default:
+        proto_reply_nak(PROTO_CMD_SET_SPEED, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    if (format == 0U) {
+        proto_suppress_pushes(PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS);
+    } else {
+        proto_suppress_pushes(PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS);
+    }
+    proto_reply_ack(PROTO_CMD_SET_SPEED, seq, NULL, 0U);
+}
+
+static void proto_handle_speed_stop(uint8_t seq)
+{
+    if ((proto_caps() & PROTO_CAP_SPEED_LOOP) == 0U) {
+        proto_reply_nak(PROTO_CMD_SPEED_STOP, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    chassis_stop();
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    proto_reply_ack(PROTO_CMD_SPEED_STOP, seq, NULL, 0U);
+}
+
 static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
+    if ((cmd == PROTO_CMD_SUBSCRIBE) || (cmd == PROTO_CMD_UNSUBSCRIBE) ||
+        (cmd == PROTO_CMD_SET_SPEED) || (cmd == PROTO_CMD_SPEED_STOP) ||
+        (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
+        proto_rx_gate_hold_cmd();
+        proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
+    }
+
     switch (cmd) {
     case PROTO_CMD_HELLO:
         proto_handle_hello(seq);
@@ -963,6 +1321,12 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
     case PROTO_CMD_DRIVE_STOP:
         proto_handle_drive_stop(seq);
         break;
+    case PROTO_CMD_SET_SPEED:
+        proto_handle_set_speed(seq, payload, len);
+        break;
+    case PROTO_CMD_SPEED_STOP:
+        proto_handle_speed_stop(seq);
+        break;
     default:
         proto_reply_nak(cmd, seq, PROTO_ERR_UNKNOWN_CMD);
         break;
@@ -973,10 +1337,101 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
 /* 帧解析                                                                     */
 /* -------------------------------------------------------------------------- */
 
+static bool_t proto_rx_set_speed_semantic_ok(const uint8_t *payload, uint16_t len)
+{
+    uint8_t format;
+    int32_t rpm;
+
+    if ((payload == NULL) || (len < 1U)) {
+        return FALSE;
+    }
+
+    format = payload[0];
+    switch (format) {
+    case 0U:
+        if (len != 6U) {
+            return FALSE;
+        }
+        if ((payload[1] < 1U) || (payload[1] > PROTO_ENCODER_COUNT)) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[2]);
+        if ((rpm > 1200) || (rpm < -1200)) {
+            return FALSE;
+        }
+        return TRUE;
+    case 1U:
+        if (len != 9U) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[1]);
+        if ((rpm > 1200) || (rpm < -1200)) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[5]);
+        if ((rpm > 1200) || (rpm < -1200)) {
+            return FALSE;
+        }
+        return TRUE;
+    case 2U:
+        return (len == 17U);
+    default:
+        return FALSE;
+    }
+}
+
+/**
+ * HC-05 等蓝牙链路上常见「帧体正确、CRC 尾字节损坏」。
+ * 在严格 CRC 失败时，若头/载荷语义自洽则放宽接受（仍由 dispatch 做业务校验）。
+ */
+static bool_t proto_rx_relaxed_crc_ok(uint16_t cmd, const uint8_t *hdr, const uint8_t *payload,
+                                      uint16_t len)
+{
+    if ((hdr == NULL) || (hdr[0] != PROTO_VER) || ((hdr[1] & PROTO_FLAG_DIR_DEVICE) != 0U)) {
+        return FALSE;
+    }
+
+    switch (cmd) {
+    case PROTO_CMD_HELLO:
+    case PROTO_CMD_PING:
+    case PROTO_CMD_GET_TELEMETRY:
+    case PROTO_CMD_SPEED_STOP:
+    case PROTO_CMD_DRIVE_STOP:
+    case PROTO_CMD_PARAM_LIST:
+        return (len == 0U);
+    case PROTO_CMD_SUBSCRIBE:
+        return (len == 4U) || (len == 9U);
+    case PROTO_CMD_UNSUBSCRIBE:
+        return (len >= 4U);
+    case PROTO_CMD_SET_SPEED:
+        return proto_rx_set_speed_semantic_ok(payload, len);
+    case PROTO_CMD_DRIVE:
+        if (len != 4U) {
+            return FALSE;
+        }
+        {
+            int16_t throttle = proto_get_i16(&payload[0]);
+            int16_t steer = proto_get_i16(&payload[2]);
+            if ((throttle < -PROTO_DRIVE_THROTTLE_MAX) || (throttle > PROTO_DRIVE_THROTTLE_MAX) ||
+                (steer < -PROTO_DRIVE_STEER_MAX) || (steer > PROTO_DRIVE_STEER_MAX)) {
+                return FALSE;
+            }
+        }
+        return TRUE;
+    case PROTO_CMD_PARAM_READ:
+        return (len == 2U);
+    case PROTO_CMD_PARAM_WRITE:
+        return (len >= 3U);
+    default:
+        return FALSE;
+    }
+}
+
 static void proto_parse_reset(void)
 {
     s_parser.state = PROTO_PARSE_SOF0;
     s_parser.body_len = 0U;
+    proto_rx_gate_hold();
 }
 
 static void proto_parse_byte(uint8_t byte)
@@ -992,20 +1447,24 @@ static void proto_parse_byte(uint8_t byte)
     case PROTO_PARSE_SOF0:
         if (byte == PROTO_SOF0) {
             s_parser.state = PROTO_PARSE_SOF1;
+            proto_rx_gate_hold();
         }
         break;
     case PROTO_PARSE_SOF1:
         if (byte == PROTO_SOF1) {
             s_parser.body_len = 0U;
             s_parser.state = PROTO_PARSE_BODY;
+            proto_rx_gate_hold();
         } else if (byte == PROTO_SOF0) {
             s_parser.state = PROTO_PARSE_SOF1;
+            proto_rx_gate_hold();
         } else {
             s_parser.state = PROTO_PARSE_SOF0;
         }
         break;
     case PROTO_PARSE_BODY:
         s_parser.body[s_parser.body_len++] = byte;
+        proto_rx_gate_hold();
         if (s_parser.body_len < (PROTO_HEADER_SIZE + 2U)) {
             break;
         }
@@ -1021,9 +1480,37 @@ static void proto_parse_byte(uint8_t byte)
         crc_expected = proto_get_u16(&s_parser.body[PROTO_HEADER_SIZE + payload_len]);
         crc_actual = proto_crc16_ccitt_false(s_parser.body,
                                              (uint16_t)(PROTO_HEADER_SIZE + payload_len));
+        cmd = proto_get_u16(&s_parser.body[4]);
+        seq = s_parser.body[6];
+        payload = (payload_len > 0U) ? &s_parser.body[PROTO_HEADER_SIZE] : NULL;
+
         if (crc_actual != crc_expected) {
-            proto_parse_reset();
-            break;
+            if (!proto_rx_relaxed_crc_ok(cmd, s_parser.body, payload, payload_len)) {
+                LOG_WARN(
+                    "proto: rx crc fail len=%u exp=0x%04x got=0x%04x "
+                    "cmd=0x%04x seq=%u body=%02x%02x%02x%02x%02x%02x%02x%02x",
+                    (unsigned)payload_len,
+                    (unsigned)crc_expected,
+                    (unsigned)crc_actual,
+                    (unsigned)cmd,
+                    (unsigned)seq,
+                    s_parser.body[0],
+                    s_parser.body[1],
+                    s_parser.body[2],
+                    s_parser.body[3],
+                    s_parser.body[4],
+                    s_parser.body[5],
+                    s_parser.body[6],
+                    s_parser.body[7]);
+                proto_parse_reset();
+                break;
+            }
+            LOG_WARN(
+                "proto: rx crc relaxed accept cmd=0x%04x seq=%u (wire=0x%04x body=0x%04x)",
+                (unsigned)cmd,
+                (unsigned)seq,
+                (unsigned)crc_expected,
+                (unsigned)crc_actual);
         }
 
         if (s_parser.body[1] & PROTO_FLAG_DIR_DEVICE) {
@@ -1031,9 +1518,10 @@ static void proto_parse_byte(uint8_t byte)
             break;
         }
 
-        cmd = proto_get_u16(&s_parser.body[4]);
-        seq = s_parser.body[6];
-        payload = (payload_len > 0U) ? &s_parser.body[PROTO_HEADER_SIZE] : NULL;
+        if ((cmd != PROTO_CMD_PING) && (cmd != PROTO_CMD_GET_TELEMETRY)) {
+            LOG_INFO("proto: rx cmd=0x%04x seq=%u len=%u", (unsigned)cmd, (unsigned)seq,
+                     (unsigned)payload_len);
+        }
         proto_dispatch(cmd, seq, payload, payload_len);
         proto_parse_reset();
         break;
@@ -1062,15 +1550,14 @@ static void proto_rx_task(void *arg)
 
         char ch;
 
-        if (UART_Getc(&ch) == 0) {
-            vTaskDelay(pdMS_TO_TICKS(PROTO_RX_POLL_MS));
-            continue;
+        while (UART_Getc(&ch) != 0) {
+            if (s_echo_mode) {
+                UART_Putc(ch);
+                continue;
+            }
+            proto_parse_byte((uint8_t)ch);
         }
-        if (s_echo_mode) {
-            UART_Putc(ch);
-            continue;
-        }
-        proto_parse_byte((uint8_t)ch);
+        vTaskDelay(pdMS_TO_TICKS(PROTO_RX_POLL_MS));
     }
 }
 
@@ -1091,22 +1578,28 @@ void proto_telemetry_tick(uint32_t period_ms)
         }
     }
 
-    if (s_sub.mask == 0U) {
+    if (proto_push_blocked()) {
         return;
     }
 
-    if ((s_sub.mask & PROTO_CH_ATTITUDE) != 0U) {
-        s_sub.acc_att_ms += period_ms;
-        if (s_sub.acc_att_ms >= proto_period_ms_for(s_sub.hz_att, PROTO_DEFAULT_HZ_ATT)) {
-            s_sub.acc_att_ms = 0U;
+    if (s_base.active != FALSE) {
+        s_base.acc_att_ms += period_ms;
+        if (s_base.acc_att_ms >= proto_period_ms_for(s_base.hz_att, PROTO_DEFAULT_HZ_ATT)) {
+            s_base.acc_att_ms = 0U;
             proto_push_attitude();
         }
-    }
-    if ((s_sub.mask & PROTO_CH_ENCODER) != 0U) {
-        s_sub.acc_enc_ms += period_ms;
-        if (s_sub.acc_enc_ms >= proto_period_ms_for(s_sub.hz_enc, PROTO_DEFAULT_HZ_ENC)) {
-            s_sub.acc_enc_ms = 0U;
+        s_base.acc_enc_ms += period_ms;
+        if (s_base.acc_enc_ms >= proto_period_ms_for(s_base.hz_enc, PROTO_DEFAULT_HZ_ENC)) {
+            s_base.acc_enc_ms = 0U;
             proto_push_encoder();
+        }
+    }
+
+    if ((s_sub.mask & PROTO_CH_BATTERY) != 0U) {
+        s_sub.acc_batt_ms += period_ms;
+        if (s_sub.acc_batt_ms >= proto_period_ms_for(s_sub.hz_batt, PROTO_DEFAULT_HZ_BATT)) {
+            s_sub.acc_batt_ms = 0U;
+            proto_push_battery();
         }
     }
     if ((s_sub.mask & PROTO_CH_LINE_ADC) != 0U) {
@@ -1121,6 +1614,14 @@ void proto_telemetry_tick(uint32_t period_ms)
         if (s_sub.acc_ultra_ms >= proto_period_ms_for(s_sub.hz_ultra, PROTO_DEFAULT_HZ_ULTRA)) {
             s_sub.acc_ultra_ms = 0U;
             proto_push_ultrasonic();
+        }
+    }
+    if ((s_sub.mask & PROTO_CH_MOTOR_RPM) != 0U) {
+        s_sub.acc_motor_rpm_ms += period_ms;
+        if (s_sub.acc_motor_rpm_ms >=
+            proto_period_ms_for(s_sub.hz_motor_rpm, PROTO_DEFAULT_HZ_MOTOR_RPM)) {
+            s_sub.acc_motor_rpm_ms = 0U;
+            proto_push_motor_rpm();
         }
     }
 }
@@ -1138,18 +1639,45 @@ status_t proto_uart_service_start(void)
         }
     }
 
+    if (s_tx_queue == NULL) {
+        s_tx_queue = xQueueCreate(PROTO_TX_QUEUE_LEN, sizeof(proto_tx_item_t));
+        if (s_tx_queue == NULL) {
+            return STATUS_NO_MEM;
+        }
+    }
+
+    if (s_tx_task == NULL) {
+        if (xTaskCreate(proto_tx_task, PROTO_TASK_NAME_TX, PROTO_TX_STACK_WORDS, NULL,
+                        PROTO_TX_PRIORITY, &s_tx_task) != pdPASS) {
+            LOG_ERROR("proto: create tx task failed");
+            vQueueDelete(s_tx_queue);
+            s_tx_queue = NULL;
+            vSemaphoreDelete(s_tx_mutex);
+            s_tx_mutex = NULL;
+            return STATUS_FAIL;
+        }
+    }
+
     proto_parse_reset();
+    (void)memset(&s_base, 0, sizeof(s_base));
     (void)memset(&s_sub, 0, sizeof(s_sub));
-    s_sub.hz_att = PROTO_DEFAULT_HZ_ATT;
+    s_base.active = TRUE;
+    s_base.hz_att = PROTO_DEFAULT_HZ_ATT;
+    s_base.hz_enc = PROTO_DEFAULT_HZ_ENC;
     s_sub.hz_line = PROTO_DEFAULT_HZ_LINE;
-    s_sub.hz_enc = PROTO_DEFAULT_HZ_ENC;
     s_sub.hz_ultra = PROTO_DEFAULT_HZ_ULTRA;
+    s_sub.hz_motor_rpm = PROTO_DEFAULT_HZ_MOTOR_RPM;
+    s_sub.hz_batt = PROTO_DEFAULT_HZ_BATT;
     s_ultra_ready = FALSE;
     s_ultra_init_attempted = FALSE;
 
     if (xTaskCreate(proto_rx_task, PROTO_TASK_NAME_RX, PROTO_RX_STACK_WORDS, NULL,
                     PROTO_RX_PRIORITY, &s_rx_task) != pdPASS) {
         LOG_ERROR("proto: create rx task failed");
+        vTaskDelete(s_tx_task);
+        s_tx_task = NULL;
+        vQueueDelete(s_tx_queue);
+        s_tx_queue = NULL;
         vSemaphoreDelete(s_tx_mutex);
         s_tx_mutex = NULL;
         s_rx_task = NULL;
@@ -1176,18 +1704,8 @@ bool_t proto_echo_get(void)
 
 void proto_send_raw(const uint8_t *data, uint16_t len)
 {
-    uint16_t i;
-
     if ((data == NULL) || (len == 0U)) {
         return;
     }
-    if (s_tx_mutex != NULL) {
-        (void)xSemaphoreTake(s_tx_mutex, pdMS_TO_TICKS(100U));
-    }
-    for (i = 0U; i < len; i++) {
-        UART_Putc((char)data[i]);
-    }
-    if (s_tx_mutex != NULL) {
-        (void)xSemaphoreGive(s_tx_mutex);
-    }
+    (void)proto_enqueue_frame_bytes(data, len, FALSE);
 }

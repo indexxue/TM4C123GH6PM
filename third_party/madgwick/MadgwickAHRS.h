@@ -14,6 +14,7 @@ extern "C" {
 #endif
 
 void MadgwickAHRS_init(float sample_hz, float beta_gain);
+void MadgwickAHRS_set_beta(float beta_gain);
 void MadgwickAHRS_reset(void);
 
 void MadgwickAHRSupdate(float gx, float gy, float gz, float ax, float ay, float az, float mx, float my,

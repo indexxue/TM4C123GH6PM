@@ -34,8 +34,9 @@ static bool qei_channel_init(const bsp_qei_channel_t *ch)
     QEIConfigure(ch->qei_base,
                  QEI_CONFIG_CAPTURE_A_B | QEI_CONFIG_NO_RESET | QEI_CONFIG_QUADRATURE | QEI_CONFIG_NO_SWAP,
                  BSP_QEI_MAX_POSITION);
+    /* 板级已去 RC 滤波：用 QEI 数字滤波抑制毛刺，避免计数跳变导致测速/PID 偏差 */
     QEIFilterConfigure(ch->qei_base, QEI_FILTCNT_2);
-    QEIFilterDisable(ch->qei_base);
+    QEIFilterEnable(ch->qei_base);
     QEIPositionSet(ch->qei_base, 0U);
     QEIEnable(ch->qei_base);
 

@@ -82,6 +82,7 @@ INCLUDES_BOARD_BSP = [
     '#include "driverlib/pin_map.h"',
     '#include "driverlib/sysctl.h"',
     '#include "driverlib/timer.h"',
+    '#include "driverlib/uart.h"',
     '#include "inc/hw_memmap.h"',
 ]
 INCLUDES_MOTOR_BSP = [
@@ -613,9 +614,11 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
         "    bsp_pwm_init(&BOARD_PWM_CFG);",
         "}",
         "",
-        "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm)",
+        "void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille)",
         "{",
-        "    uint16_t duty = (rpm == 0) ? 0U : 500U;",
+        "    if (duty_permille > 1000U) {",
+        "        duty_permille = 1000U;",
+        "    }",
         "    switch (motor_id) {",
     ]
     for i, ch in enumerate(mod.get("pwm", []), start=1):
@@ -625,16 +628,49 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
             "        motor_apply_dir(",
             f"            &(const bsp_gpio_pin_t){{GPIO_{name}_IN1_PORT, GPIO_{name}_IN1_MASK}},",
             f"            &(const bsp_gpio_pin_t){{GPIO_{name}_IN2_PORT, GPIO_{name}_IN2_MASK}}, rpm);",
-            f"        bsp_pwm_set_duty({name}_TIMER, {name}_PWM_CH, duty);",
+            f"        bsp_pwm_set_duty({name}_TIMER, {name}_PWM_CH, duty_permille);",
             "        break;",
         ]
-    body += ["    default:", "        break;", "    }", "}"]
+    body += [
+        "    default:",
+        "        break;",
+        "    }",
+        "}",
+        "",
+        "static uint16_t motor_rpm_to_duty(int32_t rpm)",
+        "{",
+        "    int32_t abs_rpm;",
+        "    uint16_t duty;",
+        "    if (rpm == 0) {",
+        "        return 0U;",
+        "    }",
+        "    abs_rpm = rpm;",
+        "    if (abs_rpm < 0) {",
+        "        abs_rpm = -abs_rpm;",
+        "    }",
+        "    if (abs_rpm > MOTOR_RPM_FULL_SCALE) {",
+        "        abs_rpm = MOTOR_RPM_FULL_SCALE;",
+        "    }",
+        "    duty = (uint16_t)((abs_rpm * 1000) / MOTOR_RPM_FULL_SCALE);",
+        "    if (duty < MOTOR_MIN_DUTY && abs_rpm > 0) {",
+        "        duty = MOTOR_MIN_DUTY;",
+        "    }",
+        "    return duty;",
+        "}",
+        "",
+        "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm)",
+        "{",
+        "    Motor_SetOutput(motor_id, rpm, motor_rpm_to_duty(rpm));",
+        "}",
+    ]
 
     protos = [
         "#include <stdint.h>",
         f"#define SYSCLK_HZ    {clock}",
         f"#define PWM_FREQ_HZ  {freq}",
         "#define PWM_PERIOD   (SYSCLK_HZ / PWM_FREQ_HZ)",
+        "#define MOTOR_RPM_FULL_SCALE 300",
+        "#define MOTOR_MIN_DUTY 120U",
         "",
     ]
     for ch in mod["pwm"]:
@@ -642,7 +678,12 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
             f"#define {ch['name']}_TIMER  {ch['timer']}_BASE",
             f"#define {ch['name']}_PWM_CH TIMER_{ch['channel']}",
         ]
-    protos += ["", "void Motor_Init(void);", "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);"]
+    protos += [
+        "",
+        "void Motor_Init(void);",
+        "void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille);",
+        "void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);",
+    ]
     write_module("motor", INCLUDES_MOTOR_BSP, body, protos, src_dir, header, section_title="Motor", plan=plan)
 
 
@@ -1087,6 +1128,10 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
             "int UART_Getc(char *c) {",
             f"    return bsp_uart_getc({base}_BASE, c);",
             "}",
+            "void UART_Flush(void) {",
+            f"    while (UARTBusy({base}_BASE)) {{",
+            "    }",
+            "}",
         ]
 
     for d in dbg.get("uart_debug", []):
@@ -1112,6 +1157,7 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
             "void UART_Putc(char c);",
             "void UART_Puts(const char* s);",
             "int UART_Getc(char *c);",
+            "void UART_Flush(void);",
         ]
     if dbg.get("uart_debug"):
         protos += [

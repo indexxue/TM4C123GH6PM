@@ -11,6 +11,7 @@
 #include "button.h"
 #include "buzzer.h"
 #include "cfg.h"
+#include "chassis.h"
 #include "device_profile.h"
 #include "event.h"
 #include "imu.h"
@@ -39,12 +40,10 @@
 
 #define APP_CTRL_PERIOD_MS          (20U)
 #define APP_HEARTBEAT_PERIOD_MS     (20000U)
-
-/** 姿态解算采样率 = 1 / app_tmr 周期 */
+/** 传感器未就绪时，重试 init 的间隔（ms） */
+#define APP_SENSOR_RETRY_PERIOD_MS  (1000U)
+#define APP_SENSOR_RETRY_INTERVAL   (APP_SENSOR_RETRY_PERIOD_MS / APP_CTRL_PERIOD_MS)
 #define APP_ATT_SAMPLE_HZ           (1000.0f / (float)APP_CTRL_PERIOD_MS)
-/** 姿态角度日志周期（ms） */
-#define APP_ATT_LOG_PERIOD_MS       (1000U)
-#define APP_ATT_LOG_INTERVAL        (APP_ATT_LOG_PERIOD_MS / APP_CTRL_PERIOD_MS)
 #define APP_LED_SCENE_TICK_MS       (50U)
 
 /* -------------------------------------------------------------------------- */
@@ -75,16 +74,6 @@ static void app_heartbeat_log(void)
 /* IMU / 磁力计 / 姿态（I2C0 软件 I2C，地址见 imu.h / magnetometer.h）         */
 /* -------------------------------------------------------------------------- */
 
-static void app_attitude_log_euler(const attitude_euler_t *euler)
-{
-    if (euler == NULL) {
-        return;
-    }
-
-    LOG_INFO("app:att roll=%d pitch=%d yaw=%d deg",
-             (int)euler->roll, (int)euler->pitch, (int)euler->yaw);
-}
-
 static void app_attitude_log_status_once(void)
 {
     static bool_t s_logged;
@@ -109,14 +98,10 @@ static bool_t app_sensors_boot_sample(void)
 {
     imu_sample_t imu;
     magnetometer_sample_t mag;
-    attitude_euler_t euler;
 
     if ((imu_read_sample(&imu) != STATUS_OK) || (magnetometer_read_sample_fast(&mag) != STATUS_OK) ||
         (attitude_update_step(&imu, &mag) != STATUS_OK)) {
         return FALSE;
-    }
-    if (attitude_get_euler(&euler) == STATUS_OK) {
-        app_attitude_log_euler(&euler);
     }
     return TRUE;
 }
@@ -177,17 +162,15 @@ static void app_sensors_init(void)
 
 static void app_attitude_periodic(void)
 {
-    static uint32_t s_log_div;
     static uint32_t s_init_retry_div;
 
     imu_sample_t imu;
     magnetometer_sample_t mag;
-    attitude_euler_t euler;
     const magnetometer_sample_t *mag_ptr = NULL;
 
     if (!attitude_is_ready()) {
         s_init_retry_div++;
-        if (s_init_retry_div >= APP_ATT_LOG_INTERVAL) {
+        if (s_init_retry_div >= APP_SENSOR_RETRY_INTERVAL) {
             s_init_retry_div = 0U;
             (void)app_sensors_try_init(TRUE);
         }
@@ -204,20 +187,6 @@ static void app_attitude_periodic(void)
     }
 
     app_attitude_log_status_once();
-
-    if (!device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
-        return;
-    }
-
-    s_log_div++;
-    if (s_log_div < APP_ATT_LOG_INTERVAL) {
-        return;
-    }
-    s_log_div = 0U;
-
-    if (attitude_get_euler(&euler) == STATUS_OK) {
-        app_attitude_log_euler(&euler);
-    }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -236,6 +205,10 @@ static void app_user_init(void)
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
         Line_Init();
+    }
+
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
+        chassis_init();
     }
 
     st = proto_uart_service_start();
@@ -266,9 +239,9 @@ static void app_on_timer(void)
 
     proto_telemetry_tick(APP_CTRL_PERIOD_MS);
 
-    /* TODO: 编码器速度计算（cfg_encoder_count + cfg_kinematics） */
-    /* TODO: PID 控制器（cfg_pid_speed / cfg_pid_line） */
-    /* TODO: 输出电机 PWM（cfg_motor_rpm + cfg_spd_limit 限速） */
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
+        chassis_tick(APP_CTRL_PERIOD_MS);
+    }
 }
 
 static void app_on_button(void)

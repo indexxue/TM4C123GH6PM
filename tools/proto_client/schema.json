@@ -1,0 +1,125 @@
+{
+  "proto_ver": 1,
+  "params": [
+    {
+      "id": 0,
+      "name": "schema",
+      "struct": "<I",
+      "fields": ["schema_version"],
+      "writable": false,
+      "description": "配置 schema 版本"
+    },
+    {
+      "id": 1,
+      "name": "serial",
+      "struct": "16s",
+      "fields": ["serial"],
+      "writable": false,
+      "description": "序列号（16 字节，\\0 结尾）"
+    },
+    {
+      "id": 2,
+      "name": "hw_rev",
+      "struct": "<I",
+      "fields": ["hw_rev"],
+      "writable": false,
+      "description": "硬件版本"
+    },
+    {
+      "id": 3,
+      "name": "boot_count",
+      "struct": "<I",
+      "fields": ["boot_count"],
+      "writable": false,
+      "description": "启动计数"
+    },
+    {
+      "id": 4,
+      "name": "fw_version",
+      "struct": "16s",
+      "fields": ["fw_version"],
+      "writable": true,
+      "description": "固件版本字符串"
+    },
+    {
+      "id": 5,
+      "name": "pid_speed",
+      "struct": "<fff",
+      "fields": ["kp", "ki", "kd"],
+      "writable": true,
+      "description": "速度环 PID"
+    },
+    {
+      "id": 6,
+      "name": "pid_line",
+      "struct": "<fff",
+      "fields": ["kp", "ki", "kd"],
+      "writable": true,
+      "description": "循迹环 PID"
+    },
+    {
+      "id": 7,
+      "name": "spd_limit",
+      "struct": "<ff",
+      "fields": ["max_rpm", "max_accel_rpm_s"],
+      "writable": true,
+      "description": "转速与加速度限制"
+    },
+    {
+      "id": 8,
+      "name": "kinematics",
+      "struct": "<ffffI",
+      "fields": ["wheel_diam_m", "gear_ratio", "track_width_m", "wheelbase_m", "encoder_cpr"],
+      "writable": true,
+      "description": "运动学参数"
+    },
+    {
+      "id": 9,
+      "name": "motor_dir",
+      "struct": "<I",
+      "fields": ["motor_dir_mask"],
+      "writable": true,
+      "description": "电机方向掩码"
+    },
+    {
+      "id": 10,
+      "name": "imu_offset",
+      "struct": "<ffffff",
+      "fields": ["gyro_x", "gyro_y", "gyro_z", "accel_x", "accel_y", "accel_z"],
+      "writable": true,
+      "description": "IMU 零偏"
+    },
+    {
+      "id": 11,
+      "name": "line_threshold",
+      "struct": "<6H",
+      "fields": ["line1", "line2", "line3", "line4", "line5", "line6"],
+      "writable": true,
+      "description": "循迹阈值（6 路 ADC）"
+    },
+    {
+      "id": 12,
+      "name": "encoder_zero",
+      "struct": "<4i",
+      "fields": ["m1", "m2", "m3", "m4"],
+      "writable": true,
+      "description": "编码器零位"
+    },
+    {
+      "id": 13,
+      "name": "battery_cal",
+      "struct": "<ff",
+      "fields": ["scale", "offset_v"],
+      "writable": true,
+      "description": "电池电压标定"
+    },
+    {
+      "id": 14,
+      "name": "last_mode",
+      "struct": "<I",
+      "fields": ["last_mode"],
+      "writable": false,
+      "description": "上次运行模式"
+    }
+  ]
+}

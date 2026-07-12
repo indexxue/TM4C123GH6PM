@@ -43,35 +43,63 @@ void Motor_Init(void) {
     bsp_pwm_init(&BOARD_PWM_CFG);
 }
 
-void Motor_SetSpeed(uint8_t motor_id, int32_t rpm)
+void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille)
 {
-    uint16_t duty = (rpm == 0) ? 0U : 500U;
+    if (duty_permille > 1000U) {
+        duty_permille = 1000U;
+    }
     switch (motor_id) {
     case 1:
         motor_apply_dir(
             &(const bsp_gpio_pin_t){GPIO_M1_IN1_PORT, GPIO_M1_IN1_MASK},
             &(const bsp_gpio_pin_t){GPIO_M1_IN2_PORT, GPIO_M1_IN2_MASK}, rpm);
-        bsp_pwm_set_duty(M1_TIMER, M1_PWM_CH, duty);
+        bsp_pwm_set_duty(M1_TIMER, M1_PWM_CH, duty_permille);
         break;
     case 2:
         motor_apply_dir(
             &(const bsp_gpio_pin_t){GPIO_M2_IN1_PORT, GPIO_M2_IN1_MASK},
             &(const bsp_gpio_pin_t){GPIO_M2_IN2_PORT, GPIO_M2_IN2_MASK}, rpm);
-        bsp_pwm_set_duty(M2_TIMER, M2_PWM_CH, duty);
+        bsp_pwm_set_duty(M2_TIMER, M2_PWM_CH, duty_permille);
         break;
     case 3:
         motor_apply_dir(
             &(const bsp_gpio_pin_t){GPIO_M3_IN1_PORT, GPIO_M3_IN1_MASK},
             &(const bsp_gpio_pin_t){GPIO_M3_IN2_PORT, GPIO_M3_IN2_MASK}, rpm);
-        bsp_pwm_set_duty(M3_TIMER, M3_PWM_CH, duty);
+        bsp_pwm_set_duty(M3_TIMER, M3_PWM_CH, duty_permille);
         break;
     case 4:
         motor_apply_dir(
             &(const bsp_gpio_pin_t){GPIO_M4_IN1_PORT, GPIO_M4_IN1_MASK},
             &(const bsp_gpio_pin_t){GPIO_M4_IN2_PORT, GPIO_M4_IN2_MASK}, rpm);
-        bsp_pwm_set_duty(M4_TIMER, M4_PWM_CH, duty);
+        bsp_pwm_set_duty(M4_TIMER, M4_PWM_CH, duty_permille);
         break;
     default:
         break;
     }
+}
+
+static uint16_t motor_rpm_to_duty(int32_t rpm)
+{
+    int32_t abs_rpm;
+    uint16_t duty;
+    if (rpm == 0) {
+        return 0U;
+    }
+    abs_rpm = rpm;
+    if (abs_rpm < 0) {
+        abs_rpm = -abs_rpm;
+    }
+    if (abs_rpm > MOTOR_RPM_FULL_SCALE) {
+        abs_rpm = MOTOR_RPM_FULL_SCALE;
+    }
+    duty = (uint16_t)((abs_rpm * 1000) / MOTOR_RPM_FULL_SCALE);
+    if (duty < MOTOR_MIN_DUTY && abs_rpm > 0) {
+        duty = MOTOR_MIN_DUTY;
+    }
+    return duty;
+}
+
+void Motor_SetSpeed(uint8_t motor_id, int32_t rpm)
+{
+    Motor_SetOutput(motor_id, rpm, motor_rpm_to_duty(rpm));
 }

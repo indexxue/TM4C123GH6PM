@@ -128,6 +128,7 @@ static const nvs_param_policy_t s_param_policy[NVS_PARAM_COUNT] = {
     [NVS_PARAM_ENCODER_ZERO] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_BATTERY_CAL] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_LAST_MODE] = {1U, NVS_SRC_INTERNAL},
+    [NVS_PARAM_ENCODER_DIR] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
 };
 
 /* -------------------------------------------------------------------------- */
@@ -916,6 +917,11 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     }
 
     cfg->last_mode = NVS_RUN_MODE_IDLE;
+
+    /* car-4wd：M2(QEI0) 与 M1(QEI1) 同向旋转时计数极性相反，默认翻转 M2 */
+    if (profile->product_id != DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
+        cfg->encoder_dir_mask = 0x02U;
+    }
 }
 
 static int nvs_load_blob_exact(const char *ns, const char *key, void *dst, u32_t expect_len)
@@ -981,6 +987,7 @@ static status_t nvs_cfg_persist_defaults(void)
     NVS_APPEND_BLOB(NVS_CFG_NS_CTRL, NVS_CFG_KEY_KINEM, &s_cfg.kinematics,
                     sizeof(s_cfg.kinematics));
     NVS_APPEND_U32(NVS_CFG_NS_CTRL, NVS_CFG_KEY_MOT_DIR, s_cfg.motor_dir_mask);
+    NVS_APPEND_U32(NVS_CFG_NS_CTRL, NVS_CFG_KEY_ENC_DIR, s_cfg.encoder_dir_mask);
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_IMU_OFF, &s_cfg.imu_offset,
                     sizeof(s_cfg.imu_offset));
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_TH, &s_cfg.line_threshold,
@@ -1120,6 +1127,10 @@ static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg)
 
     if (nvs_get_u32_impl(NVS_CFG_NS_CTRL, NVS_CFG_KEY_MOT_DIR, &u32_val) == STATUS_OK) {
         cfg->motor_dir_mask = u32_val;
+    }
+
+    if (nvs_get_u32_impl(NVS_CFG_NS_CTRL, NVS_CFG_KEY_ENC_DIR, &u32_val) == STATUS_OK) {
+        cfg->encoder_dir_mask = u32_val;
     }
 
     if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_IMU_OFF, &cfg->imu_offset,
@@ -1374,6 +1385,20 @@ status_t nvs_param_set_motor_dir_mask(u32_t mask, nvs_write_src_t src)
 
     s_cfg.motor_dir_mask = mask;
     return nvs_param_persist_u32(NVS_PARAM_MOTOR_DIR, NVS_CFG_NS_CTRL, NVS_CFG_KEY_MOT_DIR, mask);
+}
+
+status_t nvs_param_set_encoder_dir_mask(u32_t mask, nvs_write_src_t src)
+{
+    status_t st;
+
+    st = nvs_param_check_write(NVS_PARAM_ENCODER_DIR, src);
+    if (st != STATUS_OK) {
+        return st;
+    }
+
+    s_cfg.encoder_dir_mask = mask & 0x0FU;
+    return nvs_param_persist_u32(NVS_PARAM_ENCODER_DIR, NVS_CFG_NS_CTRL,
+                                 NVS_CFG_KEY_ENC_DIR, s_cfg.encoder_dir_mask);
 }
 
 status_t nvs_param_set_imu_offset(const nvs_imu_offset_t *offset, nvs_write_src_t src)

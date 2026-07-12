@@ -156,6 +156,8 @@ extern const bsp_spi_config_t BOARD_SPI_CFG;
 #define SYSCLK_HZ    80000000
 #define PWM_FREQ_HZ  10000
 #define PWM_PERIOD   (SYSCLK_HZ / PWM_FREQ_HZ)
+#define MOTOR_RPM_FULL_SCALE 300
+#define MOTOR_MIN_DUTY 120U
 #define M1_TIMER  TIMER0_BASE
 #define M1_PWM_CH TIMER_A
 #define M2_TIMER  TIMER0_BASE
@@ -165,6 +167,7 @@ extern const bsp_spi_config_t BOARD_SPI_CFG;
 #define M4_TIMER  TIMER1_BASE
 #define M4_PWM_CH TIMER_B
 void Motor_Init(void);
+void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille);
 void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);
 
 /* --- Encoder --- */
@@ -185,6 +188,7 @@ bool Board_Ultra_Init(void);
 void UART_Putc(char c);
 void UART_Puts(const char* s);
 int UART_Getc(char *c);
+void UART_Flush(void);
 void UART_Debug_Putc(char c);
 void UART_Debug_Puts(const char* s);
 int UART_Debug_Getc(char *c);

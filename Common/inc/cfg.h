@@ -14,6 +14,8 @@ void cfg_init(void);
 
 int32_t cfg_motor_rpm(uint8_t motor_id, int32_t rpm);
 int32_t cfg_encoder_count(uint8_t index);
+/** 按 encoder_dir_mask 翻转编码器 delta（与 motor_dir 解耦） */
+int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta);
 uint16_t cfg_line_threshold(uint8_t sensor_index);
 uint32_t cfg_battery_calibrate_mv(uint32_t raw_mv);
 

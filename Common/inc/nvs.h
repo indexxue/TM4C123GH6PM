@@ -60,6 +60,7 @@ typedef enum {
 #define NVS_CFG_KEY_SPD_LIM         "spd_lim"
 #define NVS_CFG_KEY_KINEM           "kinem"
 #define NVS_CFG_KEY_MOT_DIR         "mot_dir"
+#define NVS_CFG_KEY_ENC_DIR         "enc_dir"
 #define NVS_CFG_KEY_IMU_OFF         "imu_off"
 #define NVS_CFG_KEY_LINE_TH         "line_th"
 #define NVS_CFG_KEY_ENC_ZERO        "enc_zero"
@@ -124,6 +125,8 @@ typedef struct {
     nvs_spd_limit_t spd_limit;
     nvs_kinematics_t kinematics;
     u32_t motor_dir_mask;
+    /** 编码器计数极性：bit0=M1 … bit3=M4，置位则翻转该路 delta/RPM 符号 */
+    u32_t encoder_dir_mask;
     nvs_imu_offset_t imu_offset;
     nvs_line_threshold_t line_threshold;
     nvs_encoder_zero_t encoder_zero;
@@ -158,6 +161,7 @@ typedef enum {
     NVS_PARAM_ENCODER_ZERO,
     NVS_PARAM_BATTERY_CAL,
     NVS_PARAM_LAST_MODE,
+    NVS_PARAM_ENCODER_DIR,
     NVS_PARAM_COUNT
 } nvs_param_id_t;
 
@@ -201,6 +205,7 @@ status_t nvs_param_set_pid_line(const nvs_pid3_t *pid, nvs_write_src_t src);
 status_t nvs_param_set_spd_limit(const nvs_spd_limit_t *limit, nvs_write_src_t src);
 status_t nvs_param_set_kinematics(const nvs_kinematics_t *kinem, nvs_write_src_t src);
 status_t nvs_param_set_motor_dir_mask(u32_t mask, nvs_write_src_t src);
+status_t nvs_param_set_encoder_dir_mask(u32_t mask, nvs_write_src_t src);
 status_t nvs_param_set_imu_offset(const nvs_imu_offset_t *offset, nvs_write_src_t src);
 status_t nvs_param_set_line_threshold(const nvs_line_threshold_t *threshold, nvs_write_src_t src);
 status_t nvs_param_set_encoder_zero(const nvs_encoder_zero_t *zero, nvs_write_src_t src);
