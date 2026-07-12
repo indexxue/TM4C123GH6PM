@@ -13,8 +13,10 @@
 void cfg_init(void);
 
 int32_t cfg_motor_rpm(uint8_t motor_id, int32_t rpm);
+/** 编码器修正后的 RPM → 与 SET_SPEED 命令同坐标系 */
+f32_t cfg_motor_cmd_space_rpm(u8_t motor_id, f32_t enc_corrected_rpm);
 int32_t cfg_encoder_count(uint8_t index);
-/** 按 encoder_dir_mask 翻转编码器 delta（与 motor_dir 解耦） */
+/** 按 encoder_dir_mask 翻转编码器 delta（极性宏见 encoder_polarity.h） */
 int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta);
 uint16_t cfg_line_threshold(uint8_t sensor_index);
 uint32_t cfg_battery_calibrate_mv(uint32_t raw_mv);

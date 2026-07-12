@@ -9,7 +9,6 @@
 #include "cfg.h"
 
 #define MOTION_RPM_FILTER_ALPHA 0.30f
-#define MOTION_MIN_DUTY_PERMILLE 120U
 
 static f32_t s_rpm[MOTION_WHEEL_COUNT];
 static int32_t s_prev_count[MOTION_WHEEL_COUNT];
@@ -90,7 +89,7 @@ f32_t motion_get_logical_rpm(u8_t motor_id)
     if ((motor_id < 1U) || (motor_id > MOTION_WHEEL_COUNT)) {
         return 0.0f;
     }
-    return s_rpm[motor_id - 1U];
+    return cfg_motor_cmd_space_rpm(motor_id, s_rpm[motor_id - 1U]);
 }
 
 u16_t motion_rpm_to_duty_permille(f32_t abs_rpm)

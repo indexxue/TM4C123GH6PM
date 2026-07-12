@@ -18,9 +18,24 @@
 #define CHASSIS_PID_OUT_MAX_PERMILLE 400.0f
 #define CHASSIS_PID_INTEGRAL_MAX     300.0f
 
+#ifndef CHASSIS_PID_SIGN_FIX_ENABLE
+/** 1=目标/反馈异号时改按 |RPM| 闭环，方向仍由 target 符号决定 */
+#define CHASSIS_PID_SIGN_FIX_ENABLE  1
+#endif
+
+#ifndef CHASSIS_PID_DUTY_FLOOR_GUARD
+/** 1=非零目标时占空不低于起转阈值，防止 PID 把输出砍到 0 */
+#define CHASSIS_PID_DUTY_FLOOR_GUARD  1
+#endif
+
+#ifndef CHASSIS_PID_SIGN_FIX_MIN_RPM
+#define CHASSIS_PID_SIGN_FIX_MIN_RPM  5.0f
+#endif
+
 static pid_t s_pid[CHASSIS_MOTOR_COUNT];
 static f32_t s_target_rpm[CHASSIS_MOTOR_COUNT];
 static f32_t s_ramped_rpm[CHASSIS_MOTOR_COUNT];
+static s8_t s_target_sign[CHASSIS_MOTOR_COUNT];
 static bool_t s_active;
 
 void chassis_reload_pid_gains(void)
@@ -44,6 +59,7 @@ static void chassis_reset_targets(void)
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
         s_target_rpm[i] = 0.0f;
         s_ramped_rpm[i] = 0.0f;
+        s_target_sign[i] = 0;
     }
 }
 
@@ -95,6 +111,50 @@ static void chassis_ramp_targets(f32_t dt_s)
     }
 }
 
+/**
+ * 速度环按 |RPM| 闭环，方向仅由 target 符号经 Motor_SetOutput 决定。
+ * 有符号 PID 在负目标时误差恒为负，会把占空压死（+100 正常、-100 跑 ~2s 后停）。
+ */
+static void chassis_pid_setpoint_process(f32_t target_rpm, f32_t measured_rpm, f32_t *sp_out,
+                                         f32_t *pv_out)
+{
+#if CHASSIS_PID_SIGN_FIX_ENABLE
+    if (fabsf(target_rpm) >= CHASSIS_PID_SIGN_FIX_MIN_RPM) {
+        *sp_out = fabsf(target_rpm);
+        *pv_out = fabsf(measured_rpm);
+        return;
+    }
+#endif
+    *sp_out = target_rpm;
+    *pv_out = measured_rpm;
+}
+
+static s8_t chassis_target_sign(f32_t target_rpm)
+{
+    if (target_rpm > 0.5f) {
+        return 1;
+    }
+    if (target_rpm < -0.5f) {
+        return -1;
+    }
+    return 0;
+}
+
+static void chassis_pid_reset_on_dir_change(u8_t motor_id, f32_t target_rpm)
+{
+    s8_t sign = chassis_target_sign(target_rpm);
+    u8_t idx = motor_id - 1U;
+
+    if ((sign != 0) && (s_target_sign[idx] != 0) && (sign != s_target_sign[idx])) {
+        pid_reset(&s_pid[idx]);
+    }
+    if (sign != 0) {
+        s_target_sign[idx] = sign;
+    } else {
+        s_target_sign[idx] = 0;
+    }
+}
+
 static void chassis_motor_output(u8_t motor_id, f32_t target_rpm, f32_t measured_rpm, f32_t dt_s)
 {
     f32_t pid_out;
@@ -102,12 +162,16 @@ static void chassis_motor_output(u8_t motor_id, f32_t target_rpm, f32_t measured
     u16_t duty_ff;
     u16_t duty;
     s32_t dir_rpm;
+    f32_t pid_sp;
+    f32_t pid_pv;
 
     if (fabsf(target_rpm) < 1.0f) {
         target_rpm = 0.0f;
     }
 
-    pid_out = pid_update(&s_pid[motor_id - 1U], target_rpm, measured_rpm, dt_s);
+    chassis_pid_reset_on_dir_change(motor_id, target_rpm);
+    chassis_pid_setpoint_process(target_rpm, measured_rpm, &pid_sp, &pid_pv);
+    pid_out = pid_update(&s_pid[motor_id - 1U], pid_sp, pid_pv, dt_s);
     duty_ff = motion_rpm_to_duty_permille(fabsf(target_rpm));
     duty_f = (f32_t)duty_ff + pid_out;
 
@@ -117,6 +181,14 @@ static void chassis_motor_output(u8_t motor_id, f32_t target_rpm, f32_t measured
     if (duty_f > 1000.0f) {
         duty_f = 1000.0f;
     }
+
+#if CHASSIS_PID_DUTY_FLOOR_GUARD
+    if ((fabsf(target_rpm) >= CHASSIS_PID_SIGN_FIX_MIN_RPM) && (duty_ff > 0U) &&
+        (duty_f < (f32_t)MOTION_MIN_DUTY_PERMILLE)) {
+        duty_f = (f32_t)MOTION_MIN_DUTY_PERMILLE;
+    }
+#endif
+
     duty = (u16_t)duty_f;
 
     if (target_rpm == 0.0f) {

@@ -6,6 +6,7 @@
 #include "nvs.h"
 
 #include "device_profile.h"
+#include "encoder_polarity.h"
 #include "crc32.h"
 #include "flash_layout.h"
 
@@ -103,6 +104,8 @@ static void nvs_unlock(void)
 static status_t nvs_param_persist_u32(nvs_param_id_t id, const char *ns, const char *key, u32_t value);
 static status_t nvs_get_u32_impl(const char *ns, const char *key, u32_t *value);
 static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg);
+static void nvs_cfg_reconcile_encoder_dir(nvs_cfg_t *cfg);
+static void nvs_cfg_reconcile_motor_dir(nvs_cfg_t *cfg);
 static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg);
 static void nvs_cfg_detect_first_boot(void);
 static status_t nvs_cfg_seed_if_needed(void);
@@ -918,10 +921,47 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
 
     cfg->last_mode = NVS_RUN_MODE_IDLE;
 
-    /* car-4wd：M2(QEI0) 与 M1(QEI1) 同向旋转时计数极性相反，默认翻转 M2 */
+    /* 出厂 encoder_dir_mask 由 encoder_polarity_board.h / encoder_polarity.h 决定 */
     if (profile->product_id != DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
-        cfg->encoder_dir_mask = 0x02U;
+        cfg->encoder_dir_mask = encoder_polarity_default_mask();
     }
+}
+
+static void nvs_cfg_reconcile_encoder_dir(nvs_cfg_t *cfg)
+{
+    const device_product_profile_t *profile = device_profile_product();
+    u32_t expected;
+
+    if (cfg == NULL) {
+        return;
+    }
+    if (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
+        return;
+    }
+
+    expected = encoder_polarity_default_mask();
+    /*
+     * M1/M2 左右轮以板级宏为准；保留 M3/M4 用户位。
+     * 清理旧固件误将 M1 写入 encoder_dir_mask 的情况（如 0x03 → 0x02）。
+     */
+    cfg->encoder_dir_mask = (cfg->encoder_dir_mask & 0x0CU) | expected;
+}
+
+static void nvs_cfg_reconcile_motor_dir(nvs_cfg_t *cfg)
+{
+    const device_product_profile_t *profile = device_profile_product();
+    u32_t expected;
+
+    if (cfg == NULL) {
+        return;
+    }
+    if (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
+        return;
+    }
+
+    expected = motor_polarity_default_mask();
+    cfg->motor_dir_mask = (cfg->motor_dir_mask & ~0x03U) | (expected & 0x03U) |
+                          (cfg->motor_dir_mask & 0x0CU);
 }
 
 static int nvs_load_blob_exact(const char *ns, const char *key, void *dst, u32_t expect_len)
@@ -1132,6 +1172,9 @@ static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg)
     if (nvs_get_u32_impl(NVS_CFG_NS_CTRL, NVS_CFG_KEY_ENC_DIR, &u32_val) == STATUS_OK) {
         cfg->encoder_dir_mask = u32_val;
     }
+
+    nvs_cfg_reconcile_motor_dir(cfg);
+    nvs_cfg_reconcile_encoder_dir(cfg);
 
     if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_IMU_OFF, &cfg->imu_offset,
                             (u32_t)sizeof(cfg->imu_offset)) == 0) {

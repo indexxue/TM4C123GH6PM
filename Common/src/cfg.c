@@ -7,6 +7,7 @@
 
 #include "board.h"
 #include "device_profile.h"
+#include "encoder_polarity.h"
 #include "log.h"
 
 void cfg_init(void)
@@ -47,6 +48,23 @@ int32_t cfg_motor_rpm(uint8_t motor_id, int32_t rpm)
     return rpm;
 }
 
+f32_t cfg_motor_cmd_space_rpm(u8_t motor_id, f32_t enc_corrected_rpm)
+{
+    const nvs_cfg_t *n = nvs_cfg_get();
+    u32_t bit;
+
+    if ((motor_id < 1U) || (motor_id > 4U)) {
+        return enc_corrected_rpm;
+    }
+
+    bit = 1U << (motor_id - 1U);
+    /* motor_dir 翻转输出但未配 encoder_dir 时，反馈需同向修正到命令系 */
+    if (((n->motor_dir_mask & bit) != 0U) && ((n->encoder_dir_mask & bit) == 0U)) {
+        return -enc_corrected_rpm;
+    }
+    return enc_corrected_rpm;
+}
+
 int32_t cfg_encoder_count(uint8_t index)
 {
     const nvs_cfg_t *n = nvs_cfg_get();
@@ -62,17 +80,12 @@ int32_t cfg_encoder_count(uint8_t index)
 int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta)
 {
     const nvs_cfg_t *n = nvs_cfg_get();
-    u32_t bit;
 
     if (wheel_index >= NVS_CFG_ENCODER_MAX) {
         return delta;
     }
 
-    bit = 1U << wheel_index;
-    if ((n->encoder_dir_mask & bit) != 0U) {
-        return -delta;
-    }
-    return delta;
+    return encoder_polarity_to_logical_delta((u8_t)wheel_index, delta, n->encoder_dir_mask);
 }
 
 uint16_t cfg_line_threshold(uint8_t sensor_index)
