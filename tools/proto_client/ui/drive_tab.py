@@ -437,7 +437,7 @@ class DriveTab(QWidget):
         if not self._drive_enabled():
             return
         self._worker.request_drive_stream(throttle, steer)
-        self._set_status(chr(74)+chr(111)+chr(121)+chr(115)+chr(116)+chr(105)+chr(99)+chr(107)+chr(58)+chr(32)+chr(116)+chr(104)+chr(114)+chr(111)+chr(116)+chr(116)+chr(108)+chr(101)+chr(61)+chr(123)+chr(58)+chr(43)+chr(100)+chr(125)+chr(32)+chr(115)+chr(116)+chr(101)+chr(101)+chr(114)+chr(61)+chr(123)+chr(58)+chr(43)+chr(100)+chr(125)).format(throttle, steer)
+        self._set_status("Joystick: throttle={:+d} steer={:+d}".format(throttle, steer))
 
     def _on_joystick_released(self):
         self._worker.request_drive_stream(0, 0)

@@ -930,6 +930,7 @@ class SerialWorker(QThread):
                 # 双发命令时固件可能回两条相同 seq 的空 ACK，第二条忽略
                 if len(frame.payload) == 0 and frame.cmd in (
                     int(proto.Cmd.TELEMETRY_PUSH),
+                    int(proto.Cmd.DRIVE) | proto.RESPONSE_BIT,
                     int(proto.Cmd.DRIVE_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_SPEED) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SPEED_STOP) | proto.RESPONSE_BIT,
@@ -1114,11 +1115,16 @@ class SerialWorker(QThread):
                 self._on_drive_stop_rsp(frame)
             return
 
+        was_active = self._drive_stream_active
         self._drive_throttle = throttle
         self._drive_steer = steer
         self._drive_stream_active = True
-        self._drive_next_send = 0.0
-        self._send_drive_stream_frame()
+        if not was_active:
+            # 首次激活立即发一帧，避免主循环最多 5 ms 的启动延迟
+            self._drive_next_send = 0.0
+            self._send_drive_stream_frame()
+        # 已激活时仅更新目标值，由主循环按 DRIVE_STREAM_INTERVAL_S 节奏发送，
+        # 避免鼠标事件高频触发（~60 Hz）导致 DRIVE 帧泛滥。
 
     def _send_drive_stream_frame(self) -> None:
         if not self.is_connected():
@@ -1126,7 +1132,8 @@ class SerialWorker(QThread):
         payload = proto.build_drive(self._drive_throttle, self._drive_steer)
         seq = self._next_seq()
         frame_bytes = proto.encode_frame(int(proto.Cmd.DRIVE), seq, payload)
-        self._write_frame(frame_bytes)
+        if not self._write_frame(frame_bytes):
+            self.log.emit("DRIVE 流发送失败")
 
     def _nav_is_superseded(self, nav_id: int) -> bool:
         return self._nav_latest_id > nav_id
