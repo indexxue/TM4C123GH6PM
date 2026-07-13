@@ -59,7 +59,7 @@ class AngleControlPanel(QGroupBox):
         self._on_log_command = on_log_command
         self._delta_yaw = self.DEFAULT_DELTA
         self._base_rpm = self.DEFAULT_BASE_RPM
-        self._motor_count = proto.MOTOR_COUNT_MAX
+        self._motor_count = proto.MOTOR_COUNT_DEFAULT
 
         root = QVBoxLayout(self)
 

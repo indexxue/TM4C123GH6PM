@@ -135,3 +135,8 @@ const nvs_pid3_t *cfg_pid_yaw(void)
 {
     return &nvs_cfg_get()->pid_yaw;
 }
+
+const nvs_pid3_t *cfg_pid_dist(void)
+{
+    return &nvs_cfg_get()->pid_dist;
+}

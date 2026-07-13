@@ -124,6 +124,7 @@ typedef struct {
     nvs_pid3_t pid_speed;
     nvs_pid3_t pid_line;
     nvs_pid3_t pid_yaw;
+    nvs_pid3_t pid_dist;
     nvs_spd_limit_t spd_limit;
     nvs_kinematics_t kinematics;
     u32_t motor_dir_mask;
@@ -168,6 +169,7 @@ typedef enum {
     NVS_PARAM_ENCODER_DIR,
     NVS_PARAM_PID_YAW,
     NVS_PARAM_MAG_HEADING,
+    NVS_PARAM_PID_DIST,
     NVS_PARAM_COUNT
 } nvs_param_id_t;
 
@@ -209,6 +211,7 @@ status_t nvs_param_inc_boot_count(void);
 status_t nvs_param_set_pid_speed(const nvs_pid3_t *pid, nvs_write_src_t src);
 status_t nvs_param_set_pid_line(const nvs_pid3_t *pid, nvs_write_src_t src);
 status_t nvs_param_set_pid_yaw(const nvs_pid3_t *pid, nvs_write_src_t src);
+status_t nvs_param_set_pid_dist(const nvs_pid3_t *pid, nvs_write_src_t src);
 status_t nvs_param_set_spd_limit(const nvs_spd_limit_t *limit, nvs_write_src_t src);
 status_t nvs_param_set_kinematics(const nvs_kinematics_t *kinem, nvs_write_src_t src);
 status_t nvs_param_set_motor_dir_mask(u32_t mask, nvs_write_src_t src);

@@ -32,6 +32,7 @@ DEFAULT_SUB_LINE_HZ = 5
 DEFAULT_SUB_ULTRA_HZ = 5
 DEFAULT_SUB_MOTOR_RPM_HZ = 10
 DEFAULT_SUB_ANGLE_LOOP_HZ = 10
+DEFAULT_SUB_DISTANCE_LOOP_HZ = 10
 
 # 与固件 board.h LINE_SENSOR_COUNT 一致（car-4wd 为 5 路）
 LINE_SENSOR_COUNT = 5
@@ -63,6 +64,8 @@ class Cmd(IntEnum):
     SET_ANGLE = 0x0034
     ANGLE_STOP = 0x0035
     CALIB_YAW = 0x0036
+    SET_DISTANCE = 0x0037
+    DISTANCE_STOP = 0x0038
 
 
 class Cap(IntFlag):
@@ -73,6 +76,7 @@ class Cap(IntFlag):
     SPEED_LOOP = 1 << 4
     ANGLE_LOOP = 1 << 5
     YAW_CALIB = 1 << 6
+    DISTANCE_LOOP = 1 << 7
 
 
 class TelChannel(IntFlag):
@@ -83,12 +87,13 @@ class TelChannel(IntFlag):
     ULTRASONIC = 1 << 4
     MOTOR_RPM = 1 << 5
     ANGLE_LOOP = 1 << 6
+    DISTANCE_LOOP = 1 << 7
 
 
 BASE_CHANNEL_MASK = int(TelChannel.ATTITUDE | TelChannel.ENCODER)
 OPTIONAL_CHANNEL_MASK = int(
     TelChannel.BATT | TelChannel.LINE_ADC | TelChannel.ULTRASONIC | TelChannel.MOTOR_RPM |
-    TelChannel.ANGLE_LOOP
+    TelChannel.ANGLE_LOOP | TelChannel.DISTANCE_LOOP
 )
 
 CHANNEL_ID_BATTERY = 0
@@ -98,10 +103,12 @@ CHANNEL_ID_LINE_ADC = 3
 CHANNEL_ID_ULTRASONIC = 4
 CHANNEL_ID_MOTOR_RPM = 5
 CHANNEL_ID_ANGLE_LOOP = 6
+CHANNEL_ID_DISTANCE_LOOP = 7
 
 HW_REV_CAR_4WD_V1 = 0
 HW_REV_CAR_2WD_V1 = 1
 MOTOR_COUNT_MAX = 4
+MOTOR_COUNT_DEFAULT = 2
 
 
 def motor_count_for_hw_rev(hw_rev: int) -> int:
@@ -456,6 +463,14 @@ class AngleLoopPush:
     base_rpm: int
 
 
+@dataclass
+class DistanceLoopPush:
+    target_mm: int
+    current_mm: int
+    cmd_rpm: int
+    max_rpm: int
+
+
 def parse_angle_loop_push(payload: bytes) -> AngleLoopPush:
     if len(payload) < 12:
         raise ProtoError("角度环推送载荷过短")
@@ -465,6 +480,18 @@ def parse_angle_loop_push(payload: bytes) -> AngleLoopPush:
         current_yaw=current_yaw,
         turn_rpm=turn_rpm,
         base_rpm=base_rpm,
+    )
+
+
+def parse_distance_loop_push(payload: bytes) -> DistanceLoopPush:
+    if len(payload) < 16:
+        raise ProtoError("距离环推送载荷过短")
+    target_mm, current_mm, cmd_rpm, max_rpm = struct.unpack_from("<4i", payload, 0)
+    return DistanceLoopPush(
+        target_mm=target_mm,
+        current_mm=current_mm,
+        cmd_rpm=cmd_rpm,
+        max_rpm=max_rpm,
     )
 
 
@@ -479,10 +506,10 @@ def parse_param_list(payload: bytes) -> list[ParamListEntry]:
 
 def build_subscribe(mask: int, hz_att: int = 0, hz_enc: int = 0, hz_line: int = 0,
                     hz_ultra: int = 0, hz_motor_rpm: int = 0,
-                    hz_angle_loop: int = 0) -> bytes:
-    # mask u32 + 6×u8（第 6 字节为 angle_loop Hz）
+                    hz_angle_loop: int = 0, hz_distance_loop: int = 0) -> bytes:
+    # mask u32 + 7×u8（第 6/7 字节为 angle/distance loop Hz）
     return struct.pack(
-        "<IBBBBBB",
+        "<IBBBBBBB",
         mask,
         hz_att & 0xFF,
         hz_enc & 0xFF,
@@ -490,6 +517,7 @@ def build_subscribe(mask: int, hz_att: int = 0, hz_enc: int = 0, hz_line: int = 
         hz_ultra & 0xFF,
         hz_motor_rpm & 0xFF,
         hz_angle_loop & 0xFF,
+        hz_distance_loop & 0xFF,
     )
 
 
@@ -535,6 +563,11 @@ def build_set_angle(delta_yaw: int, base_rpm: int, max_turn_rpm: int = 0) -> byt
     return struct.pack("<Bhi", 0, delta_yaw, base_rpm)
 
 
+def build_set_distance(dist_mm: int, max_rpm: int = 0) -> bytes:
+    """dist_mm：相对下发时刻的位移（mm；正=前进，负=后退）。"""
+    return struct.pack("<ii", dist_mm, max_rpm)
+
+
 def build_calib_yaw(ref_yaw: int) -> bytes:
     """静止水平时，将当前物理朝向设为 ref_yaw（-180~180°）。"""
     ref = max(-180, min(180, int(ref_yaw)))
@@ -564,6 +597,8 @@ def caps_text(caps: int) -> str:
         names.append("ANGLE_LOOP")
     if caps & Cap.YAW_CALIB:
         names.append("YAW_CALIB")
+    if caps & Cap.DISTANCE_LOOP:
+        names.append("DISTANCE_LOOP")
     return ", ".join(names) if names else "none"
 
 

@@ -15,7 +15,10 @@
  * - PROTO_CMD_ANGLE_STOP (0x0035)：停止角度环
  * - PROTO_CMD_CALIB_YAW (0x0036)：payload [ref_yaw i16] — 静止时将当前物理朝向设为 ref_yaw（-180~180°）
  *   ACK: [offset_deg i16][yaw_deg i16]
- * 订阅 PROTO_CH_ANGLE_LOOP (bit6) 可推送航向环状态（push ch=6）
+ * 距离环相关命令（小端）：
+ * - PROTO_CMD_SET_DISTANCE (0x0037)：payload [dist_mm i32][max_rpm i32] — 相对位移 Δs（mm）
+ * - PROTO_CMD_DISTANCE_STOP (0x0038)：停止距离环
+ * 订阅 PROTO_CH_ANGLE_LOOP (bit6) / PROTO_CH_DISTANCE_LOOP (bit7) 可推送对应环状态
  */
 
 #ifndef PROTO_H
@@ -32,12 +35,16 @@ extern "C" {
 #define PROTO_CMD_SET_ANGLE         0x0034U
 #define PROTO_CMD_ANGLE_STOP        0x0035U
 #define PROTO_CMD_CALIB_YAW         0x0036U
+#define PROTO_CMD_SET_DISTANCE      0x0037U
+#define PROTO_CMD_DISTANCE_STOP     0x0038U
 
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
 #define PROTO_CAP_YAW_CALIB         (1U << 6)
+#define PROTO_CAP_DISTANCE_LOOP     (1U << 7)
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
+#define PROTO_CH_DISTANCE_LOOP      (1U << 7)
 
 status_t proto_uart_service_start(void);
 void proto_telemetry_tick(uint32_t period_ms);

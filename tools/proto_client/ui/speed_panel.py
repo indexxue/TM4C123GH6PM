@@ -41,7 +41,7 @@ class SpeedControlPanel(QGroupBox):
         self._spd_limit_editor = spd_limit_editor
         self._on_clear_plot = on_clear_plot
         self._target = [0, 0, 0, 0]
-        self._motor_count = proto.MOTOR_COUNT_MAX
+        self._motor_count = proto.MOTOR_COUNT_DEFAULT
 
         root = QVBoxLayout(self)
 

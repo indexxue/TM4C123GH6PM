@@ -30,7 +30,8 @@ class SubscribePanel(QGroupBox):
         self._chk_ultra = QCheckBox("超声波")
         self._chk_rpm = QCheckBox("电机 RPM")
         self._chk_angle = QCheckBox("角度环")
-        for chk in (self._chk_batt, self._chk_line, self._chk_ultra, self._chk_rpm, self._chk_angle):
+        self._chk_distance = QCheckBox("距离环")
+        for chk in (self._chk_batt, self._chk_line, self._chk_ultra, self._chk_rpm, self._chk_angle, self._chk_distance):
             row.addWidget(chk)
         layout.addLayout(row)
 
@@ -56,6 +57,8 @@ class SubscribePanel(QGroupBox):
             mask |= int(proto.TelChannel.MOTOR_RPM)
         if self._chk_angle.isChecked():
             mask |= int(proto.TelChannel.ANGLE_LOOP)
+        if self._chk_distance.isChecked():
+            mask |= int(proto.TelChannel.DISTANCE_LOOP)
         return mask
 
     def set_rpm_available(self, available: bool) -> None:
@@ -68,6 +71,11 @@ class SubscribePanel(QGroupBox):
         if not available:
             self._chk_angle.setChecked(False)
 
+    def set_distance_available(self, available: bool) -> None:
+        self._chk_distance.setEnabled(available)
+        if not available:
+            self._chk_distance.setChecked(False)
+
     def apply_mask(self, mask: int) -> None:
         """同步勾选状态（连接后自动订阅时调用，不触发 changed）。"""
         self._chk_batt.blockSignals(True)
@@ -75,19 +83,22 @@ class SubscribePanel(QGroupBox):
         self._chk_ultra.blockSignals(True)
         self._chk_rpm.blockSignals(True)
         self._chk_angle.blockSignals(True)
+        self._chk_distance.blockSignals(True)
         self._chk_batt.setChecked(bool(mask & int(proto.TelChannel.BATT)))
         self._chk_line.setChecked(bool(mask & int(proto.TelChannel.LINE_ADC)))
         self._chk_ultra.setChecked(bool(mask & int(proto.TelChannel.ULTRASONIC)))
         self._chk_rpm.setChecked(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
         self._chk_angle.setChecked(bool(mask & int(proto.TelChannel.ANGLE_LOOP)))
+        self._chk_distance.setChecked(bool(mask & int(proto.TelChannel.DISTANCE_LOOP)))
         self._chk_batt.blockSignals(False)
         self._chk_line.blockSignals(False)
         self._chk_ultra.blockSignals(False)
         self._chk_rpm.blockSignals(False)
         self._chk_angle.blockSignals(False)
+        self._chk_distance.blockSignals(False)
 
     def reset(self) -> None:
-        for chk in (self._chk_batt, self._chk_line, self._chk_ultra, self._chk_rpm, self._chk_angle):
+        for chk in (self._chk_batt, self._chk_line, self._chk_ultra, self._chk_rpm, self._chk_angle, self._chk_distance):
             chk.setChecked(False)
 
     def _emit_mask(self) -> None:

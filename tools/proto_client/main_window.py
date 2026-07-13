@@ -33,6 +33,7 @@ from serial_worker import SerialWorker, list_serial_ports, load_schema
 from ui.dashboard_tab import DashboardTab
 from ui.drive_tab import DriveTab
 from ui.param_panel import ParamPanel
+from ui.pid_tuning_tab import PidTuningTab
 from ui.plot_tab import PlotTab, deg_to_180
 
 DEFAULT_SERIAL_PORT = "COM26"
@@ -55,6 +56,7 @@ class MainWindow(QMainWindow):
         self._worker.push_received.connect(self._on_push)
         self._worker.motor_rpm_received.connect(self._on_motor_rpm)
         self._worker.angle_loop_received.connect(self._on_angle_loop)
+        self._worker.distance_loop_received.connect(self._on_distance_loop)
         self._worker.encoder_counts_received.connect(self._on_encoder_counts)
         self._worker.battery_received.connect(self._on_battery)
         self._worker.optional_subscription_changed.connect(self._on_optional_subscription)
@@ -135,13 +137,16 @@ class MainWindow(QMainWindow):
             self._param_panel.editor(5),
             self._param_panel.editor(7),
             self._param_panel.editor(16),
+            self._param_panel.editor(18),
         )
         self._drive = DriveTab(self._worker)
+        self._pid_tuning = PidTuningTab(self._worker)
 
         self._dashboard.subscribe_panel.changed.connect(self._on_subscribe_apply)
 
         tabs.addTab(self._dashboard, "仪表盘")
         tabs.addTab(self._plot, "姿态 / 循迹 / 速度")
+        tabs.addTab(self._pid_tuning, "PID 整定")
         tabs.addTab(self._drive, "遥控")
         return tabs
 
@@ -191,6 +196,7 @@ class MainWindow(QMainWindow):
             self._hello_label.setText("—")
             self._dashboard.reset()
             self._plot.reset()
+            self._pid_tuning.reset()
 
     def _on_hello(self, info: proto.HelloInfo) -> None:
         self._proto_ver = info.proto_ver
@@ -200,10 +206,13 @@ class MainWindow(QMainWindow):
         )
         has_speed = bool(info.caps & int(proto.Cap.SPEED_LOOP))
         has_angle = bool(info.caps & int(proto.Cap.ANGLE_LOOP))
+        has_distance = bool(info.caps & int(proto.Cap.DISTANCE_LOOP))
         self._dashboard.subscribe_panel.set_rpm_available(has_speed)
         self._dashboard.subscribe_panel.set_angle_available(has_angle)
-        motor_count = proto.motor_count_for_hw_rev(info.hw_rev)
-        self._plot.set_motor_count(motor_count)
+        self._dashboard.subscribe_panel.set_distance_available(has_distance)
+        if info.hw_rev == proto.HW_REV_CAR_4WD_V1:
+            self._append_log("提示: 固件为四轮车型，上位机默认按两轮调试；可在各页切换「四轮」")
+        self._pid_tuning.on_hello(info.caps)
         if info.proto_ver < proto.PROTO_VER:
             self._append_log(f"提示: 固件 proto_ver={info.proto_ver}，姿态按 v1 f32 解析")
 
@@ -212,6 +221,7 @@ class MainWindow(QMainWindow):
         self._dashboard.subscribe_panel.apply_mask(mask)
         self._plot.set_rpm_subscribed(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
         self._plot.set_angle_subscribed(bool(mask & int(proto.TelChannel.ANGLE_LOOP)))
+        self._plot.set_distance_subscribed(bool(mask & int(proto.TelChannel.DISTANCE_LOOP)))
 
     def _on_link_alive(self, alive: bool) -> None:
         if alive:
@@ -250,9 +260,15 @@ class MainWindow(QMainWindow):
 
     def _on_motor_rpm(self, rpms: tuple[int, int, int, int]) -> None:
         self._plot.on_motor_rpm(rpms)
+        self._pid_tuning.on_motor_rpm(rpms)
 
     def _on_angle_loop(self, sample: proto.AngleLoopPush) -> None:
         self._plot.on_angle_loop(sample)
+        self._pid_tuning.on_angle_loop(sample)
+
+    def _on_distance_loop(self, sample: proto.DistanceLoopPush) -> None:
+        self._plot.on_distance_loop(sample)
+        self._pid_tuning.on_distance_loop(sample)
 
     def _on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
         self._dashboard.update_encoder_counts(counts)
@@ -260,6 +276,7 @@ class MainWindow(QMainWindow):
 
     def _on_param_read(self, param_id: int, payload: bytes) -> None:
         self._param_panel.apply_read(param_id, payload, self._schema)
+        self._pid_tuning.apply_param_read(param_id, payload)
 
     def _on_param_write(self, param_id: int, ok: bool, message: str) -> None:
         editor = self._param_panel.editor(param_id)

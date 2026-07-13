@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 from angle_log_export import AngleLoopRecorder, log_dir
 from serial_worker import SerialWorker
 from ui.angle_panel import AngleControlPanel
+from ui.distance_panel import DistanceControlPanel
 from ui.param_panel import ParamEditor
 from ui.speed_panel import SpeedControlPanel
 
@@ -49,6 +50,24 @@ def angle_plot_y_range(values: list[float]) -> tuple[float, float]:
         mid = (lo + hi) * 0.5
         lo = mid - 10.0
         hi = mid + 10.0
+    else:
+        lo -= margin
+        hi += margin
+    return lo, hi
+
+
+def distance_plot_y_range(values: list[float]) -> tuple[float, float]:
+    """距离曲线 Y 轴自适应（mm）。"""
+    if not values:
+        return -100.0, 600.0
+    lo = min(values)
+    hi = max(values)
+    span = hi - lo
+    margin = max(20.0, span * 0.12)
+    if span < 40.0:
+        mid = (lo + hi) * 0.5
+        lo = mid - 20.0
+        hi = mid + 20.0
     else:
         lo -= margin
         hi += margin
@@ -127,13 +146,14 @@ class PlotTab(QWidget):
         pid_editor: Optional[ParamEditor] = None,
         spd_limit_editor: Optional[ParamEditor] = None,
         pid_yaw_editor: Optional[ParamEditor] = None,
+        pid_dist_editor: Optional[ParamEditor] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
         self._time_origin: Optional[float] = None
         self._charts_paused = False
         self._last_att = (0.0, 0.0, 0.0)
-        self._motor_count = proto.MOTOR_COUNT_MAX
+        self._motor_count = proto.MOTOR_COUNT_DEFAULT
         self._rpm_subscribed = False
         self._motor_visible = [True] * proto.MOTOR_COUNT_MAX
         self._rpm_targets = [0] * proto.MOTOR_COUNT_MAX
@@ -146,6 +166,11 @@ class PlotTab(QWidget):
         self._angle_turn_rpm = 0
         self._angle_base_rpm = 0
         self._angle_recorder = AngleLoopRecorder()
+        self._distance_subscribed = False
+        self._dist_target_mm = 0
+        self._dist_current_mm: Optional[int] = None
+        self._dist_cmd_rpm = 0
+        self._dist_max_rpm = 0
 
         root = QVBoxLayout(self)
         root.addWidget(self._build_toolbar())
@@ -157,6 +182,141 @@ class PlotTab(QWidget):
         self._build_encoder_view()
         self._build_rpm_view(worker, pid_editor, spd_limit_editor)
         self._build_angle_view(worker, pid_yaw_editor, spd_limit_editor)
+        self._build_distance_view(worker, pid_dist_editor, spd_limit_editor)
+
+    def _build_distance_view(
+        self,
+        worker: SerialWorker,
+        pid_dist_editor: Optional[ParamEditor],
+        spd_limit_editor: Optional[ParamEditor],
+    ) -> None:
+        page = QWidget()
+        layout = QHBoxLayout(page)
+
+        chart_col = QVBoxLayout()
+
+        self._lbl_distance_hint = QLabel("等待订阅距离环…")
+        self._lbl_distance_hint.setStyleSheet("color: #c8860a;")
+        chart_col.addWidget(self._lbl_distance_hint)
+
+        motor_bar = QHBoxLayout()
+        motor_bar.addWidget(QLabel("车型"))
+        self._distance_motor_count_combo = QComboBox()
+        self._fill_motor_count_combo(self._distance_motor_count_combo)
+        self._distance_motor_count_combo.currentIndexChanged.connect(self._on_distance_motor_count_combo)
+        motor_bar.addWidget(self._distance_motor_count_combo)
+        motor_bar.addStretch()
+        chart_col.addLayout(motor_bar)
+
+        self._plot_distance = pg.PlotWidget(title="本次相对位移 (mm)")
+        dist_legend = self._plot_distance.addLegend(offset=(10, 10))
+        self._plot_distance.setLabel("left", "mm")
+        self._plot_distance.setLabel("bottom", "时间", units="s")
+        self._plot_distance.showGrid(x=True, y=True, alpha=0.3)
+        self._plot_distance.setYRange(-100, 600)
+        self._plot_distance.getViewBox().setMouseEnabled(y=False)
+        self._curve_dist_meas = self._plot_distance.plot(pen=pg.mkPen("#1abc9c", width=2))
+        self._curve_dist_target = self._plot_distance.plot(
+            pen=pg.mkPen("#e67e22", width=2, style=Qt.PenStyle.DashLine),
+        )
+        dist_legend.addItem(self._curve_dist_meas, "当前 Δs")
+        dist_legend.addItem(self._curve_dist_target, "目标 Δs")
+        chart_col.addWidget(self._plot_distance, stretch=1)
+
+        self._lbl_distance_live = QLabel("目标=—  当前=—  cmd=—  max=—")
+        chart_col.addWidget(self._lbl_distance_live)
+        layout.addLayout(chart_col, stretch=3)
+
+        self._distance_panel = DistanceControlPanel(
+            worker,
+            pid_dist_editor,
+            spd_limit_editor,
+            on_clear_plot=self.reset_distance_plot,
+        )
+        self._distance_panel.setMaximumWidth(360)
+        layout.addWidget(self._distance_panel, stretch=1)
+
+        self._distance_time: list[float] = []
+        self._distance_meas: list[float] = []
+        self._distance_target_series: list[float] = []
+        self._views.addTab(page, "距离 / 调试")
+
+    @staticmethod
+    def _fill_motor_count_combo(combo: QComboBox) -> None:
+        combo.clear()
+        combo.addItem("两轮 (M1~M2)", proto.MOTOR_COUNT_DEFAULT)
+        combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
+
+    def _on_distance_motor_count_combo(self) -> None:
+        count = self._distance_motor_count_combo.currentData()
+        if count is None:
+            return
+        self.set_motor_count(int(count))
+
+    def set_distance_subscribed(self, subscribed: bool) -> None:
+        self._distance_subscribed = subscribed
+        if subscribed:
+            self._lbl_distance_hint.setText(
+                "距离环已订阅 — 实线=当前位移，橙色虚线=目标位移"
+            )
+            self._lbl_distance_hint.setStyleSheet("color: #2d7a2d;")
+        else:
+            self._lbl_distance_hint.setText(
+                "未订阅距离环：在仪表盘勾选「距离环」并点「应用订阅」"
+            )
+            self._lbl_distance_hint.setStyleSheet("color: #c8860a; font-weight: bold;")
+
+    def reset_distance_plot(self) -> None:
+        self._distance_time.clear()
+        self._distance_meas.clear()
+        self._distance_target_series.clear()
+        self._dist_current_mm = None
+        self._dist_cmd_rpm = 0
+        self._dist_max_rpm = 0
+        if not self._charts_paused:
+            self._redraw_distance()
+        else:
+            self._refresh_distance_live_label()
+
+    def _refresh_distance_live_label(self) -> None:
+        cur = "—" if self._dist_current_mm is None else str(self._dist_current_mm)
+        suffix = "  [暂停]" if self._charts_paused else ""
+        self._lbl_distance_live.setText(
+            f"目标={self._dist_target_mm} mm  当前={cur} mm  "
+            f"cmd={self._dist_cmd_rpm}  max={self._dist_max_rpm}{suffix}"
+        )
+
+    def _redraw_distance(self) -> None:
+        n = min(len(self._distance_time), len(self._distance_meas), len(self._distance_target_series))
+        xs = self._distance_time[-n:] if n else []
+        if n:
+            meas = self._distance_meas[-n:]
+            tgt = self._distance_target_series[-n:]
+            self._curve_dist_meas.setData(xs, meas)
+            self._curve_dist_target.setData(xs, tgt)
+            y_lo, y_hi = distance_plot_y_range(meas + tgt)
+            self._plot_distance.setYRange(y_lo, y_hi, padding=0)
+        else:
+            self._curve_dist_meas.setData([], [])
+            self._curve_dist_target.setData([], [])
+            self._plot_distance.setYRange(-100, 600, padding=0)
+        self._set_time_window(self._plot_distance, self._distance_time)
+        self._refresh_distance_live_label()
+
+    def on_distance_loop(self, sample: proto.DistanceLoopPush) -> None:
+        self._dist_current_mm = sample.current_mm
+        self._dist_target_mm = sample.target_mm
+        self._dist_cmd_rpm = sample.cmd_rpm
+        self._dist_max_rpm = sample.max_rpm
+        t = self._plot_time_s()
+        self._distance_time.append(t)
+        self._distance_meas.append(float(sample.current_mm))
+        self._distance_target_series.append(float(sample.target_mm))
+        self._trim_series(self._distance_time, self._distance_meas, self._distance_target_series)
+        if not self._charts_paused:
+            self._redraw_distance()
+        else:
+            self._refresh_distance_live_label()
 
     def _build_angle_view(
         self,
@@ -176,8 +336,7 @@ class PlotTab(QWidget):
         motor_bar = QHBoxLayout()
         motor_bar.addWidget(QLabel("车型"))
         self._angle_motor_count_combo = QComboBox()
-        self._angle_motor_count_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
-        self._angle_motor_count_combo.addItem("两轮 (M1~M2)", 2)
+        self._fill_motor_count_combo(self._angle_motor_count_combo)
         self._angle_motor_count_combo.currentIndexChanged.connect(self._on_angle_motor_count_combo)
         motor_bar.addWidget(self._angle_motor_count_combo)
         motor_bar.addStretch()
@@ -477,8 +636,7 @@ class PlotTab(QWidget):
         motor_bar = QHBoxLayout()
         motor_bar.addWidget(QLabel("车型"))
         self._motor_count_combo = QComboBox()
-        self._motor_count_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
-        self._motor_count_combo.addItem("两轮 (M1~M2)", 2)
+        self._fill_motor_count_combo(self._motor_count_combo)
         self._motor_count_combo.currentIndexChanged.connect(self._on_motor_count_combo)
         motor_bar.addWidget(self._motor_count_combo)
         motor_bar.addSpacing(12)
@@ -530,7 +688,7 @@ class PlotTab(QWidget):
         self._rpm_time: list[float] = []
         self._rpm_data: list[list[float]] = [[] for _ in range(proto.MOTOR_COUNT_MAX)]
         self._views.addTab(page, "转速 / 调试")
-        self._apply_motor_count_ui()
+        self.set_motor_count(proto.MOTOR_COUNT_DEFAULT)
 
     def set_motor_count(self, count: int) -> None:
         count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
@@ -548,6 +706,12 @@ class PlotTab(QWidget):
                 self._angle_motor_count_combo.blockSignals(True)
                 self._angle_motor_count_combo.setCurrentIndex(idx_a)
                 self._angle_motor_count_combo.blockSignals(False)
+        if hasattr(self, "_distance_motor_count_combo"):
+            idx_d = self._distance_motor_count_combo.findData(count)
+            if idx_d >= 0:
+                self._distance_motor_count_combo.blockSignals(True)
+                self._distance_motor_count_combo.setCurrentIndex(idx_d)
+                self._distance_motor_count_combo.blockSignals(False)
         self._apply_motor_count_ui()
 
     def set_rpm_subscribed(self, subscribed: bool) -> None:
@@ -651,11 +815,13 @@ class PlotTab(QWidget):
         self.reset_encoder_plot()
         self.reset_rpm_plot()
         self.reset_angle_plot()
+        self.reset_distance_plot()
         self._angle_target_yaw = 0
         self._lbl_enc_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
         self._lbl_rpm_live.setText(self._format_motor_live_text([None] * proto.MOTOR_COUNT_MAX))
         self.set_rpm_subscribed(False)
         self.set_angle_subscribed(False)
+        self.set_distance_subscribed(False)
         self._redraw_all()
 
     def reset_encoder_plot(self) -> None:
@@ -768,6 +934,8 @@ class PlotTab(QWidget):
         self._redraw_rpm()
         if hasattr(self, "_plot_angle"):
             self._redraw_angle()
+        if hasattr(self, "_plot_distance"):
+            self._redraw_distance()
 
     def update_attitude(self, roll: float, pitch: float, yaw: float) -> None:
         r = deg_to_180(roll)

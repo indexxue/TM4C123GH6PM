@@ -13,6 +13,9 @@
 #include "nvs.h"
 #include "pid.h"
 
+#include "FreeRTOS.h"
+#include "semphr.h"
+
 #include <math.h>
 
 #define CHASSIS_MOTOR_COUNT 4U
@@ -20,6 +23,8 @@
 #define CHASSIS_PID_INTEGRAL_MAX     300.0f
 #define CHASSIS_ANGLE_PID_OUT_MAX_RPM 200.0f
 #define CHASSIS_ANGLE_PID_INTEGRAL_MAX 120.0f
+#define CHASSIS_DISTANCE_PID_OUT_MAX_RPM 300.0f
+#define CHASSIS_DISTANCE_PID_INTEGRAL_MAX 150.0f
 
 #ifndef CHASSIS_ANGLE_DEADBAND_DEG
 /** |误差| 低于此值视为到位，停差速并清积分 */
@@ -34,6 +39,11 @@
 #ifndef CHASSIS_ANGLE_GZ_DAMP_SCALE
 /** Kd × gz(°/s) → turn RPM 阻尼系数 */
 #define CHASSIS_ANGLE_GZ_DAMP_SCALE   0.12f
+#endif
+
+#ifndef CHASSIS_DISTANCE_DEADBAND_MM
+/** |误差| 低于此值视为到位并停车 */
+#define CHASSIS_DISTANCE_DEADBAND_MM   8.0f
 #endif
 
 #ifndef CHASSIS_PID_SIGN_FIX_ENABLE
@@ -59,10 +69,13 @@ typedef enum {
     CHASSIS_CTRL_IDLE = 0,
     CHASSIS_CTRL_SPEED,
     CHASSIS_CTRL_ANGLE,
+    CHASSIS_CTRL_DISTANCE,
 } chassis_ctrl_mode_t;
 
 static pid_t s_pid[CHASSIS_MOTOR_COUNT];
 static pid_t s_pid_yaw;
+static pid_t s_pid_dist;
+static SemaphoreHandle_t s_chassis_mutex;
 static f32_t s_target_rpm[CHASSIS_MOTOR_COUNT];
 static f32_t s_ramped_rpm[CHASSIS_MOTOR_COUNT];
 static s8_t s_target_sign[CHASSIS_MOTOR_COUNT];
@@ -79,9 +92,56 @@ static f32_t s_angle_yaw_filt;
 static bool_t s_angle_yaw_filt_valid;
 static f32_t s_angle_odom_yaw;
 static bool_t s_angle_odom_valid;
-static int32_t s_angle_enc_prev[CHASSIS_MOTOR_COUNT];
+static int32_t s_odom_enc_prev[CHASSIS_MOTOR_COUNT];
+
+static s32_t s_dist_target_mm;
+static f32_t s_dist_target_mm_f;
+static s32_t s_dist_max_rpm;
+static f32_t s_dist_odom_mm;
+static bool_t s_dist_odom_valid;
+static s32_t s_dist_current_mm;
+static s32_t s_dist_cmd_rpm;
 
 static void chassis_apply_lr_rpm(s32_t left_rpm, s32_t right_rpm);
+static void chassis_distance_clear_state(void);
+static void chassis_reset_targets(void);
+static void chassis_lock(void);
+static void chassis_unlock(void);
+
+static void chassis_lock(void)
+{
+    if (s_chassis_mutex != NULL) {
+        (void)xSemaphoreTake(s_chassis_mutex, portMAX_DELAY);
+    }
+}
+
+static void chassis_unlock(void)
+{
+    if (s_chassis_mutex != NULL) {
+        (void)xSemaphoreGive(s_chassis_mutex);
+    }
+}
+
+static bool_t chassis_distance_reached(void)
+{
+    if (fabsf(s_dist_target_mm_f) <= CHASSIS_DISTANCE_DEADBAND_MM) {
+        return (fabsf(s_dist_odom_mm) <= CHASSIS_DISTANCE_DEADBAND_MM) ? TRUE : FALSE;
+    }
+    if (s_dist_target_mm_f > 0.0f) {
+        return (s_dist_odom_mm >= (s_dist_target_mm_f - CHASSIS_DISTANCE_DEADBAND_MM)) ? TRUE : FALSE;
+    }
+    return (s_dist_odom_mm <= (s_dist_target_mm_f + CHASSIS_DISTANCE_DEADBAND_MM)) ? TRUE : FALSE;
+}
+
+static void chassis_distance_complete(void)
+{
+    chassis_reset_targets();
+    s_dist_cmd_rpm = 0;
+    s_active = FALSE;
+    s_ctrl_mode = CHASSIS_CTRL_IDLE;
+    s_dist_odom_valid = FALSE;
+    pid_reset(&s_pid_dist);
+}
 
 static u8_t chassis_motor_count(void)
 {
@@ -116,32 +176,24 @@ static s16_t chassis_yaw_deg_to_i16(f32_t deg)
     return (s16_t)(wrapped - 0.5f);
 }
 
-static void chassis_angle_enc_snapshot(void)
+static void chassis_odom_enc_snapshot(void)
 {
     u8_t i;
 
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
-        s_angle_enc_prev[i] = cfg_encoder_count(i);
+        s_odom_enc_prev[i] = cfg_encoder_count(i);
     }
 }
 
-static void chassis_angle_odom_begin_maneuver(void)
-{
-    /* 每次 SET_ANGLE 从 0 起计本次相对转角，避免多次指令累积与 float 漂移 */
-    s_angle_odom_yaw = 0.0f;
-    s_angle_odom_valid = TRUE;
-    chassis_angle_enc_snapshot();
-}
-
-static void chassis_angle_odom_side_deltas(u8_t motor_count, int32_t *d_left, int32_t *d_right)
+static void chassis_odom_side_deltas(u8_t motor_count, int32_t *d_left, int32_t *d_right)
 {
     int32_t c0 = cfg_encoder_count(0);
     int32_t c1 = cfg_encoder_count(1);
-    int32_t d0 = cfg_encoder_delta(0, c0 - s_angle_enc_prev[0]);
-    int32_t d1 = cfg_encoder_delta(1, c1 - s_angle_enc_prev[1]);
+    int32_t d0 = cfg_encoder_delta(0, c0 - s_odom_enc_prev[0]);
+    int32_t d1 = cfg_encoder_delta(1, c1 - s_odom_enc_prev[1]);
 
-    s_angle_enc_prev[0] = c0;
-    s_angle_enc_prev[1] = c1;
+    s_odom_enc_prev[0] = c0;
+    s_odom_enc_prev[1] = c1;
     *d_left = d0;
     *d_right = d1;
 
@@ -152,13 +204,12 @@ static void chassis_angle_odom_side_deltas(u8_t motor_count, int32_t *d_left, in
     {
         int32_t c2 = cfg_encoder_count(2);
         int32_t c3 = cfg_encoder_count(3);
-        int32_t d2 = cfg_encoder_delta(2, c2 - s_angle_enc_prev[2]);
-        int32_t d3 = cfg_encoder_delta(3, c3 - s_angle_enc_prev[3]);
+        int32_t d2 = cfg_encoder_delta(2, c2 - s_odom_enc_prev[2]);
+        int32_t d3 = cfg_encoder_delta(3, c3 - s_odom_enc_prev[3]);
 
-        s_angle_enc_prev[2] = c2;
-        s_angle_enc_prev[3] = c3;
+        s_odom_enc_prev[2] = c2;
+        s_odom_enc_prev[3] = c3;
 
-        /* M3/M4 无有效计数时仅用 M1/M2，避免 (d0+0)/2 把转角估成一半 */
         if (d2 != 0) {
             *d_left = (d0 + d2) / 2;
         }
@@ -168,11 +219,41 @@ static void chassis_angle_odom_side_deltas(u8_t motor_count, int32_t *d_left, in
     }
 }
 
+static void chassis_angle_odom_begin_maneuver(void)
+{
+    /* 每次 SET_ANGLE 从 0 起计本次相对转角，避免多次指令累积与 float 漂移 */
+    s_angle_odom_yaw = 0.0f;
+    s_angle_odom_valid = TRUE;
+    chassis_odom_enc_snapshot();
+}
+
+static f32_t chassis_wheel_circ_m(void)
+{
+    const nvs_kinematics_t *k = cfg_kinematics();
+    f32_t wheel_diam_m = (k != NULL) ? k->wheel_diam_m : 0.065f;
+
+    if (wheel_diam_m < 0.01f) {
+        wheel_diam_m = 0.065f;
+    }
+    return 3.14159265f * wheel_diam_m;
+}
+
+static f32_t chassis_counts_to_mm(f32_t avg_counts)
+{
+    f32_t ppr = motion_pulses_per_wheel_rev();
+    f32_t circ_m;
+
+    if (ppr < 1.0f) {
+        ppr = 1.0f;
+    }
+    circ_m = chassis_wheel_circ_m();
+    return avg_counts / ppr * circ_m * 1000.0f;
+}
+
 static void chassis_angle_odom_step(f32_t dt_s)
 {
     const nvs_kinematics_t *k;
     f32_t track_m;
-    f32_t wheel_diam_m;
     f32_t ppr;
     f32_t wheel_circ_m;
     int32_t d_left;
@@ -186,28 +267,58 @@ static void chassis_angle_odom_step(f32_t dt_s)
 
     k = cfg_kinematics();
     track_m = (k != NULL) ? k->track_width_m : 0.18f;
-    wheel_diam_m = (k != NULL) ? k->wheel_diam_m : 0.065f;
     if (track_m < 0.05f) {
         track_m = 0.18f;
-    }
-    if (wheel_diam_m < 0.01f) {
-        wheel_diam_m = 0.065f;
     }
 
     d_left = 0;
     d_right = 0;
-    chassis_angle_odom_side_deltas(motor_count, &d_left, &d_right);
+    chassis_odom_side_deltas(motor_count, &d_left, &d_right);
 
     ppr = motion_pulses_per_wheel_rev();
     if (ppr < 1.0f) {
         ppr = 1.0f;
     }
-    wheel_circ_m = 3.14159265f * wheel_diam_m;
+    wheel_circ_m = chassis_wheel_circ_m();
     dyaw_deg = ((f32_t)d_right - (f32_t)d_left) / ppr * wheel_circ_m / track_m * (180.0f / 3.14159265f);
     s_angle_odom_yaw += dyaw_deg;
 }
 
-static f32_t chassis_default_max_turn_rpm(void)
+static void chassis_distance_odom_begin_maneuver(void)
+{
+    s_dist_odom_mm = 0.0f;
+    s_dist_odom_valid = TRUE;
+    s_dist_current_mm = 0;
+    chassis_odom_enc_snapshot();
+}
+
+static void chassis_distance_odom_step(f32_t dt_s)
+{
+    int32_t d_left;
+    int32_t d_right;
+    f32_t step_mm;
+    u8_t motor_count = chassis_motor_count();
+
+    (void)dt_s;
+
+    if (s_dist_odom_valid == FALSE) {
+        return;
+    }
+
+    d_left = 0;
+    d_right = 0;
+    chassis_odom_side_deltas(motor_count, &d_left, &d_right);
+    step_mm = chassis_counts_to_mm(((f32_t)d_left + (f32_t)d_right) * 0.5f);
+    s_dist_odom_mm += step_mm;
+
+    if (s_dist_odom_mm >= 0.0f) {
+        s_dist_current_mm = (s32_t)(s_dist_odom_mm + 0.5f);
+    } else {
+        s_dist_current_mm = (s32_t)(s_dist_odom_mm - 0.5f);
+    }
+}
+
+static f32_t chassis_default_max_rpm(void)
 {
     const nvs_spd_limit_t *lim = cfg_spd_limit();
     f32_t max_rpm = (lim != NULL) ? lim->max_rpm : 300.0f;
@@ -215,7 +326,24 @@ static f32_t chassis_default_max_turn_rpm(void)
     if (max_rpm <= 0.0f) {
         max_rpm = 300.0f;
     }
-    return max_rpm * 0.5f;
+    return max_rpm;
+}
+
+static void chassis_distance_clear_state(void)
+{
+    s_dist_target_mm = 0;
+    s_dist_target_mm_f = 0.0f;
+    s_dist_max_rpm = 0;
+    s_dist_odom_mm = 0.0f;
+    s_dist_odom_valid = FALSE;
+    s_dist_current_mm = 0;
+    s_dist_cmd_rpm = 0;
+    pid_reset(&s_pid_dist);
+}
+
+static f32_t chassis_default_max_turn_rpm(void)
+{
+    return chassis_default_max_rpm() * 0.5f;
 }
 
 static void chassis_angle_clear_state(void)
@@ -332,6 +460,44 @@ static void chassis_angle_update_lr(f32_t dt_s)
     chassis_apply_lr_rpm(left, right);
 }
 
+static void chassis_distance_update_lr(f32_t dt_s)
+{
+    f32_t err_mm;
+    f32_t cmd_rpm;
+    f32_t max_rpm;
+    s32_t rpm_cmd;
+
+    chassis_distance_odom_step(dt_s);
+
+    if (chassis_distance_reached() != FALSE) {
+        chassis_distance_complete();
+        return;
+    }
+
+    err_mm = s_dist_target_mm_f - s_dist_odom_mm;
+    max_rpm = (s_dist_max_rpm > 0) ? (f32_t)s_dist_max_rpm : chassis_default_max_rpm();
+
+    if (fabsf(err_mm) <= CHASSIS_DISTANCE_DEADBAND_MM) {
+        chassis_distance_complete();
+        return;
+    }
+
+    cmd_rpm = pid_update(&s_pid_dist, s_dist_target_mm_f, s_dist_odom_mm, dt_s);
+    if (cmd_rpm > max_rpm) {
+        cmd_rpm = max_rpm;
+    } else if (cmd_rpm < -max_rpm) {
+        cmd_rpm = -max_rpm;
+    }
+
+    if (cmd_rpm >= 0.0f) {
+        rpm_cmd = (s32_t)(cmd_rpm + 0.5f);
+    } else {
+        rpm_cmd = (s32_t)(cmd_rpm - 0.5f);
+    }
+    s_dist_cmd_rpm = rpm_cmd;
+    chassis_apply_lr_rpm(rpm_cmd, rpm_cmd);
+}
+
 void chassis_reload_pid_gains(void)
 {
     const nvs_pid3_t *g = cfg_pid_speed();
@@ -355,6 +521,17 @@ void chassis_reload_angle_pid_gains(void)
     }
 
     pid_set_gains(&s_pid_yaw, g->kp, g->ki, 0.0f);
+}
+
+void chassis_reload_distance_pid_gains(void)
+{
+    const nvs_pid3_t *g = cfg_pid_dist();
+
+    if (g == NULL) {
+        return;
+    }
+
+    pid_set_gains(&s_pid_dist, g->kp, g->ki, g->kd);
 }
 
 static void chassis_reset_targets(void)
@@ -491,10 +668,15 @@ void chassis_init(void)
 {
     u8_t i;
 
+    if (s_chassis_mutex == NULL) {
+        s_chassis_mutex = xSemaphoreCreateMutex();
+    }
+
     chassis_reset_targets();
     s_active = FALSE;
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     chassis_angle_clear_state();
+    chassis_distance_clear_state();
 
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
         pid_init(&s_pid[i], 1.0f, 0.0f, 0.0f);
@@ -506,8 +688,13 @@ void chassis_init(void)
     pid_set_output_limits(&s_pid_yaw, -CHASSIS_ANGLE_PID_OUT_MAX_RPM, CHASSIS_ANGLE_PID_OUT_MAX_RPM);
     pid_set_integral_limit(&s_pid_yaw, CHASSIS_ANGLE_PID_INTEGRAL_MAX);
 
+    pid_init(&s_pid_dist, 0.8f, 0.05f, 0.02f);
+    pid_set_output_limits(&s_pid_dist, -CHASSIS_DISTANCE_PID_OUT_MAX_RPM, CHASSIS_DISTANCE_PID_OUT_MAX_RPM);
+    pid_set_integral_limit(&s_pid_dist, CHASSIS_DISTANCE_PID_INTEGRAL_MAX);
+
     chassis_reload_pid_gains();
     chassis_reload_angle_pid_gains();
+    chassis_reload_distance_pid_gains();
     motion_init();
 }
 
@@ -516,10 +703,12 @@ void chassis_stop(void)
     u8_t i;
     u8_t motor_count = chassis_motor_count();
 
+    chassis_lock();
     chassis_reset_targets();
     s_active = FALSE;
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     chassis_angle_clear_state();
+    chassis_distance_clear_state();
 
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
         pid_reset(&s_pid[i]);
@@ -533,6 +722,7 @@ void chassis_stop(void)
             Motor_SetOutput(i, 0, 0U);
         }
     }
+    chassis_unlock();
 }
 
 bool_t chassis_is_active(void)
@@ -543,6 +733,11 @@ bool_t chassis_is_active(void)
 bool_t chassis_angle_is_active(void)
 {
     return (s_ctrl_mode == CHASSIS_CTRL_ANGLE) ? TRUE : FALSE;
+}
+
+bool_t chassis_distance_is_active(void)
+{
+    return (s_ctrl_mode == CHASSIS_CTRL_DISTANCE) ? TRUE : FALSE;
 }
 
 s16_t chassis_get_angle_target_yaw(void)
@@ -565,6 +760,29 @@ s32_t chassis_get_angle_base_rpm(void)
     return s_angle_base_rpm;
 }
 
+s32_t chassis_get_distance_target_mm(void)
+{
+    return s_dist_target_mm;
+}
+
+s32_t chassis_get_distance_current_mm(void)
+{
+    return s_dist_current_mm;
+}
+
+s32_t chassis_get_distance_cmd_rpm(void)
+{
+    return s_dist_cmd_rpm;
+}
+
+s32_t chassis_get_distance_max_rpm(void)
+{
+    if (s_dist_max_rpm > 0) {
+        return s_dist_max_rpm;
+    }
+    return (s32_t)(chassis_default_max_rpm() + 0.5f);
+}
+
 void chassis_set_wheel_rpm(u8_t motor_id, s32_t rpm)
 {
     if ((motor_id < 1U) || (motor_id > chassis_motor_count())) {
@@ -573,6 +791,7 @@ void chassis_set_wheel_rpm(u8_t motor_id, s32_t rpm)
 
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
+    chassis_distance_clear_state();
     s_target_rpm[motor_id - 1U] = chassis_clamp_rpm((f32_t)rpm);
     s_active = TRUE;
 }
@@ -600,6 +819,7 @@ void chassis_set_lr_rpm(s32_t left_rpm, s32_t right_rpm)
 {
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
+    chassis_distance_clear_state();
     chassis_apply_lr_rpm(left_rpm, right_rpm);
 }
 
@@ -621,6 +841,7 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
 
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
+    chassis_distance_clear_state();
 
     max_rpm = (lim != NULL) ? lim->max_rpm : 300.0f;
     base_rpm = ((f32_t)throttle / (f32_t)throttle_max) * max_rpm;
@@ -633,6 +854,7 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
 void chassis_set_angle(s16_t target_yaw_deg, s32_t base_rpm, s32_t max_turn_rpm)
 {
     s_ctrl_mode = CHASSIS_CTRL_ANGLE;
+    chassis_distance_clear_state();
     s_angle_base_rpm = base_rpm;
     s_angle_max_turn_rpm = max_turn_rpm;
     s_angle_turn_rpm = 0;
@@ -644,6 +866,20 @@ void chassis_set_angle(s16_t target_yaw_deg, s32_t base_rpm, s32_t max_turn_rpm)
     /* SET_ANGLE：相对当前航向 Δθ；本次机动在连续域 0→Δθ */
     s_angle_target_yaw_f = (f32_t)target_yaw_deg;
     s_angle_target_yaw = chassis_yaw_deg_to_i16(s_angle_target_yaw_f);
+    s_active = TRUE;
+}
+
+void chassis_set_distance(s32_t target_dist_mm, s32_t max_rpm)
+{
+    s_ctrl_mode = CHASSIS_CTRL_DISTANCE;
+    chassis_angle_clear_state();
+    s_dist_max_rpm = max_rpm;
+    s_dist_cmd_rpm = 0;
+    pid_reset(&s_pid_dist);
+    chassis_distance_odom_begin_maneuver();
+
+    s_dist_target_mm_f = (f32_t)target_dist_mm;
+    s_dist_target_mm = target_dist_mm;
     s_active = TRUE;
 }
 
@@ -672,15 +908,20 @@ void chassis_tick(u32_t period_ms)
         return;
     }
 
+    chassis_lock();
+
     motion_update(period_ms);
 
     if (period_ms == 0U) {
+        chassis_unlock();
         return;
     }
     dt_s = (f32_t)period_ms / 1000.0f;
 
     if (s_ctrl_mode == CHASSIS_CTRL_ANGLE) {
         chassis_angle_update_lr(dt_s);
+    } else if (s_ctrl_mode == CHASSIS_CTRL_DISTANCE) {
+        chassis_distance_update_lr(dt_s);
     }
 
     chassis_ramp_targets(dt_s);
@@ -689,6 +930,7 @@ void chassis_tick(u32_t period_ms)
         for (i = 1U; i <= motor_count; i++) {
             Motor_SetOutput(i, 0, 0U);
         }
+        chassis_unlock();
         return;
     }
 
@@ -702,4 +944,5 @@ void chassis_tick(u32_t period_ms)
     for (i = motor_count + 1U; i <= CHASSIS_MOTOR_COUNT; i++) {
         Motor_SetOutput(i, 0, 0U);
     }
+    chassis_unlock();
 }

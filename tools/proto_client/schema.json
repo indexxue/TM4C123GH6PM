@@ -136,6 +136,14 @@
       "fields": ["kp", "ki", "kd"],
       "writable": true,
       "description": "航向角环 PID"
+    },
+    {
+      "id": 18,
+      "name": "pid_dist",
+      "struct": "<fff",
+      "fields": ["kp", "ki", "kd"],
+      "writable": true,
+      "description": "距离环 PID"
     }
   ]
 }

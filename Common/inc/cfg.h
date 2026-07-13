@@ -26,5 +26,6 @@ const nvs_kinematics_t *cfg_kinematics(void);
 const nvs_pid3_t *cfg_pid_speed(void);
 const nvs_pid3_t *cfg_pid_line(void);
 const nvs_pid3_t *cfg_pid_yaw(void);
+const nvs_pid3_t *cfg_pid_dist(void);
 
 #endif /* CFG_H */

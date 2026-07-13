@@ -49,6 +49,7 @@ class SerialWorker(QThread):
     push_received = Signal(object)
     motor_rpm_received = Signal(object)
     angle_loop_received = Signal(object)
+    distance_loop_received = Signal(object)
     encoder_counts_received = Signal(object)
     battery_received = Signal(int, int)
     optional_subscription_changed = Signal(int)
@@ -78,6 +79,8 @@ class SerialWorker(QThread):
         self._speed_attempt = 0
         self._angle_payload: Optional[bytes] = None
         self._angle_attempt = 0
+        self._distance_payload: Optional[bytes] = None
+        self._distance_attempt = 0
         self._critical_depth = 0
         self._want_connected = False
         self._auto_reconnect = True
@@ -88,6 +91,10 @@ class SerialWorker(QThread):
     @property
     def hello_info(self) -> Optional[proto.HelloInfo]:
         return self._hello_info
+
+    @property
+    def optional_mask(self) -> int:
+        return self._optional_mask
 
     def is_connected(self) -> bool:
         return self._ser is not None and self._ser.is_open
@@ -131,6 +138,14 @@ class SerialWorker(QThread):
     def request_angle_stop(self) -> None:
         self._cmd_queue.put(("angle_stop", b"", None))
 
+    @Slot(bytes)
+    def request_set_distance(self, payload: bytes) -> None:
+        self._cmd_queue.put(("set_distance", payload, None))
+
+    @Slot()
+    def request_distance_stop(self) -> None:
+        self._cmd_queue.put(("distance_stop", b"", None))
+
     @Slot(int)
     def request_calib_yaw(self, ref_yaw: int = 0) -> None:
         self._cmd_queue.put(("calib_yaw", proto.build_calib_yaw(ref_yaw), None))
@@ -157,6 +172,8 @@ class SerialWorker(QThread):
             int(proto.Cmd.SPEED_STOP),
             int(proto.Cmd.SET_ANGLE),
             int(proto.Cmd.ANGLE_STOP),
+            int(proto.Cmd.SET_DISTANCE),
+            int(proto.Cmd.DISTANCE_STOP),
             int(proto.Cmd.CALIB_YAW),
             int(proto.Cmd.SUBSCRIBE),
         )
@@ -175,8 +192,8 @@ class SerialWorker(QThread):
             self._next_ping = now
             self._next_telemetry = now
 
-    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int]:
-        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor_rpm, hz_angle_loop)。"""
+    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int, int]:
+        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor_rpm, hz_angle_loop, hz_distance_loop)。"""
         mask = proto.BASE_CHANNEL_MASK | (optional_mask & proto.OPTIONAL_CHANNEL_MASK)
         hz_line = proto.DEFAULT_SUB_LINE_HZ if optional_mask & int(proto.TelChannel.LINE_ADC) else 0
         hz_ultra = proto.DEFAULT_SUB_ULTRA_HZ if optional_mask & int(proto.TelChannel.ULTRASONIC) else 0
@@ -188,6 +205,10 @@ class SerialWorker(QThread):
         if optional_mask & int(proto.TelChannel.ANGLE_LOOP):
             if self._hello_info and (self._hello_info.caps & int(proto.Cap.ANGLE_LOOP)):
                 hz_angle = proto.DEFAULT_SUB_ANGLE_LOOP_HZ
+        hz_distance = 0
+        if optional_mask & int(proto.TelChannel.DISTANCE_LOOP):
+            if self._hello_info and (self._hello_info.caps & int(proto.Cap.DISTANCE_LOOP)):
+                hz_distance = proto.DEFAULT_SUB_DISTANCE_LOOP_HZ
         return (
             mask,
             proto.DEFAULT_SUB_ATT_HZ,
@@ -196,6 +217,7 @@ class SerialWorker(QThread):
             hz_ultra,
             hz_motor,
             hz_angle,
+            hz_distance,
         )
 
     def _unsubscribe_optional(self) -> bool:
@@ -228,7 +250,7 @@ class SerialWorker(QThread):
             return
         if self._hello_info is None or not (self._hello_info.caps & int(proto.Cap.SUBSCRIBE)):
             return
-        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle = self._subscribe_plan(self._optional_mask)
+        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance = self._subscribe_plan(self._optional_mask)
         self._wait_rx_quiet()
         frame = self._send_request_retry(
             int(proto.Cmd.SUBSCRIBE),
@@ -240,6 +262,7 @@ class SerialWorker(QThread):
                 hz_ultra=hz_ultra,
                 hz_motor_rpm=hz_motor,
                 hz_angle_loop=hz_angle,
+                hz_distance_loop=hz_distance,
             ),
             timeout=3.0,
             retries=2,
@@ -258,6 +281,8 @@ class SerialWorker(QThread):
             parts.append(f"RPM@{hz_motor}Hz")
         if self._optional_mask & int(proto.TelChannel.ANGLE_LOOP) and hz_angle:
             parts.append(f"角度@{hz_angle}Hz")
+        if self._optional_mask & int(proto.TelChannel.DISTANCE_LOOP) and hz_distance:
+            parts.append(f"距离@{hz_distance}Hz")
         self.log.emit(f"SUBSCRIBE ok ({' + '.join(parts)})")
         self.optional_subscription_changed.emit(self._optional_mask)
 
@@ -381,6 +406,17 @@ class SerialWorker(QThread):
             elif kind == "angle_stop":
                 if self.is_connected():
                     self._post_angle_stop()
+            elif kind == "set_distance":
+                if self.is_connected():
+                    self._distance_payload = payload
+                    self._distance_attempt = 0
+                    self._start_set_distance_attempt()
+            elif kind == "set_distance_retry":
+                if self.is_connected():
+                    self._start_set_distance_attempt()
+            elif kind == "distance_stop":
+                if self.is_connected():
+                    self._post_distance_stop()
             elif kind == "calib_yaw":
                 if self.is_connected():
                     self._run_calib_yaw(payload)
@@ -602,6 +638,8 @@ class SerialWorker(QThread):
                 optional |= int(proto.TelChannel.MOTOR_RPM)
             if self._hello_info.caps & int(proto.Cap.ANGLE_LOOP):
                 optional |= int(proto.TelChannel.ANGLE_LOOP)
+            if self._hello_info.caps & int(proto.Cap.DISTANCE_LOOP):
+                optional |= int(proto.TelChannel.DISTANCE_LOOP)
             self._apply_subscription_now(optional)
 
         if ping_frame is not None:
@@ -802,6 +840,8 @@ class SerialWorker(QThread):
                     self.motor_rpm_received.emit(proto.parse_motor_rpm_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ANGLE_LOOP:
                     self.angle_loop_received.emit(proto.parse_angle_loop_push(push.payload))
+                elif push.channel_id == proto.CHANNEL_ID_DISTANCE_LOOP:
+                    self.distance_loop_received.emit(proto.parse_distance_loop_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ENCODER:
                     self.encoder_counts_received.emit(proto.parse_encoder_push(push.payload))
                 self.push_received.emit(push)
@@ -819,6 +859,8 @@ class SerialWorker(QThread):
                     int(proto.Cmd.SPEED_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_ANGLE) | proto.RESPONSE_BIT,
                     int(proto.Cmd.ANGLE_STOP) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.SET_DISTANCE) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.DISTANCE_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.CALIB_YAW) | proto.RESPONSE_BIT,
                 ):
                     return
@@ -1030,6 +1072,85 @@ class SerialWorker(QThread):
             self.log.emit(f"ANGLE_STOP 失败: {proto.err_text(code)}")
             return
         self.log.emit("ANGLE_STOP 已确认")
+
+    def _start_set_distance_attempt(self) -> None:
+        payload = self._distance_payload
+        if payload is None:
+            return
+        if self._distance_attempt == 0:
+            self._begin_critical()
+            self._wait_rx_quiet(quiet_s=proto.SET_SPEED_QUIET_S_FMT0, timeout_s=1.0)
+        else:
+            self._flush_serial_input()
+            self._wait_rx_quiet(quiet_s=0.10, timeout_s=0.8)
+
+        attempt = self._distance_attempt
+        timeout_s = 3.5
+
+        def on_response(frame: Optional[proto.Frame]) -> None:
+            if frame is not None and not frame.is_nak:
+                self._distance_payload = None
+                self._distance_attempt = 0
+                self._finish_set_distance(frame)
+                return
+            if attempt < 2:
+                self._distance_attempt = attempt + 1
+                self._cmd_queue.put(("set_distance_retry", b"", None))
+                return
+            self._distance_payload = None
+            self._distance_attempt = 0
+            self._finish_set_distance(frame)
+
+        self._post_request(
+            int(proto.Cmd.SET_DISTANCE),
+            payload,
+            on_response=on_response,
+            timeout=timeout_s,
+            duplicate_tx=proto.HC05_SAFE_TX,
+        )
+
+    def _post_distance_stop(self) -> None:
+        self._begin_critical()
+        self._wait_rx_quiet(quiet_s=0.10, timeout_s=1.0)
+
+        def on_response(frame: Optional[proto.Frame]) -> None:
+            self._finish_distance_stop(frame)
+
+        self._post_request(
+            int(proto.Cmd.DISTANCE_STOP),
+            b"",
+            on_response=on_response,
+            timeout=4.0,
+            duplicate_tx=proto.HC05_SAFE_TX,
+        )
+
+    def _finish_set_distance(self, frame: Optional[proto.Frame]) -> None:
+        self._on_set_distance_rsp(frame)
+        self._end_critical()
+
+    def _finish_distance_stop(self, frame: Optional[proto.Frame]) -> None:
+        self._on_distance_stop_rsp(frame)
+        self._end_critical()
+
+    def _on_set_distance_rsp(self, frame: Optional[proto.Frame]) -> None:
+        if frame is None:
+            self.log.emit("SET_DISTANCE 超时（无应答）")
+            return
+        if frame.is_nak:
+            code = frame.err_code or 0
+            self.log.emit(f"SET_DISTANCE 失败: {proto.err_text(code)}")
+            return
+        self.log.emit("SET_DISTANCE 已确认")
+
+    def _on_distance_stop_rsp(self, frame: Optional[proto.Frame]) -> None:
+        if frame is None:
+            self.log.emit("DISTANCE_STOP 超时")
+            return
+        if frame.is_nak:
+            code = frame.err_code or 0
+            self.log.emit(f"DISTANCE_STOP 失败: {proto.err_text(code)}")
+            return
+        self.log.emit("DISTANCE_STOP 已确认")
 
     def _on_calib_yaw_rsp(self, frame: Optional[proto.Frame]) -> None:
         if frame is None:
