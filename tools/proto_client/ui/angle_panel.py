@@ -12,6 +12,7 @@ from PySide6.QtWidgets import (
     QGroupBox,
     QHBoxLayout,
     QLabel,
+    QMessageBox,
     QPushButton,
     QSpinBox,
     QVBoxLayout,
@@ -113,6 +114,30 @@ class AngleControlPanel(QGroupBox):
         btn_row.addWidget(self._btn_step)
         btn_row.addWidget(self._btn_clear)
         cmd_form.addRow(btn_row)
+
+        calib_row = QWidget()
+        calib_layout = QHBoxLayout(calib_row)
+        calib_layout.setContentsMargins(0, 0, 0, 0)
+        self._calib_yaw_spin = QSpinBox()
+        self._calib_yaw_spin.setRange(-180, 180)
+        self._calib_yaw_spin.setSingleStep(15)
+        self._calib_yaw_spin.setWrapping(True)
+        self._calib_yaw_spin.setValue(0)
+        self._calib_yaw_spin.setSuffix(" °")
+        self._calib_yaw_spin.setToolTip("校准后当前车头物理朝向将显示为该角度")
+        self._btn_calib_yaw = QPushButton("校准物理 Yaw")
+        calib_layout.addWidget(QLabel("参考角"))
+        calib_layout.addWidget(self._calib_yaw_spin, stretch=1)
+        calib_layout.addWidget(self._btn_calib_yaw)
+        cmd_form.addRow("磁力计校准", calib_row)
+
+        calib_hint = QLabel(
+            "车辆须静止放平；将当前车头朝向设为上方参考角（默认 0°=正前方）。"
+        )
+        calib_hint.setWordWrap(True)
+        calib_hint.setStyleSheet("color: palette(mid); font-size: 11px;")
+        cmd_form.addRow(calib_hint)
+
         root.addLayout(cmd_form)
 
         log_box = QGroupBox("数据导出 (log/)")
@@ -147,14 +172,17 @@ class AngleControlPanel(QGroupBox):
         self._btn_stop.clicked.connect(self._stop_angle)
         self._btn_step.clicked.connect(self._step_default_yaw)
         self._btn_clear.clicked.connect(self._clear_plot)
+        self._btn_calib_yaw.clicked.connect(self._calib_yaw)
         self._btn_yaw_dec.clicked.connect(self._dec_yaw)
         self._btn_yaw_inc.clicked.connect(self._inc_yaw)
         self._delta_yaw_spin.valueChanged.connect(self._on_delta_spin_changed)
         self._btn_log_start.clicked.connect(lambda: self._start_log(silent=False))
         self._btn_log_export.clicked.connect(lambda: self._export_log(silent=False))
+        worker.hello_received.connect(self._update_calib_available)
 
         self.set_motor_count(self._motor_count)
         self._refresh_log_hint()
+        self._update_calib_available(worker.hello_info)
 
     @staticmethod
     def _make_rpm_spin(default: int) -> QSpinBox:
@@ -235,6 +263,7 @@ class AngleControlPanel(QGroupBox):
         target: Optional[int] = None,
         base: Optional[int] = None,
         max_turn: Optional[int] = None,
+        note: str = "",
     ) -> None:
         if self._on_log_command is None:
             return
@@ -243,6 +272,7 @@ class AngleControlPanel(QGroupBox):
             target=target,
             base=base,
             max_turn=max_turn,
+            note=note,
         )
 
     def _start_log(self, silent: bool = False) -> None:
@@ -283,6 +313,32 @@ class AngleControlPanel(QGroupBox):
     def _clear_plot(self) -> None:
         if self._on_clear_plot is not None:
             self._on_clear_plot()
+
+    def _update_calib_available(self, info=None) -> None:
+        if info is None:
+            info = self._worker.hello_info
+        enabled = info is not None and bool(info.caps & int(proto.Cap.YAW_CALIB))
+        self._btn_calib_yaw.setEnabled(enabled)
+        self._calib_yaw_spin.setEnabled(enabled)
+
+    def _calib_yaw(self) -> None:
+        if not self._btn_calib_yaw.isEnabled():
+            self._set_status("固件不支持 YAW_CALIB")
+            return
+        ref_yaw = normalize_yaw(self._calib_yaw_spin.value())
+        reply = QMessageBox.question(
+            self,
+            "校准物理 Yaw",
+            f"请确认车辆已静止放平、电机已停止。\n\n"
+            f"将把当前车头朝向设为 {ref_yaw:+d}°。\n\n是否继续？",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        self._emit_log_command("calib_yaw", note=f"ref={ref_yaw}")
+        self._worker.request_calib_yaw(ref_yaw)
+        self._set_status(f"CALIB_YAW 已发送 ref={ref_yaw:+d}°")
 
     def _set_status(self, text: str) -> None:
         self._status.setText(text)

@@ -56,6 +56,7 @@
 #define PROTO_CMD_SPEED_STOP        0x0033U
 #define PROTO_CMD_SET_ANGLE         0x0034U
 #define PROTO_CMD_ANGLE_STOP        0x0035U
+#define PROTO_CMD_CALIB_YAW         0x0036U
 
 #define PROTO_ERR_UNKNOWN_CMD       0x02U
 #define PROTO_ERR_BAD_LEN           0x03U
@@ -72,6 +73,7 @@
 #define PROTO_CAP_DRIVE             (1U << 3)
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
+#define PROTO_CAP_YAW_CALIB         (1U << 6)
 
 #define PROTO_CH_BATTERY            (1U << 0)
 #define PROTO_CH_ATTITUDE           (1U << 1)
@@ -636,6 +638,22 @@ static status_t proto_write_battery_cal(const uint8_t *data, uint16_t len)
     return nvs_param_set_battery_cal(&cal, NVS_WRITE_SRC_PROTOCOL);
 }
 
+static status_t proto_write_mag_heading(const uint8_t *data, uint16_t len)
+{
+    f32_t offset;
+    status_t st;
+
+    if ((data == NULL) || (len != sizeof(f32_t))) {
+        return STATUS_INVALID_ARG;
+    }
+    (void)memcpy(&offset, data, sizeof(offset));
+    st = nvs_param_set_mag_heading_offset(offset, NVS_WRITE_SRC_PROTOCOL);
+    if (st == STATUS_OK) {
+        attitude_set_mag_heading_offset((float)offset);
+    }
+    return st;
+}
+
 static const proto_param_desc_t s_param_table[] = {
     { NVS_PARAM_SCHEMA,         (uint8_t)sizeof(u32_t),              NULL },
     { NVS_PARAM_SERIAL,       NVS_CFG_SERIAL_MAX,                  NULL },
@@ -653,6 +671,7 @@ static const proto_param_desc_t s_param_table[] = {
     { NVS_PARAM_LINE_THRESHOLD, (uint8_t)sizeof(nvs_line_threshold_t), proto_write_line_threshold },
     { NVS_PARAM_ENCODER_ZERO, (uint8_t)sizeof(nvs_encoder_zero_t), proto_write_encoder_zero },
     { NVS_PARAM_BATTERY_CAL,  (uint8_t)sizeof(nvs_battery_cal_t), proto_write_battery_cal },
+    { NVS_PARAM_MAG_HEADING,  (uint8_t)sizeof(f32_t),             proto_write_mag_heading },
     { NVS_PARAM_LAST_MODE,    (uint8_t)sizeof(u32_t),              NULL },
 };
 
@@ -728,6 +747,9 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
     case NVS_PARAM_BATTERY_CAL:
         (void)memcpy(out, &cfg->battery_cal, sizeof(cfg->battery_cal));
         return (uint16_t)sizeof(cfg->battery_cal);
+    case NVS_PARAM_MAG_HEADING:
+        (void)memcpy(out, &cfg->mag_heading_offset_deg, sizeof(cfg->mag_heading_offset_deg));
+        return (uint16_t)sizeof(cfg->mag_heading_offset_deg);
     case NVS_PARAM_LAST_MODE:
         (void)memcpy(out, &cfg->last_mode, sizeof(cfg->last_mode));
         return (uint16_t)sizeof(cfg->last_mode);
@@ -1009,6 +1031,9 @@ static uint32_t proto_caps(void)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER |
                                    DEVICE_BOARD_MASK_PERIPH)) {
         caps |= PROTO_CAP_ANGLE_LOOP;
+    }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        caps |= PROTO_CAP_YAW_CALIB;
     }
     return caps;
 }
@@ -1414,11 +1439,69 @@ static void proto_handle_angle_stop(uint8_t seq)
     proto_reply_ack(PROTO_CMD_ANGLE_STOP, seq, NULL, 0U);
 }
 
+static int16_t proto_float_deg_to_i16(float deg)
+{
+    if (deg >= 0.0f) {
+        return (int16_t)(deg + 0.5f);
+    }
+    return (int16_t)(deg - 0.5f);
+}
+
+static void proto_handle_calib_yaw(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    int16_t ref_yaw_i16;
+    float ref_yaw;
+    float offset_deg;
+    float yaw_deg;
+    uint8_t ack[4];
+    status_t st;
+
+    if ((proto_caps() & PROTO_CAP_YAW_CALIB) == 0U) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len != 2U) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+
+    ref_yaw_i16 = proto_get_i16(payload);
+    if ((ref_yaw_i16 < -180) || (ref_yaw_i16 > 180)) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+
+    chassis_stop();
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
+
+    ref_yaw = (float)ref_yaw_i16;
+    st = attitude_calibrate_yaw(ref_yaw, &offset_deg, &yaw_deg);
+    if (st == STATUS_FAIL) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_BUSY);
+        return;
+    }
+    if (st == STATUS_INVALID_STATE) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_CALIB_YAW, seq, PROTO_ERR_NVS_WRITE_FAIL);
+        return;
+    }
+
+    proto_put_i16(&ack[0], proto_float_deg_to_i16(offset_deg));
+    proto_put_i16(&ack[2], proto_float_deg_to_i16(yaw_deg));
+    proto_reply_ack(PROTO_CMD_CALIB_YAW, seq, ack, (uint16_t)sizeof(ack));
+}
+
 static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
     if ((cmd == PROTO_CMD_SUBSCRIBE) || (cmd == PROTO_CMD_UNSUBSCRIBE) ||
         (cmd == PROTO_CMD_SET_SPEED) || (cmd == PROTO_CMD_SPEED_STOP) ||
         (cmd == PROTO_CMD_SET_ANGLE) || (cmd == PROTO_CMD_ANGLE_STOP) ||
+        (cmd == PROTO_CMD_CALIB_YAW) ||
         (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
         proto_rx_gate_hold_cmd();
         proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
@@ -1466,6 +1549,9 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         break;
     case PROTO_CMD_ANGLE_STOP:
         proto_handle_angle_stop(seq);
+        break;
+    case PROTO_CMD_CALIB_YAW:
+        proto_handle_calib_yaw(seq, payload, len);
         break;
     default:
         proto_reply_nak(cmd, seq, PROTO_ERR_UNKNOWN_CMD);
@@ -1580,6 +1666,8 @@ static bool_t proto_rx_relaxed_crc_ok(uint16_t cmd, const uint8_t *hdr, const ui
         return proto_rx_set_speed_semantic_ok(payload, len);
     case PROTO_CMD_SET_ANGLE:
         return proto_rx_set_angle_semantic_ok(payload, len);
+    case PROTO_CMD_CALIB_YAW:
+        return (len == 2U);
     case PROTO_CMD_DRIVE:
         if (len != 4U) {
             return FALSE;

@@ -131,6 +131,10 @@ class SerialWorker(QThread):
     def request_angle_stop(self) -> None:
         self._cmd_queue.put(("angle_stop", b"", None))
 
+    @Slot(int)
+    def request_calib_yaw(self, ref_yaw: int = 0) -> None:
+        self._cmd_queue.put(("calib_yaw", proto.build_calib_yaw(ref_yaw), None))
+
     @Slot(int, int)
     def request_drive(self, throttle: int, steer: int) -> None:
         self._cmd_queue.put(("drive", proto.build_drive(throttle, steer), None))
@@ -153,6 +157,7 @@ class SerialWorker(QThread):
             int(proto.Cmd.SPEED_STOP),
             int(proto.Cmd.SET_ANGLE),
             int(proto.Cmd.ANGLE_STOP),
+            int(proto.Cmd.CALIB_YAW),
             int(proto.Cmd.SUBSCRIBE),
         )
 
@@ -376,6 +381,9 @@ class SerialWorker(QThread):
             elif kind == "angle_stop":
                 if self.is_connected():
                     self._post_angle_stop()
+            elif kind == "calib_yaw":
+                if self.is_connected():
+                    self._run_calib_yaw(payload)
             elif kind == "drive":
                 if self.is_connected():
                     frame = self._send_request_retry(
@@ -811,6 +819,7 @@ class SerialWorker(QThread):
                     int(proto.Cmd.SPEED_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_ANGLE) | proto.RESPONSE_BIT,
                     int(proto.Cmd.ANGLE_STOP) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.CALIB_YAW) | proto.RESPONSE_BIT,
                 ):
                     return
                 self.log.emit(
@@ -971,12 +980,35 @@ class SerialWorker(QThread):
             duplicate_tx=proto.HC05_SAFE_TX,
         )
 
+    def _run_calib_yaw(self, payload: bytes) -> None:
+        """先停角度环/遥控，静止后再发 CALIB_YAW。"""
+        self._begin_critical()
+        self._wait_rx_quiet(quiet_s=0.08, timeout_s=0.6)
+        self._send_request_retry(int(proto.Cmd.ANGLE_STOP), b"", timeout=2.0, retries=1)
+        self._send_request_retry(int(proto.Cmd.DRIVE_STOP), b"", timeout=2.0, retries=1)
+        self._wait_rx_quiet(quiet_s=0.20, timeout_s=1.0)
+
+        def on_response(frame: Optional[proto.Frame]) -> None:
+            self._finish_calib_yaw(frame)
+
+        self._post_request(
+            int(proto.Cmd.CALIB_YAW),
+            payload,
+            on_response=on_response,
+            timeout=4.0,
+            duplicate_tx=proto.HC05_SAFE_TX,
+        )
+
     def _finish_set_angle(self, frame: Optional[proto.Frame]) -> None:
         self._on_set_angle_rsp(frame)
         self._end_critical()
 
     def _finish_angle_stop(self, frame: Optional[proto.Frame]) -> None:
         self._on_angle_stop_rsp(frame)
+        self._end_critical()
+
+    def _finish_calib_yaw(self, frame: Optional[proto.Frame]) -> None:
+        self._on_calib_yaw_rsp(frame)
         self._end_critical()
 
     def _on_set_angle_rsp(self, frame: proto.Frame) -> None:
@@ -998,6 +1030,22 @@ class SerialWorker(QThread):
             self.log.emit(f"ANGLE_STOP 失败: {proto.err_text(code)}")
             return
         self.log.emit("ANGLE_STOP 已确认")
+
+    def _on_calib_yaw_rsp(self, frame: Optional[proto.Frame]) -> None:
+        if frame is None:
+            self.log.emit("CALIB_YAW 超时（无应答）")
+            return
+        if frame.is_nak:
+            code = frame.err_code or 0
+            self.log.emit(f"CALIB_YAW 失败: {proto.err_text(code)}")
+            return
+        try:
+            offset_deg, yaw_deg = proto.parse_calib_yaw_ack(frame.payload)
+            self.log.emit(
+                f"CALIB_YAW 成功 offset={offset_deg:+d}° yaw={yaw_deg:+d}°"
+            )
+        except ValueError as exc:
+            self.log.emit(f"CALIB_YAW 应答解析失败: {exc}")
 
     def _on_set_speed_rsp(self, frame: proto.Frame) -> None:
         if frame is None:

@@ -44,4 +44,10 @@ status_t attitude_get_status(attitude_status_t *status);
 void attitude_yaw_hold_set(bool_t active);
 bool_t attitude_yaw_hold_is_active(void);
 
+/**
+ * 静止水平时用磁力计校准物理 yaw：当前朝向设为 ref_yaw_deg（-180~180°），offset 写入 NVS。
+ */
+status_t attitude_calibrate_yaw(float ref_yaw_deg, float *offset_deg_out, float *yaw_deg_out);
+void attitude_set_mag_heading_offset(float offset_deg);
+
 #endif /* ATTITUDE_H */

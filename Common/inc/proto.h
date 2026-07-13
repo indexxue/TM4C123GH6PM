@@ -13,6 +13,8 @@
  *   0: [delta_yaw i16][base_rpm i32] — 相对当前航向转角 Δθ（度）；
  *   1: [delta_yaw i16][base_rpm i32][max_turn_rpm i32]
  * - PROTO_CMD_ANGLE_STOP (0x0035)：停止角度环
+ * - PROTO_CMD_CALIB_YAW (0x0036)：payload [ref_yaw i16] — 静止时将当前物理朝向设为 ref_yaw（-180~180°）
+ *   ACK: [offset_deg i16][yaw_deg i16]
  * 订阅 PROTO_CH_ANGLE_LOOP (bit6) 可推送航向环状态（push ch=6）
  */
 
@@ -29,9 +31,11 @@ extern "C" {
 #define PROTO_CMD_SPEED_STOP        0x0033U
 #define PROTO_CMD_SET_ANGLE         0x0034U
 #define PROTO_CMD_ANGLE_STOP        0x0035U
+#define PROTO_CMD_CALIB_YAW         0x0036U
 
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
+#define PROTO_CAP_YAW_CALIB         (1U << 6)
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
 

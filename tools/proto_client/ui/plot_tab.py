@@ -309,8 +309,6 @@ class PlotTab(QWidget):
         max_turn: Optional[int] = None,
         note: str = "",
     ) -> None:
-        if name == "set_angle":
-            self.reset_angle_plot()
         self._angle_recorder.record_command(
             name,
             target=target,

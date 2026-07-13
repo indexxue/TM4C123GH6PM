@@ -133,6 +133,7 @@ static const nvs_param_policy_t s_param_policy[NVS_PARAM_COUNT] = {
     [NVS_PARAM_LAST_MODE] = {1U, NVS_SRC_INTERNAL},
     [NVS_PARAM_ENCODER_DIR] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
     [NVS_PARAM_PID_YAW] = {0U, NVS_SRC_CMD | NVS_SRC_PROTOCOL},
+    [NVS_PARAM_MAG_HEADING] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
 };
 
 /* -------------------------------------------------------------------------- */
@@ -918,6 +919,7 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
 
     cfg->battery_cal.scale = 1.0f;
     cfg->battery_cal.offset_v = 0.0f;
+    cfg->mag_heading_offset_deg = 0.0f;
 
     for (i = 0U; i < NVS_CFG_LINE_SENSOR_COUNT; i++) {
         cfg->line_threshold.threshold[i] = 2048U;
@@ -1040,6 +1042,8 @@ static status_t nvs_cfg_persist_defaults(void)
                     sizeof(s_cfg.encoder_zero));
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_BAT_CAL, &s_cfg.battery_cal,
                     sizeof(s_cfg.battery_cal));
+    NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_MAG_HDG, &s_cfg.mag_heading_offset_deg,
+                    sizeof(s_cfg.mag_heading_offset_deg));
     NVS_APPEND_U32(NVS_CFG_NS_USER, NVS_CFG_KEY_LAST_MODE, (u32_t)s_cfg.last_mode);
 
 #undef NVS_APPEND_U32
@@ -1197,6 +1201,11 @@ static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg)
 
     if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_BAT_CAL, &cfg->battery_cal,
                             (u32_t)sizeof(cfg->battery_cal)) == 0) {
+        /* keep default */
+    }
+
+    if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_MAG_HDG, &cfg->mag_heading_offset_deg,
+                            (u32_t)sizeof(cfg->mag_heading_offset_deg)) == 0) {
         /* keep default */
     }
 
@@ -1532,6 +1541,21 @@ status_t nvs_param_set_battery_cal(const nvs_battery_cal_t *cal, nvs_write_src_t
                                   sizeof(*cal));
 }
 
+status_t nvs_param_set_mag_heading_offset(f32_t offset_deg, nvs_write_src_t src)
+{
+    status_t st;
+
+    st = nvs_param_check_write(NVS_PARAM_MAG_HEADING, src);
+    if (st != STATUS_OK) {
+        return st;
+    }
+
+    s_cfg.mag_heading_offset_deg = offset_deg;
+    return nvs_param_persist_blob(NVS_PARAM_MAG_HEADING, NVS_CFG_NS_CAL, NVS_CFG_KEY_MAG_HDG,
+                                  &s_cfg.mag_heading_offset_deg,
+                                  (u32_t)sizeof(s_cfg.mag_heading_offset_deg));
+}
+
 status_t nvs_param_set_last_mode(nvs_run_mode_t mode, nvs_write_src_t src)
 {
     status_t st;
@@ -1609,6 +1633,12 @@ status_t nvs_factory_reset(void)
 
     st = nvs_set_blob_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_BAT_CAL, &s_cfg.battery_cal,
                            (u32_t)sizeof(s_cfg.battery_cal));
+    if (st != STATUS_OK) {
+        goto done;
+    }
+
+    st = nvs_set_blob_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_MAG_HDG, &s_cfg.mag_heading_offset_deg,
+                           (u32_t)sizeof(s_cfg.mag_heading_offset_deg));
     if (st != STATUS_OK) {
         goto done;
     }

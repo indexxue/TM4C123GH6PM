@@ -74,6 +74,7 @@ static u16_t s_yaw_mag_ramp_left;
 static float s_sample_period;
 static float s_yaw_ctrl_deg;
 static bool_t s_yaw_ctrl_valid;
+static float s_mag_heading_offset_deg;
 
 static FusionQuaternion attitude_quat_from_euler_rad(float roll, float pitch, float yaw)
 {
@@ -219,6 +220,13 @@ static void attitude_load_nvs_gyro_offset(void)
     FusionBiasSetOffset(&s_bias, offset);
 }
 
+static void attitude_load_nvs_mag_heading_offset(void)
+{
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+
+    s_mag_heading_offset_deg = cfg->mag_heading_offset_deg;
+}
+
 static float attitude_wrap_deg_180(float deg)
 {
     while (deg > 180.0f) {
@@ -228,6 +236,14 @@ static float attitude_wrap_deg_180(float deg)
         deg += 360.0f;
     }
     return deg;
+}
+
+static float attitude_compass_heading_calibrated(FusionVector accelerometer,
+                                                 FusionVector magnetometer)
+{
+    float heading = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+
+    return attitude_wrap_deg_180(heading - s_mag_heading_offset_deg);
 }
 
 static int16_t attitude_deg_to_int16(float deg)
@@ -307,7 +323,7 @@ static void attitude_blend_yaw_from_compass(FusionVector accelerometer, FusionVe
         return;
     }
 
-    heading = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+    heading = attitude_compass_heading_calibrated(accelerometer, magnetometer);
     euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&s_ahrs));
     yaw_deg = euler.angle.yaw;
     yaw_new = yaw_deg + (alpha * attitude_wrap_deg_180(heading - yaw_deg));
@@ -388,7 +404,7 @@ static void attitude_update_fusion(const imu_sample_t *imu, const magnetometer_s
         float yaw_seed = 0.0f;
 
         if (mag_ok != FALSE) {
-            yaw_seed = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+            yaw_seed = attitude_compass_heading_calibrated(accelerometer, magnetometer);
         }
         attitude_seed_tilt(accelerometer, yaw_seed);
     }
@@ -424,6 +440,7 @@ status_t attitude_init(float sample_hz)
 
     attitude_apply_fusion_settings(sample_hz);
     attitude_load_nvs_gyro_offset();
+    attitude_load_nvs_mag_heading_offset();
 
     s_sample_period = 1.0f / sample_hz;
     s_tilt_seeded = FALSE;
@@ -574,4 +591,86 @@ void attitude_yaw_hold_set(bool_t active)
 bool_t attitude_yaw_hold_is_active(void)
 {
     return s_yaw_hold;
+}
+
+status_t attitude_calibrate_yaw(float ref_yaw_deg, float *offset_deg_out, float *yaw_deg_out)
+{
+    imu_sample_t imu;
+    magnetometer_sample_t mag;
+    FusionVector gyroscope;
+    FusionVector accelerometer;
+    FusionVector magnetometer;
+    float gyro_peak_dps;
+    float heading_raw;
+    float offset_deg;
+    float ref_yaw;
+    status_t st;
+
+    if (s_ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    if (s_yaw_hold != FALSE) {
+        return STATUS_FAIL;
+    }
+    if ((imu_is_ready() == FALSE) || (magnetometer_is_ready() == FALSE)) {
+        return STATUS_INVALID_STATE;
+    }
+
+    if (imu_read_sample(&imu) != STATUS_OK) {
+        return STATUS_FAIL;
+    }
+    if (magnetometer_read_sample(&mag) != STATUS_OK) {
+        return STATUS_FAIL;
+    }
+    if (attitude_mag_sample_ok(mag.mx, mag.my, mag.mz) == FALSE) {
+        return STATUS_FAIL;
+    }
+
+    gyroscope = attitude_raw_to_gyro_dps(&imu);
+    accelerometer = attitude_raw_to_accel_g(&imu);
+    magnetometer = attitude_raw_to_mag(&mag);
+    gyro_peak_dps = attitude_gyro_peak_dps(gyroscope);
+
+    if (attitude_accel_is_gravity(accelerometer) == FALSE) {
+        return STATUS_FAIL;
+    }
+    if (gyro_peak_dps >= ATTITUDE_TILT_LOCK_MAX_DPS) {
+        return STATUS_FAIL;
+    }
+    if ((fabsf(gyroscope.axis.x) >= ATTITUDE_MAG_YAW_SKIP_XY_DPS) ||
+        (fabsf(gyroscope.axis.y) >= ATTITUDE_MAG_YAW_SKIP_XY_DPS)) {
+        return STATUS_FAIL;
+    }
+    if (fabsf(gyroscope.axis.z) >= ATTITUDE_MAG_YAW_SKIP_GZ_DPS) {
+        return STATUS_FAIL;
+    }
+
+    heading_raw = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
+    ref_yaw = attitude_wrap_deg_180(ref_yaw_deg);
+    offset_deg = attitude_wrap_deg_180(heading_raw - ref_yaw);
+
+    st = nvs_param_set_mag_heading_offset(offset_deg, NVS_WRITE_SRC_PROTOCOL);
+    if (st != STATUS_OK) {
+        return st;
+    }
+
+    s_mag_heading_offset_deg = offset_deg;
+    FusionAhrsSetHeading(&s_ahrs, ref_yaw);
+    s_prev_yaw_deg = ref_yaw;
+    s_yaw_ctrl_deg = ref_yaw;
+    s_yaw_ctrl_valid = TRUE;
+    s_euler_prev_valid = TRUE;
+
+    if (offset_deg_out != NULL) {
+        *offset_deg_out = offset_deg;
+    }
+    if (yaw_deg_out != NULL) {
+        *yaw_deg_out = ref_yaw;
+    }
+    return STATUS_OK;
+}
+
+void attitude_set_mag_heading_offset(float offset_deg)
+{
+    s_mag_heading_offset_deg = offset_deg;
 }

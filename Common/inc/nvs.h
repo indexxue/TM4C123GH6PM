@@ -65,6 +65,7 @@ typedef enum {
 #define NVS_CFG_KEY_LINE_TH         "line_th"
 #define NVS_CFG_KEY_ENC_ZERO        "enc_zero"
 #define NVS_CFG_KEY_BAT_CAL         "bat_cal"
+#define NVS_CFG_KEY_MAG_HDG         "mag_hdg"
 #define NVS_CFG_KEY_LAST_MODE       "last_mode"
 
 #define NVS_HW_REV_CAR_4WD_V1       0U
@@ -132,6 +133,8 @@ typedef struct {
     nvs_line_threshold_t line_threshold;
     nvs_encoder_zero_t encoder_zero;
     nvs_battery_cal_t battery_cal;
+    /** 磁力计航向零点偏移（度）；显示 yaw = FusionCompass - offset */
+    f32_t mag_heading_offset_deg;
     nvs_run_mode_t last_mode;
 } nvs_cfg_t;
 
@@ -164,6 +167,7 @@ typedef enum {
     NVS_PARAM_LAST_MODE,
     NVS_PARAM_ENCODER_DIR,
     NVS_PARAM_PID_YAW,
+    NVS_PARAM_MAG_HEADING,
     NVS_PARAM_COUNT
 } nvs_param_id_t;
 
@@ -213,6 +217,7 @@ status_t nvs_param_set_imu_offset(const nvs_imu_offset_t *offset, nvs_write_src_
 status_t nvs_param_set_line_threshold(const nvs_line_threshold_t *threshold, nvs_write_src_t src);
 status_t nvs_param_set_encoder_zero(const nvs_encoder_zero_t *zero, nvs_write_src_t src);
 status_t nvs_param_set_battery_cal(const nvs_battery_cal_t *cal, nvs_write_src_t src);
+status_t nvs_param_set_mag_heading_offset(f32_t offset_deg, nvs_write_src_t src);
 status_t nvs_param_set_last_mode(nvs_run_mode_t mode, nvs_write_src_t src);
 
 /** 恢复 ctrl/cal/user 参数为默认值；保留 serial / hw_rev / fw_ver / boot_cnt */

@@ -62,6 +62,7 @@ class Cmd(IntEnum):
     SPEED_STOP = 0x0033
     SET_ANGLE = 0x0034
     ANGLE_STOP = 0x0035
+    CALIB_YAW = 0x0036
 
 
 class Cap(IntFlag):
@@ -71,6 +72,7 @@ class Cap(IntFlag):
     DRIVE = 1 << 3
     SPEED_LOOP = 1 << 4
     ANGLE_LOOP = 1 << 5
+    YAW_CALIB = 1 << 6
 
 
 class TelChannel(IntFlag):
@@ -533,6 +535,19 @@ def build_set_angle(delta_yaw: int, base_rpm: int, max_turn_rpm: int = 0) -> byt
     return struct.pack("<Bhi", 0, delta_yaw, base_rpm)
 
 
+def build_calib_yaw(ref_yaw: int) -> bytes:
+    """静止水平时，将当前物理朝向设为 ref_yaw（-180~180°）。"""
+    ref = max(-180, min(180, int(ref_yaw)))
+    return struct.pack("<h", ref)
+
+
+def parse_calib_yaw_ack(payload: bytes) -> tuple[int, int]:
+    if len(payload) < 4:
+        raise ValueError("calib yaw ack too short")
+    offset_deg, yaw_deg = struct.unpack_from("<hh", payload, 0)
+    return offset_deg, yaw_deg
+
+
 def caps_text(caps: int) -> str:
     names: list[str] = []
     if caps & Cap.TELEMETRY:
@@ -547,6 +562,8 @@ def caps_text(caps: int) -> str:
         names.append("SPEED_LOOP")
     if caps & Cap.ANGLE_LOOP:
         names.append("ANGLE_LOOP")
+    if caps & Cap.YAW_CALIB:
+        names.append("YAW_CALIB")
     return ", ".join(names) if names else "none"
 
 
