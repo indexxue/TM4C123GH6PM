@@ -54,6 +54,7 @@ class MainWindow(QMainWindow):
         self._worker.link_alive_changed.connect(self._on_link_alive)
         self._worker.push_received.connect(self._on_push)
         self._worker.motor_rpm_received.connect(self._on_motor_rpm)
+        self._worker.angle_loop_received.connect(self._on_angle_loop)
         self._worker.encoder_counts_received.connect(self._on_encoder_counts)
         self._worker.battery_received.connect(self._on_battery)
         self._worker.optional_subscription_changed.connect(self._on_optional_subscription)
@@ -133,6 +134,7 @@ class MainWindow(QMainWindow):
             self._worker,
             self._param_panel.editor(5),
             self._param_panel.editor(7),
+            self._param_panel.editor(16),
         )
         self._drive = DriveTab(self._worker)
 
@@ -197,7 +199,9 @@ class MainWindow(QMainWindow):
             f"caps={proto.caps_text(info.caps)}"
         )
         has_speed = bool(info.caps & int(proto.Cap.SPEED_LOOP))
+        has_angle = bool(info.caps & int(proto.Cap.ANGLE_LOOP))
         self._dashboard.subscribe_panel.set_rpm_available(has_speed)
+        self._dashboard.subscribe_panel.set_angle_available(has_angle)
         motor_count = proto.motor_count_for_hw_rev(info.hw_rev)
         self._plot.set_motor_count(motor_count)
         if info.proto_ver < proto.PROTO_VER:
@@ -207,6 +211,7 @@ class MainWindow(QMainWindow):
         self._dashboard.set_optional_channels(mask)
         self._dashboard.subscribe_panel.apply_mask(mask)
         self._plot.set_rpm_subscribed(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
+        self._plot.set_angle_subscribed(bool(mask & int(proto.TelChannel.ANGLE_LOOP)))
 
     def _on_link_alive(self, alive: bool) -> None:
         if alive:
@@ -245,6 +250,9 @@ class MainWindow(QMainWindow):
 
     def _on_motor_rpm(self, rpms: tuple[int, int, int, int]) -> None:
         self._plot.on_motor_rpm(rpms)
+
+    def _on_angle_loop(self, sample: proto.AngleLoopPush) -> None:
+        self._plot.on_angle_loop(sample)
 
     def _on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
         self._dashboard.update_encoder_counts(counts)

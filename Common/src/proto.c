@@ -54,6 +54,8 @@
 #define PROTO_CMD_DRIVE_STOP        0x0031U
 #define PROTO_CMD_SET_SPEED         0x0032U
 #define PROTO_CMD_SPEED_STOP        0x0033U
+#define PROTO_CMD_SET_ANGLE         0x0034U
+#define PROTO_CMD_ANGLE_STOP        0x0035U
 
 #define PROTO_ERR_UNKNOWN_CMD       0x02U
 #define PROTO_ERR_BAD_LEN           0x03U
@@ -69,6 +71,7 @@
 #define PROTO_CAP_SUBSCRIBE         (1U << 2)
 #define PROTO_CAP_DRIVE             (1U << 3)
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
+#define PROTO_CAP_ANGLE_LOOP        (1U << 5)
 
 #define PROTO_CH_BATTERY            (1U << 0)
 #define PROTO_CH_ATTITUDE           (1U << 1)
@@ -76,9 +79,11 @@
 #define PROTO_CH_LINE_ADC           (1U << 3)
 #define PROTO_CH_ULTRASONIC         (1U << 4)
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
+#define PROTO_CH_ANGLE_LOOP         (1U << 6)
 
 #define PROTO_BASE_MASK             (PROTO_CH_ATTITUDE | PROTO_CH_ENCODER)
-#define PROTO_OPTIONAL_MASK         (PROTO_CH_BATTERY | PROTO_CH_LINE_ADC | PROTO_CH_ULTRASONIC | PROTO_CH_MOTOR_RPM)
+#define PROTO_OPTIONAL_MASK         (PROTO_CH_BATTERY | PROTO_CH_LINE_ADC | PROTO_CH_ULTRASONIC | \
+                                     PROTO_CH_MOTOR_RPM | PROTO_CH_ANGLE_LOOP)
 
 #define PROTO_PUSH_CH_BATTERY       0U
 #define PROTO_PUSH_CH_ATTITUDE      1U
@@ -86,6 +91,7 @@
 #define PROTO_PUSH_CH_LINE_ADC      3U
 #define PROTO_PUSH_CH_ULTRASONIC    4U
 #define PROTO_PUSH_CH_MOTOR_RPM     5U
+#define PROTO_PUSH_CH_ANGLE_LOOP    6U
 
 #define PROTO_DEFAULT_HZ_ATT        10U
 #define PROTO_DEFAULT_HZ_ENC        5U
@@ -93,9 +99,11 @@
 #define PROTO_DEFAULT_HZ_LINE         5U
 #define PROTO_DEFAULT_HZ_ULTRA      5U
 #define PROTO_DEFAULT_HZ_MOTOR_RPM  10U
+#define PROTO_DEFAULT_HZ_ANGLE_LOOP 10U
 #define PROTO_PUSH_SUPPRESS_MS      280U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 350U
+#define PROTO_PUSH_SUPPRESS_SET_ANGLE_MS       350U
 
 /** 与 app.c APP_CTRL_PERIOD_MS 一致，SET_SPEED 后立即 tick 用 */
 #define PROTO_CHASSIS_TICK_MS       20U
@@ -164,10 +172,12 @@ static struct {
     uint8_t hz_line;
     uint8_t hz_ultra;
     uint8_t hz_motor_rpm;
+    uint8_t hz_angle_loop;
     uint32_t acc_batt_ms;
     uint32_t acc_line_ms;
     uint32_t acc_ultra_ms;
     uint32_t acc_motor_rpm_ms;
+    uint32_t acc_angle_loop_ms;
 } s_sub;
 
 static bool_t s_ultra_ready;
@@ -523,6 +533,21 @@ static status_t proto_write_pid_line(const uint8_t *data, uint16_t len)
     return nvs_param_set_pid_line(&pid, NVS_WRITE_SRC_PROTOCOL);
 }
 
+static status_t proto_write_pid_yaw(const uint8_t *data, uint16_t len)
+{
+    nvs_pid3_t pid;
+
+    if ((data == NULL) || (len != sizeof(nvs_pid3_t))) {
+        return STATUS_INVALID_ARG;
+    }
+    (void)memcpy(&pid, data, sizeof(pid));
+    if (nvs_param_set_pid_yaw(&pid, NVS_WRITE_SRC_PROTOCOL) == STATUS_OK) {
+        chassis_reload_angle_pid_gains();
+        return STATUS_OK;
+    }
+    return STATUS_FAIL;
+}
+
 static status_t proto_write_spd_limit(const uint8_t *data, uint16_t len)
 {
     nvs_spd_limit_t limit;
@@ -619,6 +644,7 @@ static const proto_param_desc_t s_param_table[] = {
     { NVS_PARAM_FW_VERSION,   NVS_CFG_FW_VER_MAX,                  proto_write_fw_version },
     { NVS_PARAM_PID_SPEED,    (uint8_t)sizeof(nvs_pid3_t),         proto_write_pid_speed },
     { NVS_PARAM_PID_LINE,     (uint8_t)sizeof(nvs_pid3_t),         proto_write_pid_line },
+    { NVS_PARAM_PID_YAW,      (uint8_t)sizeof(nvs_pid3_t),         proto_write_pid_yaw },
     { NVS_PARAM_SPD_LIMIT,    (uint8_t)sizeof(nvs_spd_limit_t),    proto_write_spd_limit },
     { NVS_PARAM_KINEMATICS,   (uint8_t)sizeof(nvs_kinematics_t),  proto_write_kinematics },
     { NVS_PARAM_MOTOR_DIR,    (uint8_t)sizeof(u32_t),              proto_write_motor_dir },
@@ -675,6 +701,9 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
     case NVS_PARAM_PID_LINE:
         (void)memcpy(out, &cfg->pid_line, sizeof(cfg->pid_line));
         return (uint16_t)sizeof(cfg->pid_line);
+    case NVS_PARAM_PID_YAW:
+        (void)memcpy(out, &cfg->pid_yaw, sizeof(cfg->pid_yaw));
+        return (uint16_t)sizeof(cfg->pid_yaw);
     case NVS_PARAM_SPD_LIMIT:
         (void)memcpy(out, &cfg->spd_limit, sizeof(cfg->spd_limit));
         return (uint16_t)sizeof(cfg->spd_limit);
@@ -915,6 +944,19 @@ static void proto_push_motor_rpm(void)
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
+static void proto_push_angle_loop(void)
+{
+    uint8_t payload[5U + 2U + 2U + 4U + 4U];
+
+    payload[0] = PROTO_PUSH_CH_ANGLE_LOOP;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    proto_put_i16(&payload[5], chassis_get_angle_target_yaw());
+    proto_put_i16(&payload[7], chassis_get_angle_current_yaw());
+    proto_put_i32(&payload[9], chassis_get_angle_turn_rpm());
+    proto_put_i32(&payload[13], chassis_get_angle_base_rpm());
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
 static void proto_push_ultrasonic(void)
 {
     uint8_t payload[5U + 2U];
@@ -964,6 +1006,10 @@ static uint32_t proto_caps(void)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
         caps |= PROTO_CAP_SPEED_LOOP;
     }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER |
+                                   DEVICE_BOARD_MASK_PERIPH)) {
+        caps |= PROTO_CAP_ANGLE_LOOP;
+    }
     return caps;
 }
 
@@ -1011,6 +1057,7 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     uint8_t hz_line;
     uint8_t hz_ultra;
     uint8_t hz_motor_rpm;
+    uint8_t hz_angle_loop;
 
     if (len < 4U) {
         proto_reply_nak(PROTO_CMD_SUBSCRIBE, seq, PROTO_ERR_BAD_LEN);
@@ -1038,6 +1085,13 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     } else {
         hz_motor_rpm = 0U;
     }
+    if (len >= 10U) {
+        hz_angle_loop = payload[9];
+    } else if ((mask & PROTO_CH_ANGLE_LOOP) != 0U) {
+        hz_angle_loop = PROTO_DEFAULT_HZ_ANGLE_LOOP;
+    } else {
+        hz_angle_loop = 0U;
+    }
 
     /* 先 ACK 再开推送，避免与应答争用 TX 互斥/共享缓冲 */
     proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
@@ -1060,10 +1114,12 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     s_sub.hz_line = hz_line;
     s_sub.hz_ultra = hz_ultra;
     s_sub.hz_motor_rpm = hz_motor_rpm;
+    s_sub.hz_angle_loop = hz_angle_loop;
     s_sub.acc_batt_ms = 0U;
     s_sub.acc_line_ms = 0U;
     s_sub.acc_ultra_ms = 0U;
     s_sub.acc_motor_rpm_ms = 0U;
+    s_sub.acc_angle_loop_ms = 0U;
 }
 
 static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16_t len)
@@ -1084,6 +1140,7 @@ static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16
     s_sub.acc_line_ms = 0U;
     s_sub.acc_ultra_ms = 0U;
     s_sub.acc_motor_rpm_ms = 0U;
+    s_sub.acc_angle_loop_ms = 0U;
     proto_reply_ack(PROTO_CMD_UNSUBSCRIBE, seq, NULL, 0U);
 }
 
@@ -1286,10 +1343,82 @@ static void proto_handle_speed_stop(uint8_t seq)
     proto_reply_ack(PROTO_CMD_SPEED_STOP, seq, NULL, 0U);
 }
 
+static void proto_handle_set_angle(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    uint8_t format;
+    int16_t target_yaw;
+    int32_t base_rpm;
+    int32_t max_turn_rpm;
+
+    if ((proto_caps() & PROTO_CAP_ANGLE_LOOP) == 0U) {
+        proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 1U) {
+        proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+
+    format = payload[0];
+    switch (format) {
+    case 0U:
+        if (len < 7U) {
+            proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        target_yaw = proto_get_i16(&payload[1]);
+        base_rpm = proto_get_i32(&payload[3]);
+        max_turn_rpm = 0;
+        break;
+    case 1U:
+        if (len < 11U) {
+            proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        target_yaw = proto_get_i16(&payload[1]);
+        base_rpm = proto_get_i32(&payload[3]);
+        max_turn_rpm = proto_get_i32(&payload[7]);
+        break;
+    default:
+        proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+
+    if ((base_rpm > 1200) || (base_rpm < -1200)) {
+        proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+    if ((max_turn_rpm > 1200) || (max_turn_rpm < -1200)) {
+        proto_reply_nak(PROTO_CMD_SET_ANGLE, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+
+    chassis_set_angle(target_yaw, base_rpm, max_turn_rpm);
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    proto_suppress_pushes(PROTO_PUSH_SUPPRESS_SET_ANGLE_MS);
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
+    proto_reply_ack(PROTO_CMD_SET_ANGLE, seq, NULL, 0U);
+}
+
+static void proto_handle_angle_stop(uint8_t seq)
+{
+    if ((proto_caps() & PROTO_CAP_ANGLE_LOOP) == 0U) {
+        proto_reply_nak(PROTO_CMD_ANGLE_STOP, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    chassis_stop();
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
+    proto_reply_ack(PROTO_CMD_ANGLE_STOP, seq, NULL, 0U);
+}
+
 static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
     if ((cmd == PROTO_CMD_SUBSCRIBE) || (cmd == PROTO_CMD_UNSUBSCRIBE) ||
         (cmd == PROTO_CMD_SET_SPEED) || (cmd == PROTO_CMD_SPEED_STOP) ||
+        (cmd == PROTO_CMD_SET_ANGLE) || (cmd == PROTO_CMD_ANGLE_STOP) ||
         (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
         proto_rx_gate_hold_cmd();
         proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
@@ -1331,6 +1460,12 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         break;
     case PROTO_CMD_SPEED_STOP:
         proto_handle_speed_stop(seq);
+        break;
+    case PROTO_CMD_SET_ANGLE:
+        proto_handle_set_angle(seq, payload, len);
+        break;
+    case PROTO_CMD_ANGLE_STOP:
+        proto_handle_angle_stop(seq);
         break;
     default:
         proto_reply_nak(cmd, seq, PROTO_ERR_UNKNOWN_CMD);
@@ -1385,6 +1520,38 @@ static bool_t proto_rx_set_speed_semantic_ok(const uint8_t *payload, uint16_t le
     }
 }
 
+static bool_t proto_rx_set_angle_semantic_ok(const uint8_t *payload, uint16_t len)
+{
+    uint8_t format;
+    int32_t rpm;
+
+    if ((payload == NULL) || (len < 1U)) {
+        return FALSE;
+    }
+
+    format = payload[0];
+    switch (format) {
+    case 0U:
+        if (len != 7U) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[3]);
+        return (rpm <= 1200) && (rpm >= -1200);
+    case 1U:
+        if (len != 11U) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[3]);
+        if ((rpm > 1200) || (rpm < -1200)) {
+            return FALSE;
+        }
+        rpm = proto_get_i32(&payload[7]);
+        return (rpm <= 1200) && (rpm >= -1200);
+    default:
+        return FALSE;
+    }
+}
+
 /**
  * HC-05 等蓝牙链路上常见「帧体正确、CRC 尾字节损坏」。
  * 在严格 CRC 失败时，若头/载荷语义自洽则放宽接受（仍由 dispatch 做业务校验）。
@@ -1401,15 +1568,18 @@ static bool_t proto_rx_relaxed_crc_ok(uint16_t cmd, const uint8_t *hdr, const ui
     case PROTO_CMD_PING:
     case PROTO_CMD_GET_TELEMETRY:
     case PROTO_CMD_SPEED_STOP:
+    case PROTO_CMD_ANGLE_STOP:
     case PROTO_CMD_DRIVE_STOP:
     case PROTO_CMD_PARAM_LIST:
         return (len == 0U);
     case PROTO_CMD_SUBSCRIBE:
-        return (len == 4U) || (len == 9U);
+        return (len == 4U) || (len == 9U) || (len == 10U);
     case PROTO_CMD_UNSUBSCRIBE:
         return (len >= 4U);
     case PROTO_CMD_SET_SPEED:
         return proto_rx_set_speed_semantic_ok(payload, len);
+    case PROTO_CMD_SET_ANGLE:
+        return proto_rx_set_angle_semantic_ok(payload, len);
     case PROTO_CMD_DRIVE:
         if (len != 4U) {
             return FALSE;
@@ -1629,6 +1799,14 @@ void proto_telemetry_tick(uint32_t period_ms)
             proto_push_motor_rpm();
         }
     }
+    if ((s_sub.mask & PROTO_CH_ANGLE_LOOP) != 0U) {
+        s_sub.acc_angle_loop_ms += period_ms;
+        if (s_sub.acc_angle_loop_ms >=
+            proto_period_ms_for(s_sub.hz_angle_loop, PROTO_DEFAULT_HZ_ANGLE_LOOP)) {
+            s_sub.acc_angle_loop_ms = 0U;
+            proto_push_angle_loop();
+        }
+    }
 }
 
 status_t proto_uart_service_start(void)
@@ -1672,6 +1850,7 @@ status_t proto_uart_service_start(void)
     s_sub.hz_line = PROTO_DEFAULT_HZ_LINE;
     s_sub.hz_ultra = PROTO_DEFAULT_HZ_ULTRA;
     s_sub.hz_motor_rpm = PROTO_DEFAULT_HZ_MOTOR_RPM;
+    s_sub.hz_angle_loop = PROTO_DEFAULT_HZ_ANGLE_LOOP;
     s_sub.hz_batt = PROTO_DEFAULT_HZ_BATT;
     s_ultra_ready = FALSE;
     s_ultra_init_attempted = FALSE;

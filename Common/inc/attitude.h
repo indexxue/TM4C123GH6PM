@@ -33,6 +33,15 @@ status_t attitude_update_from_imu(const imu_sample_t *imu);
 status_t attitude_update_from_sensors(const imu_sample_t *imu, const magnetometer_sample_t *mag);
 status_t attitude_update_step(const imu_sample_t *imu, const magnetometer_sample_t *mag);
 status_t attitude_get_euler(attitude_euler_t *euler);
+/** 控制用 float yaw（同 get_euler 平滑路径）与 gz（°/s，车体 Z） */
+status_t attitude_get_yaw_control(float *yaw_deg, float *yaw_rate_dps);
 status_t attitude_get_status(attitude_status_t *status);
+
+/**
+ * 角度环 HOLD：为真时禁止磁力计 yaw 慢融合，航向由 gz 积分（仍保留 gyro 零偏修正）。
+ * active=FALSE 后按帧渐变恢复 mag 融合系数。
+ */
+void attitude_yaw_hold_set(bool_t active);
+bool_t attitude_yaw_hold_is_active(void);
 
 #endif /* ATTITUDE_H */

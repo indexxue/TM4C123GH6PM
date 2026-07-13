@@ -132,6 +132,7 @@ static const nvs_param_policy_t s_param_policy[NVS_PARAM_COUNT] = {
     [NVS_PARAM_BATTERY_CAL] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_LAST_MODE] = {1U, NVS_SRC_INTERNAL},
     [NVS_PARAM_ENCODER_DIR] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
+    [NVS_PARAM_PID_YAW] = {0U, NVS_SRC_CMD | NVS_SRC_PROTOCOL},
 };
 
 /* -------------------------------------------------------------------------- */
@@ -897,6 +898,9 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     cfg->pid_line.kp = 2.0f;
     cfg->pid_line.ki = 0.0f;
     cfg->pid_line.kd = 0.1f;
+    cfg->pid_yaw.kp = 2.0f;
+    cfg->pid_yaw.ki = 0.0f;
+    cfg->pid_yaw.kd = 0.5f;
 
     cfg->spd_limit.max_rpm = 300.0f;
     cfg->spd_limit.max_accel_rpm_s = 600.0f;
@@ -1380,6 +1384,22 @@ status_t nvs_param_set_pid_line(const nvs_pid3_t *pid, nvs_write_src_t src)
     }
 
     s_cfg.pid_line = *pid;
+    return STATUS_OK;
+}
+
+status_t nvs_param_set_pid_yaw(const nvs_pid3_t *pid, nvs_write_src_t src)
+{
+    status_t st;
+
+    st = nvs_param_check_write(NVS_PARAM_PID_YAW, src);
+    if (st != STATUS_OK) {
+        return st;
+    }
+    if (pid == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+
+    s_cfg.pid_yaw = *pid;
     return STATUS_OK;
 }
 

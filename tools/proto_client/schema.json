@@ -120,6 +120,22 @@
       "fields": ["last_mode"],
       "writable": false,
       "description": "上次运行模式"
+    },
+    {
+      "id": 15,
+      "name": "encoder_dir",
+      "struct": "<I",
+      "fields": ["encoder_dir_mask"],
+      "writable": true,
+      "description": "编码器方向掩码"
+    },
+    {
+      "id": 16,
+      "name": "pid_yaw",
+      "struct": "<fff",
+      "fields": ["kp", "ki", "kd"],
+      "writable": true,
+      "description": "航向角环 PID"
     }
   ]
 }

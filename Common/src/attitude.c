@@ -40,6 +40,10 @@
 #define ATTITUDE_MAG_YAW_SKIP_XY_DPS    5.0f
 /** mag yaw 融合系数（50Hz 下约 0.12 可抵消 ~2°/s 零偏漂移） */
 #define ATTITUDE_MAG_YAW_ALPHA          0.12f
+/** 快速绕 Z 转结束后，延迟若干帧再允许 mag 拉回 yaw（抑制停转瞬间反向跳变） */
+#define ATTITUDE_MAG_YAW_COOLDOWN_FRAMES 25U
+/** 角度环结束 HOLD 后，mag 融合系数渐变恢复帧数（50Hz 下约 500ms） */
+#define ATTITUDE_YAW_HOLD_MAG_RAMP_FRAMES 25U
 
 #define ATTITUDE_MAG_NORM_JUMP          0.22f
 #define ATTITUDE_MAG_NORM_ALPHA         0.05f
@@ -63,6 +67,13 @@ static float s_prev_roll_deg;
 static float s_prev_pitch_deg;
 static float s_prev_yaw_deg;
 static bool_t s_euler_prev_valid;
+static float s_last_gz_dps;
+static u8_t s_mag_yaw_cooldown;
+static bool_t s_yaw_hold;
+static u16_t s_yaw_mag_ramp_left;
+static float s_sample_period;
+static float s_yaw_ctrl_deg;
+static bool_t s_yaw_ctrl_valid;
 
 static FusionQuaternion attitude_quat_from_euler_rad(float roll, float pitch, float yaw)
 {
@@ -284,22 +295,51 @@ static void attitude_lock_tilt_preserve_yaw(FusionVector accelerometer)
     FusionAhrsSetQuaternion(&s_ahrs, q);
 }
 
-static void attitude_blend_yaw_from_compass(FusionVector accelerometer, FusionVector magnetometer)
+static void attitude_blend_yaw_from_compass(FusionVector accelerometer, FusionVector magnetometer,
+                                            float alpha)
 {
     float heading;
     float yaw_deg;
     float yaw_new;
     FusionEuler euler;
 
+    if (alpha <= 0.0f) {
+        return;
+    }
+
     heading = FusionCompass(accelerometer, magnetometer, ATTITUDE_EARTH_CONVENTION);
     euler = FusionQuaternionToEuler(FusionAhrsGetQuaternion(&s_ahrs));
     yaw_deg = euler.angle.yaw;
-    yaw_new = yaw_deg + (ATTITUDE_MAG_YAW_ALPHA * attitude_wrap_deg_180(heading - yaw_deg));
+    yaw_new = yaw_deg + (alpha * attitude_wrap_deg_180(heading - yaw_deg));
     FusionAhrsSetHeading(&s_ahrs, yaw_new);
+}
+
+static float attitude_mag_yaw_blend_alpha(void)
+{
+    float alpha = ATTITUDE_MAG_YAW_ALPHA;
+
+    if (s_yaw_mag_ramp_left == 0U) {
+        return alpha;
+    }
+
+    {
+        u16_t elapsed = ATTITUDE_YAW_HOLD_MAG_RAMP_FRAMES - s_yaw_mag_ramp_left;
+
+        alpha = ATTITUDE_MAG_YAW_ALPHA *
+                ((float)elapsed / (float)ATTITUDE_YAW_HOLD_MAG_RAMP_FRAMES);
+        s_yaw_mag_ramp_left--;
+    }
+    return alpha;
 }
 
 static bool_t attitude_can_blend_mag_yaw(FusionVector gyroscope, float gyro_peak_dps, bool_t gravity)
 {
+    if (s_yaw_hold != FALSE) {
+        return FALSE;
+    }
+    if (s_mag_yaw_cooldown > 0U) {
+        return FALSE;
+    }
     if ((gravity == FALSE) || (gyro_peak_dps >= ATTITUDE_TILT_LOCK_MAX_DPS)) {
         return FALSE;
     }
@@ -323,10 +363,18 @@ static void attitude_update_fusion(const imu_sample_t *imu, const magnetometer_s
     bool_t mag_yaw_ok;
     bool_t mag_ok = FALSE;
 
-    gyroscope = attitude_raw_to_gyro_dps(imu);
+    FusionVector gyro_raw;
+
+    gyro_raw = attitude_raw_to_gyro_dps(imu);
     accelerometer = attitude_raw_to_accel_g(imu);
-    gyroscope = FusionBiasUpdate(&s_bias, gyroscope);
+    gyroscope = FusionBiasUpdate(&s_bias, gyro_raw);
     gyro_peak_dps = attitude_gyro_peak_dps(gyroscope);
+    s_last_gz_dps = gyroscope.axis.z;
+    if (fabsf(gyroscope.axis.z) >= ATTITUDE_MAG_YAW_SKIP_GZ_DPS) {
+        s_mag_yaw_cooldown = ATTITUDE_MAG_YAW_COOLDOWN_FRAMES;
+    } else if (s_mag_yaw_cooldown > 0U) {
+        s_mag_yaw_cooldown--;
+    }
     gravity = attitude_accel_is_gravity(accelerometer);
 
     if (mag != NULL) {
@@ -348,13 +396,20 @@ static void attitude_update_fusion(const imu_sample_t *imu, const magnetometer_s
     /* 6-DOF：mag 不参与四元数融合，避免磁干扰带动 roll/pitch 绕圈漂移 */
     FusionAhrsUpdateNoMagnetometer(&s_ahrs, gyroscope, accelerometer);
 
-    if (gravity && (gyro_peak_dps < ATTITUDE_TILT_LOCK_MAX_DPS)) {
+    if (s_yaw_hold != FALSE) {
+        s_yaw_ctrl_deg = attitude_wrap_deg_180(s_yaw_ctrl_deg + (gyro_raw.axis.z * s_sample_period));
+        s_prev_yaw_deg = s_yaw_ctrl_deg;
+    }
+
+    if ((s_yaw_hold == FALSE) && gravity && (gyro_peak_dps < ATTITUDE_TILT_LOCK_MAX_DPS)) {
         attitude_lock_tilt_preserve_yaw(accelerometer);
     }
 
     mag_yaw_ok = attitude_can_blend_mag_yaw(gyroscope, gyro_peak_dps, gravity);
     if (mag_yaw_ok && (mag_ok != FALSE)) {
-        attitude_blend_yaw_from_compass(accelerometer, magnetometer);
+        float alpha = attitude_mag_yaw_blend_alpha();
+
+        attitude_blend_yaw_from_compass(accelerometer, magnetometer, alpha);
         s_mag_trust = TRUE;
     } else if (mag_ok != FALSE) {
         s_mag_trust = TRUE;
@@ -370,6 +425,7 @@ status_t attitude_init(float sample_hz)
     attitude_apply_fusion_settings(sample_hz);
     attitude_load_nvs_gyro_offset();
 
+    s_sample_period = 1.0f / sample_hz;
     s_tilt_seeded = FALSE;
     s_mag_norm_ema = 0.0f;
     s_mag_norm_ready = FALSE;
@@ -378,6 +434,12 @@ status_t attitude_init(float sample_hz)
     s_prev_roll_deg = 0.0f;
     s_prev_pitch_deg = 0.0f;
     s_prev_yaw_deg = 0.0f;
+    s_last_gz_dps = 0.0f;
+    s_mag_yaw_cooldown = 0U;
+    s_yaw_hold = FALSE;
+    s_yaw_mag_ramp_left = 0U;
+    s_yaw_ctrl_deg = 0.0f;
+    s_yaw_ctrl_valid = FALSE;
     s_ready = TRUE;
     return STATUS_OK;
 }
@@ -454,7 +516,62 @@ status_t attitude_get_euler(attitude_euler_t *euler)
 
     euler->roll = attitude_deg_smooth_int(angles.angle.roll, &s_prev_roll_deg);
     euler->pitch = attitude_deg_smooth_int(angles.angle.pitch, &s_prev_pitch_deg);
-    euler->yaw = attitude_deg_smooth_int(angles.angle.yaw, &s_prev_yaw_deg);
+    if ((s_yaw_hold != FALSE) && (s_yaw_ctrl_valid != FALSE)) {
+        euler->yaw = attitude_deg_to_int16(s_yaw_ctrl_deg);
+    } else {
+        euler->yaw = attitude_deg_smooth_int(angles.angle.yaw, &s_prev_yaw_deg);
+    }
     s_euler_prev_valid = TRUE;
     return STATUS_OK;
+}
+
+status_t attitude_get_yaw_control(float *yaw_deg, float *yaw_rate_dps)
+{
+    if (s_ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+
+    if (yaw_deg != NULL) {
+        if ((s_yaw_hold != FALSE) && (s_yaw_ctrl_valid != FALSE)) {
+            *yaw_deg = s_yaw_ctrl_deg;
+        } else {
+            *yaw_deg = s_prev_yaw_deg;
+        }
+    }
+    if (yaw_rate_dps != NULL) {
+        *yaw_rate_dps = s_last_gz_dps;
+    }
+    return STATUS_OK;
+}
+
+void attitude_yaw_hold_set(bool_t active)
+{
+    if (active != FALSE) {
+        s_yaw_ctrl_deg = s_prev_yaw_deg;
+        s_yaw_ctrl_valid = TRUE;
+        s_yaw_hold = TRUE;
+        s_yaw_mag_ramp_left = 0U;
+        return;
+    }
+
+    if (s_yaw_hold == FALSE) {
+        return;
+    }
+
+    if (s_yaw_ctrl_valid != FALSE) {
+        FusionAhrsSetHeading(&s_ahrs, s_yaw_ctrl_deg);
+        s_prev_yaw_deg = s_yaw_ctrl_deg;
+    }
+
+    s_yaw_hold = FALSE;
+    s_yaw_ctrl_valid = FALSE;
+    s_yaw_mag_ramp_left = ATTITUDE_YAW_HOLD_MAG_RAMP_FRAMES;
+    if (s_mag_yaw_cooldown < ATTITUDE_MAG_YAW_COOLDOWN_FRAMES) {
+        s_mag_yaw_cooldown = ATTITUDE_MAG_YAW_COOLDOWN_FRAMES;
+    }
+}
+
+bool_t attitude_yaw_hold_is_active(void)
+{
+    return s_yaw_hold;
 }

@@ -37,3 +37,12 @@ int32_t Encoder_GetCount(uint8_t index)
     default: return 0;
     }
 }
+
+void Encoder_ResetCount(uint8_t index)
+{
+    switch (index) {
+    case 0: bsp_qei_reset(QEI1_BASE); break;
+    case 1: bsp_qei_reset(QEI0_BASE); break;
+    default: break;
+    }
+}

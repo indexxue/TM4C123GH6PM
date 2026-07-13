@@ -48,6 +48,7 @@ class SerialWorker(QThread):
     telemetry_received = Signal(object)
     push_received = Signal(object)
     motor_rpm_received = Signal(object)
+    angle_loop_received = Signal(object)
     encoder_counts_received = Signal(object)
     battery_received = Signal(int, int)
     optional_subscription_changed = Signal(int)
@@ -75,6 +76,8 @@ class SerialWorker(QThread):
         self._optional_mask = 0
         self._speed_payload: Optional[bytes] = None
         self._speed_attempt = 0
+        self._angle_payload: Optional[bytes] = None
+        self._angle_attempt = 0
         self._critical_depth = 0
         self._want_connected = False
         self._auto_reconnect = True
@@ -120,6 +123,14 @@ class SerialWorker(QThread):
     def request_speed_stop(self) -> None:
         self._cmd_queue.put(("speed_stop", b"", None))
 
+    @Slot(bytes)
+    def request_set_angle(self, payload: bytes) -> None:
+        self._cmd_queue.put(("set_angle", payload, None))
+
+    @Slot()
+    def request_angle_stop(self) -> None:
+        self._cmd_queue.put(("angle_stop", b"", None))
+
     @Slot(int, int)
     def request_drive(self, throttle: int, steer: int) -> None:
         self._cmd_queue.put(("drive", proto.build_drive(throttle, steer), None))
@@ -140,6 +151,8 @@ class SerialWorker(QThread):
             int(proto.Cmd.DRIVE_STOP),
             int(proto.Cmd.SET_SPEED),
             int(proto.Cmd.SPEED_STOP),
+            int(proto.Cmd.SET_ANGLE),
+            int(proto.Cmd.ANGLE_STOP),
             int(proto.Cmd.SUBSCRIBE),
         )
 
@@ -157,8 +170,8 @@ class SerialWorker(QThread):
             self._next_ping = now
             self._next_telemetry = now
 
-    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int]:
-        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor_rpm)。"""
+    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int]:
+        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor_rpm, hz_angle_loop)。"""
         mask = proto.BASE_CHANNEL_MASK | (optional_mask & proto.OPTIONAL_CHANNEL_MASK)
         hz_line = proto.DEFAULT_SUB_LINE_HZ if optional_mask & int(proto.TelChannel.LINE_ADC) else 0
         hz_ultra = proto.DEFAULT_SUB_ULTRA_HZ if optional_mask & int(proto.TelChannel.ULTRASONIC) else 0
@@ -166,6 +179,10 @@ class SerialWorker(QThread):
         if optional_mask & int(proto.TelChannel.MOTOR_RPM):
             if self._hello_info and (self._hello_info.caps & int(proto.Cap.SPEED_LOOP)):
                 hz_motor = proto.DEFAULT_SUB_MOTOR_RPM_HZ
+        hz_angle = 0
+        if optional_mask & int(proto.TelChannel.ANGLE_LOOP):
+            if self._hello_info and (self._hello_info.caps & int(proto.Cap.ANGLE_LOOP)):
+                hz_angle = proto.DEFAULT_SUB_ANGLE_LOOP_HZ
         return (
             mask,
             proto.DEFAULT_SUB_ATT_HZ,
@@ -173,6 +190,7 @@ class SerialWorker(QThread):
             hz_line,
             hz_ultra,
             hz_motor,
+            hz_angle,
         )
 
     def _unsubscribe_optional(self) -> bool:
@@ -205,7 +223,7 @@ class SerialWorker(QThread):
             return
         if self._hello_info is None or not (self._hello_info.caps & int(proto.Cap.SUBSCRIBE)):
             return
-        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor = self._subscribe_plan(self._optional_mask)
+        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle = self._subscribe_plan(self._optional_mask)
         self._wait_rx_quiet()
         frame = self._send_request_retry(
             int(proto.Cmd.SUBSCRIBE),
@@ -216,6 +234,7 @@ class SerialWorker(QThread):
                 hz_line=hz_line,
                 hz_ultra=hz_ultra,
                 hz_motor_rpm=hz_motor,
+                hz_angle_loop=hz_angle,
             ),
             timeout=3.0,
             retries=2,
@@ -232,6 +251,8 @@ class SerialWorker(QThread):
             parts.append(f"超声@{hz_ultra}Hz")
         if self._optional_mask & int(proto.TelChannel.MOTOR_RPM) and hz_motor:
             parts.append(f"RPM@{hz_motor}Hz")
+        if self._optional_mask & int(proto.TelChannel.ANGLE_LOOP) and hz_angle:
+            parts.append(f"角度@{hz_angle}Hz")
         self.log.emit(f"SUBSCRIBE ok ({' + '.join(parts)})")
         self.optional_subscription_changed.emit(self._optional_mask)
 
@@ -344,6 +365,17 @@ class SerialWorker(QThread):
             elif kind == "speed_stop":
                 if self.is_connected():
                     self._post_speed_stop()
+            elif kind == "set_angle":
+                if self.is_connected():
+                    self._angle_payload = payload
+                    self._angle_attempt = 0
+                    self._start_set_angle_attempt()
+            elif kind == "set_angle_retry":
+                if self.is_connected():
+                    self._start_set_angle_attempt()
+            elif kind == "angle_stop":
+                if self.is_connected():
+                    self._post_angle_stop()
             elif kind == "drive":
                 if self.is_connected():
                     frame = self._send_request_retry(
@@ -560,6 +592,8 @@ class SerialWorker(QThread):
             optional = 0
             if self._hello_info.caps & int(proto.Cap.SPEED_LOOP):
                 optional |= int(proto.TelChannel.MOTOR_RPM)
+            if self._hello_info.caps & int(proto.Cap.ANGLE_LOOP):
+                optional |= int(proto.TelChannel.ANGLE_LOOP)
             self._apply_subscription_now(optional)
 
         if ping_frame is not None:
@@ -758,6 +792,8 @@ class SerialWorker(QThread):
                     self.battery_received.emit(mv, pct)
                 elif push.channel_id == proto.CHANNEL_ID_MOTOR_RPM:
                     self.motor_rpm_received.emit(proto.parse_motor_rpm_push(push.payload))
+                elif push.channel_id == proto.CHANNEL_ID_ANGLE_LOOP:
+                    self.angle_loop_received.emit(proto.parse_angle_loop_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ENCODER:
                     self.encoder_counts_received.emit(proto.parse_encoder_push(push.payload))
                 self.push_received.emit(push)
@@ -773,6 +809,8 @@ class SerialWorker(QThread):
                     int(proto.Cmd.TELEMETRY_PUSH),
                     int(proto.Cmd.SET_SPEED) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SPEED_STOP) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.SET_ANGLE) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.ANGLE_STOP) | proto.RESPONSE_BIT,
                 ):
                     return
                 self.log.emit(
@@ -881,6 +919,85 @@ class SerialWorker(QThread):
     def _finish_speed_stop(self, frame: Optional[proto.Frame]) -> None:
         self._on_speed_stop_rsp(frame)
         self._end_critical()
+
+    def _start_set_angle_attempt(self) -> None:
+        payload = self._angle_payload
+        if payload is None:
+            return
+        if self._angle_attempt == 0:
+            self._begin_critical()
+            self._wait_rx_quiet(quiet_s=proto.SET_SPEED_QUIET_S_FMT0, timeout_s=1.0)
+        else:
+            self._flush_serial_input()
+            self._wait_rx_quiet(quiet_s=0.10, timeout_s=0.8)
+
+        attempt = self._angle_attempt
+        timeout_s = 3.5
+
+        def on_response(frame: Optional[proto.Frame]) -> None:
+            if frame is not None and not frame.is_nak:
+                self._angle_payload = None
+                self._angle_attempt = 0
+                self._finish_set_angle(frame)
+                return
+            if attempt < 2:
+                self._angle_attempt = attempt + 1
+                self._cmd_queue.put(("set_angle_retry", b"", None))
+                return
+            self._angle_payload = None
+            self._angle_attempt = 0
+            self._finish_set_angle(frame)
+
+        self._post_request(
+            int(proto.Cmd.SET_ANGLE),
+            payload,
+            on_response=on_response,
+            timeout=timeout_s,
+            duplicate_tx=proto.HC05_SAFE_TX,
+        )
+
+    def _post_angle_stop(self) -> None:
+        self._begin_critical()
+        self._wait_rx_quiet(quiet_s=0.10, timeout_s=1.0)
+
+        def on_response(frame: Optional[proto.Frame]) -> None:
+            self._finish_angle_stop(frame)
+
+        self._post_request(
+            int(proto.Cmd.ANGLE_STOP),
+            b"",
+            on_response=on_response,
+            timeout=4.0,
+            duplicate_tx=proto.HC05_SAFE_TX,
+        )
+
+    def _finish_set_angle(self, frame: Optional[proto.Frame]) -> None:
+        self._on_set_angle_rsp(frame)
+        self._end_critical()
+
+    def _finish_angle_stop(self, frame: Optional[proto.Frame]) -> None:
+        self._on_angle_stop_rsp(frame)
+        self._end_critical()
+
+    def _on_set_angle_rsp(self, frame: proto.Frame) -> None:
+        if frame is None:
+            self.log.emit("SET_ANGLE 超时（无应答）")
+            return
+        if frame.is_nak:
+            code = frame.err_code or 0
+            self.log.emit(f"SET_ANGLE 失败: {proto.err_text(code)}")
+            return
+        self.log.emit("SET_ANGLE 已确认")
+
+    def _on_angle_stop_rsp(self, frame: proto.Frame) -> None:
+        if frame is None:
+            self.log.emit("ANGLE_STOP 超时")
+            return
+        if frame.is_nak:
+            code = frame.err_code or 0
+            self.log.emit(f"ANGLE_STOP 失败: {proto.err_text(code)}")
+            return
+        self.log.emit("ANGLE_STOP 已确认")
 
     def _on_set_speed_rsp(self, frame: proto.Frame) -> None:
         if frame is None:

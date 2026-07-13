@@ -10,6 +10,7 @@
 #include "flash_layout.h"
 #include "board.h"
 #include "button.h"
+#include "chassis.h"
 #include "bsp_adc.h"
 #include "bsp_i2c.h"
 #include "bsp_sysctl.h"
@@ -387,6 +388,19 @@ static void cmd_param(int argc, const char *argv[])
         return;
     }
 
+    if ((argc == 5) && (strcmp(argv[1], "pid_yaw") == 0)) {
+        pid.kp = (f32_t)strtof(argv[2], NULL);
+        pid.ki = (f32_t)strtof(argv[3], NULL);
+        pid.kd = (f32_t)strtof(argv[4], NULL);
+        if (nvs_param_set_pid_yaw(&pid, NVS_WRITE_SRC_CMD) == STATUS_OK) {
+            chassis_reload_angle_pid_gains();
+            cmd_reply_ok("param", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
     cmd_reply_ng();
 }
 
@@ -572,7 +586,7 @@ void cmd_register_defaults(void)
 #if defined(NVS_CMD_RAW_KV)
     (void)cmd_register("nvs", cmd_nvs, "nvs get <ns> <key>");
 #endif
-    (void)cmd_register("param", cmd_param, "param mot_dir|max_rpm|pid_spd|pid_line ...");
+    (void)cmd_register("param", cmd_param, "param mot_dir|max_rpm|pid_spd|pid_line|pid_yaw ...");
     (void)cmd_register("cfg", cmd_cfg, "cfg show|reset");
 }
 

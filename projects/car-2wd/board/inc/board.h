@@ -112,7 +112,7 @@ extern const bsp_qei_config_t BOARD_QEI_CFG;
 extern const bsp_uart_config_t BOARD_UART_BT_CFG;
 extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;
 extern const bsp_i2c_config_t BOARD_I2C_CFG;
-extern const bsp_adc_config_t BOARD_ADC_CFG;
+extern const bsp_adc_config_t BOARD_LINE_ADC_CFG;
 extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;
 extern const bsp_spi_config_t BOARD_SPI_CFG;
 
@@ -120,18 +120,25 @@ extern const bsp_spi_config_t BOARD_SPI_CFG;
 #define SYSCLK_HZ    80000000
 #define PWM_FREQ_HZ  10000
 #define PWM_PERIOD   (SYSCLK_HZ / PWM_FREQ_HZ)
+#define MOTOR_RPM_FULL_SCALE 300
+#define MOTOR_MIN_DUTY 120U
 #define M1_TIMER  TIMER0_BASE
 #define M1_PWM_CH TIMER_A
 #define M2_TIMER  TIMER0_BASE
 #define M2_PWM_CH TIMER_B
 void Motor_Init(void);
+void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille);
 void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);
 
 /* --- Encoder --- */
 void Encoder_Init(void);
 int32_t Encoder_GetCount(uint8_t index);
+void Encoder_ResetCount(uint8_t index);
 
 /* --- Line --- */
+#define LINE_SENSOR_COUNT 3U
+bool Line_IsReady(void);
+bool Line_Sample(uint16_t *out, size_t count);
 void Line_Init(void);
 
 /* --- Board --- */

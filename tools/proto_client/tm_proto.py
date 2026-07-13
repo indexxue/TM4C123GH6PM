@@ -31,6 +31,7 @@ DEFAULT_SUB_ENC_HZ = 5
 DEFAULT_SUB_LINE_HZ = 5
 DEFAULT_SUB_ULTRA_HZ = 5
 DEFAULT_SUB_MOTOR_RPM_HZ = 10
+DEFAULT_SUB_ANGLE_LOOP_HZ = 10
 
 # 与固件 board.h LINE_SENSOR_COUNT 一致（car-4wd 为 5 路）
 LINE_SENSOR_COUNT = 5
@@ -59,6 +60,8 @@ class Cmd(IntEnum):
     DRIVE_STOP = 0x0031
     SET_SPEED = 0x0032
     SPEED_STOP = 0x0033
+    SET_ANGLE = 0x0034
+    ANGLE_STOP = 0x0035
 
 
 class Cap(IntFlag):
@@ -67,6 +70,7 @@ class Cap(IntFlag):
     SUBSCRIBE = 1 << 2
     DRIVE = 1 << 3
     SPEED_LOOP = 1 << 4
+    ANGLE_LOOP = 1 << 5
 
 
 class TelChannel(IntFlag):
@@ -76,11 +80,13 @@ class TelChannel(IntFlag):
     LINE_ADC = 1 << 3
     ULTRASONIC = 1 << 4
     MOTOR_RPM = 1 << 5
+    ANGLE_LOOP = 1 << 6
 
 
 BASE_CHANNEL_MASK = int(TelChannel.ATTITUDE | TelChannel.ENCODER)
 OPTIONAL_CHANNEL_MASK = int(
-    TelChannel.BATT | TelChannel.LINE_ADC | TelChannel.ULTRASONIC | TelChannel.MOTOR_RPM
+    TelChannel.BATT | TelChannel.LINE_ADC | TelChannel.ULTRASONIC | TelChannel.MOTOR_RPM |
+    TelChannel.ANGLE_LOOP
 )
 
 CHANNEL_ID_BATTERY = 0
@@ -89,6 +95,7 @@ CHANNEL_ID_ENCODER = 2
 CHANNEL_ID_LINE_ADC = 3
 CHANNEL_ID_ULTRASONIC = 4
 CHANNEL_ID_MOTOR_RPM = 5
+CHANNEL_ID_ANGLE_LOOP = 6
 
 HW_REV_CAR_4WD_V1 = 0
 HW_REV_CAR_2WD_V1 = 1
@@ -439,6 +446,26 @@ def parse_motor_rpm_push(payload: bytes) -> tuple[int, int, int, int]:
     return struct.unpack_from("<4i", payload, 0)
 
 
+@dataclass
+class AngleLoopPush:
+    target_yaw: int
+    current_yaw: int
+    turn_rpm: int
+    base_rpm: int
+
+
+def parse_angle_loop_push(payload: bytes) -> AngleLoopPush:
+    if len(payload) < 12:
+        raise ProtoError("角度环推送载荷过短")
+    target_yaw, current_yaw, turn_rpm, base_rpm = struct.unpack_from("<hhii", payload, 0)
+    return AngleLoopPush(
+        target_yaw=target_yaw,
+        current_yaw=current_yaw,
+        turn_rpm=turn_rpm,
+        base_rpm=base_rpm,
+    )
+
+
 def parse_param_list(payload: bytes) -> list[ParamListEntry]:
     entries: list[ParamListEntry] = []
     stride = 8
@@ -449,16 +476,18 @@ def parse_param_list(payload: bytes) -> list[ParamListEntry]:
 
 
 def build_subscribe(mask: int, hz_att: int = 0, hz_enc: int = 0, hz_line: int = 0,
-                    hz_ultra: int = 0, hz_motor_rpm: int = 0) -> bytes:
-    # mask u32 + 5×u8（与固件 proto_handle_subscribe 一致，第 9 字节为 motor_rpm Hz）
+                    hz_ultra: int = 0, hz_motor_rpm: int = 0,
+                    hz_angle_loop: int = 0) -> bytes:
+    # mask u32 + 6×u8（第 6 字节为 angle_loop Hz）
     return struct.pack(
-        "<IBBBBB",
+        "<IBBBBBB",
         mask,
         hz_att & 0xFF,
         hz_enc & 0xFF,
         hz_line & 0xFF,
         hz_ultra & 0xFF,
         hz_motor_rpm & 0xFF,
+        hz_angle_loop & 0xFF,
     )
 
 
@@ -497,6 +526,13 @@ def build_set_speed_four(m1: int, m2: int, m3: int, m4: int) -> bytes:
     return struct.pack("<Biiii", 2, m1, m2, m3, m4)
 
 
+def build_set_angle(delta_yaw: int, base_rpm: int, max_turn_rpm: int = 0) -> bytes:
+    """delta_yaw：相对当前航向的转角 Δθ（度），非绝对方位。"""
+    if max_turn_rpm != 0:
+        return struct.pack("<Bhii", 1, delta_yaw, base_rpm, max_turn_rpm)
+    return struct.pack("<Bhi", 0, delta_yaw, base_rpm)
+
+
 def caps_text(caps: int) -> str:
     names: list[str] = []
     if caps & Cap.TELEMETRY:
@@ -509,6 +545,8 @@ def caps_text(caps: int) -> str:
         names.append("DRIVE")
     if caps & Cap.SPEED_LOOP:
         names.append("SPEED_LOOP")
+    if caps & Cap.ANGLE_LOOP:
+        names.append("ANGLE_LOOP")
     return ", ".join(names) if names else "none"
 
 

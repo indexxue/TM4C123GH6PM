@@ -55,19 +55,16 @@ const bsp_uart_config_t BOARD_UART_DEBUG_CFG = { UART7_BASE, 115200 };
 
 const bsp_i2c_config_t BOARD_I2C_CFG = { I2C0_BASE, 400000 };
 
-static const bsp_adc_channel_t board_adc_channels[] = {
-    { 0, 0 },
-    { 1, 1 },
-    { 5, 2 },
-    { 4, 3 },
-    { 7, 4 },
-    { 6, 5 },
+static const bsp_adc_channel_t board_line_adc_channels[] = {
+    { 5, 0 },
+    { 4, 1 },
+    { 7, 2 },
 };
-const bsp_adc_config_t BOARD_ADC_CFG = {
+const bsp_adc_config_t BOARD_LINE_ADC_CFG = {
     .base = ADC1_BASE,
-    .sequence = 3,
-    .channels = board_adc_channels,
-    .channel_count = 6,
+    .sequence = 0,
+    .channels = board_line_adc_channels,
+    .channel_count = 3,
 };
 
 static const bsp_adc_channel_t board_battery_channel = { 0, 0 };
@@ -136,7 +133,7 @@ bool Board_Periph_Init(void) {
     if (!bsp_i2c_init(&BOARD_I2C_CFG)) {
         return false;
     }
-    if (!bsp_adc_init(&BOARD_ADC_CFG)) {
+    if (!bsp_adc_init(&BOARD_LINE_ADC_CFG)) {
         return false;
     }
     if (!bsp_adc_init(&BOARD_BATTERY_ADC_CFG)) {
