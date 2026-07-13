@@ -96,6 +96,11 @@ class MapOdometry:
     def update_yaw(self, yaw_deg: float) -> None:
         self._pose.yaw_deg = normalize_yaw_deg(yaw_deg)
 
+    def sync_encoders(self, counts: tuple[int, int, int, int]) -> None:
+        """仅更新编码器基准，不积分位移（导航冻结期间使用）。"""
+        self._enc_prev = counts
+        self._origin_valid = True
+
     def integrate_encoders(self, counts: tuple[int, int, int, int]) -> None:
         if self._enc_prev is None:
             self._enc_prev = counts

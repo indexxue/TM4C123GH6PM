@@ -1,0 +1,10 @@
+si SWD
+speed 400
+device TM4C123GH6PM
+connect
+halt
+loadfile "D:\Ti\tm4c123-project\projects\car-4wd\build\car-4wd.elf"
+r
+g
+exit
+

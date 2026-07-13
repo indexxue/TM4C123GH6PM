@@ -26,9 +26,35 @@ SET_SPEED_QUIET_S_FMT0 = 0.04
 SET_SPEED_QUIET_S_FMT_LR = 0.06
 SET_SPEED_DUP_TX_INTERVAL_S = 0.04
 DRIVE_STREAM_INTERVAL_S = 0.08
-DRIVE_MAGNITUDE_DEFAULT = 700
+DRIVE_MAGNITUDE_DEFAULT = 300
 DRIVE_MAGNITUDE_MAX = 1000
-NAV_STEP_TIMEOUT_S = 2.0
+NAV_MANEUVER_MAX_S = 90.0
+
+
+def maneuver_angle_done_tol_deg(target_deg: int) -> int:
+    """与固件 chassis_angle_done_tol_deg 一致。"""
+    a = abs(int(target_deg))
+    if a < 1:
+        return 3
+    tol = max(8, a // 4)
+    cap = int(a * 0.75)
+    if tol > cap:
+        tol = max(3, cap)
+    return max(3, tol)
+
+
+def maneuver_distance_done_tol_mm(target_mm: int) -> int:
+    """与固件 chassis_distance_done_tol_mm 一致。"""
+    a = abs(int(target_mm))
+    if a < 1:
+        return 8
+    tol = max(40, a // 10)
+    cap = int(a * 0.75)
+    if tol > cap:
+        tol = max(8, cap)
+    return max(8, tol)
+
+
 TELEMETRY_POLL_HZ = 0.0  # 不再周期轮询；姿态/编码器走常驻推送
 DEFAULT_SUB_ATT_HZ = 10
 DEFAULT_SUB_ENC_HZ = 5

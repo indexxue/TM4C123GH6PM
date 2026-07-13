@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from typing import Optional
 
 import tm_proto as proto
-from map_odometry import MapOdometry, MapPose
+# removed MapOdometry,MapPose
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWidgets import (
@@ -26,8 +26,13 @@ from PySide6.QtWidgets import (
 )
 
 from serial_worker import NavResult, SerialWorker
-from ui.angle_panel import normalize_yaw
-from ui.drive_map_widget import DriveMapWidget
+# local normalize_yaw function
+def _normalize_yaw_local(d):
+    d=int(d)%360
+    if d>180: d-=360
+    if d<=-180: d+=360
+    return d
+from ui.drive_map_widget import DriveJoystick
 
 
 @dataclass(frozen=True)
@@ -63,36 +68,29 @@ class DriveTab(QWidget):
         self._active_key: Optional[str] = None
         self._direction_buttons: dict[str, QPushButton] = {}
         self._navigating = False
-        self._nav_freeze_odom = False
-        self._last_enc: Optional[tuple[int, int, int, int]] = None
-        self._odom = MapOdometry(self._motor_count)
+        # self._nav_id removed
+        # self._nav_freeze_odom removed
+        # self._last_enc removed
+        # odom removed
 
         root = QHBoxLayout(self)
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         map_page = QWidget()
         map_layout = QVBoxLayout(map_page)
-        map_toolbar = QHBoxLayout()
-        map_toolbar.addWidget(QLabel("比例"))
-        self._map_scale = QSpinBox()
-        self._map_scale.setRange(1, 20)
-        self._map_scale.setValue(4)
-        self._map_scale.setSuffix(" mm/px")
-        self._map_scale.valueChanged.connect(self._on_map_scale)
-        map_toolbar.addWidget(self._map_scale)
-        map_toolbar.addStretch()
-        map_layout.addLayout(map_toolbar)
+        # joystick mode - no toolbar
+        
 
-        self._map = DriveMapWidget()
-        self._map.target_clicked.connect(self._on_map_target)
-        map_layout.addWidget(self._map, stretch=1)
+        self._joystick = DriveJoystick()
+        self._joystick.direction_activated.connect(self._on_joystick_direction)
+        self._joystick.direction_released.connect(self._on_joystick_released)
+        map_layout.addWidget(self._joystick, stretch=1)
         splitter.addWidget(map_page)
 
         ctrl_page = QWidget()
         ctrl_layout = QVBoxLayout(ctrl_page)
         ctrl_layout.addLayout(self._build_toolbar())
         ctrl_layout.addWidget(self._build_pad_group())
-        ctrl_layout.addWidget(self._build_nav_group())
         ctrl_layout.addWidget(self._build_calib_group())
         ctrl_layout.addWidget(self._build_hint_group())
         self._status = QLabel("未连接")
@@ -173,8 +171,8 @@ class DriveTab(QWidget):
         form.addRow("转向 RPM 上限", self._nav_turn_rpm)
         form.addRow("行驶 RPM 上限", self._nav_drive_rpm)
         hint = QLabel(
-            f"左键点击地图设目标；每步最多等待 {proto.NAV_STEP_TIMEOUT_S:.0f}s，"
-            "超时也会进入下一步并停车。"
+            "左键点击地图设目标；导航中再次点击会覆盖上一目标并立即重规划。"
+            "固件按目标幅度计算到位容差并提前停车。"
         )
         hint.setWordWrap(True)
         hint.setStyleSheet("color: palette(mid);")
@@ -214,12 +212,11 @@ class DriveTab(QWidget):
         layout.addWidget(self._hint)
         return box
 
-    def _on_map_scale(self) -> None:
-        self._map.set_scale_mm_per_px(float(self._map_scale.value()))
+    # def _on_map_scale removed for joystick
 
     def _on_motor_combo(self) -> None:
         self._motor_count = int(self._motor_combo.currentData())
-        self._odom.set_motor_count(self._motor_count)
+        # odom removed
         self._refresh_status()
 
     def _vector_for_key(self, key: str) -> DriveVector:
@@ -233,7 +230,7 @@ class DriveTab(QWidget):
         return DriveVector(0, base.steer * mag)
 
     def _on_direction_pressed(self, key: str) -> None:
-        if not self._drive_enabled() or self._navigating:
+        if not self._drive_enabled():
             return
         self._active_key = key
         vec = self._vector_for_key(key)
@@ -252,34 +249,47 @@ class DriveTab(QWidget):
         self._worker.request_drive_stream(0, 0)
         self._refresh_status()
 
-    def _nav_enabled(self) -> bool:
+    def _nav_caps_ok(self) -> bool:
         return (
             self._worker.is_connected()
             and bool(self._caps & int(proto.Cap.ANGLE_LOOP))
             and bool(self._caps & int(proto.Cap.DISTANCE_LOOP))
-            and not self._navigating
         )
 
-    def _on_map_target(self, x_mm: float, y_mm: float) -> None:
-        if not self._nav_enabled():
-            if self._navigating:
-                self._set_status("导航进行中，请稍候")
+    def _sync_pose_live(self) -> None:
+        """用当前编码器/姿态刷新地图位姿（覆盖导航或重规划前调用）。"""
+        # self._nav_freeze_odom removed
+        if self._last_enc is not None:
+            if self._odom.origin_valid:
+                self._odom.integrate_encoders(self._last_enc)
             else:
-                self._set_status("需要 ANGLE_LOOP + DISTANCE_LOOP 才能点击导航")
+                self._odom.reset_origin(self._last_enc, self._odom.pose.yaw_deg)
+        # self._map.set_pose(self._odom.pose)
+
+    def _on_map_target(self, x_mm: float, y_mm: float) -> None:
+        if not self._nav_caps_ok():
+            self._set_status("需要 ANGLE_LOOP + DISTANCE_LOOP 才能点击导航")
             return
         self._stop_drive()
+        if self._navigating:
+            self._sync_pose_live()
         plan = self._odom.plan_to_point(x_mm, y_mm)
         if plan is None:
             self._set_status("目标过近，无需移动")
             return
         delta_yaw, dist_mm = plan
-        self._map.set_target(x_mm, y_mm)
+        # self._map.set_target(x_mm, y_mm)
         self._navigating = True
+        self._nav_id += 1
+        if self._last_enc is not None:
+            self._odom.sync_encoders(self._last_enc)
         self._nav_freeze_odom = True
-        self._map.set_navigating(True)
+        # self._map.set_navigating(True)
         self._update_controls()
+        replan = "（覆盖上一目标）" if self._nav_id > 1 else ""
         self._set_status(
-            f"导航 → ({x_mm:.0f}, {y_mm:.0f}) mm：先转 {delta_yaw:+d}° 再走 {dist_mm} mm"
+            f"导航{replan} → ({x_mm:.0f}, {y_mm:.0f}) mm："
+            f"先转 {delta_yaw:+d}° 再走 {dist_mm} mm"
         )
         self._worker.request_navigate(
             delta_yaw,
@@ -289,21 +299,19 @@ class DriveTab(QWidget):
         )
 
     def _on_navigation_finished(self, result: NavResult) -> None:
+        if result.superseded or result.nav_id != self._nav_id:
+            return
         self._navigating = False
-        self._nav_freeze_odom = False
-        self._map.set_navigating(False)
+        # # self._map.set_navigating(False)
         self._update_controls()
         if not result.command_failed:
-            applied_yaw = result.actual_delta_yaw if result.turned else 0
-            self._odom.apply_navigation_leg(
-                applied_yaw,
-                result.dist_mm if result.drove else 0,
-                final_dist_mm=result.final_dist_mm,
-            )
+            if self._last_enc is not None:
+                self._odom.sync_encoders(self._last_enc)
             pose = self._odom.pose
-            self._map.set_pose(pose)
+            # self._map.set_pose(pose)
             parts: list[str] = []
             if result.turned and not result.angle_done:
+                applied_yaw = result.actual_delta_yaw
                 parts.append(f"转约{applied_yaw:+d}°/{result.delta_yaw:+d}°")
             if result.drove and not result.distance_done:
                 got = result.final_dist_mm if result.final_dist_mm is not None else 0
@@ -315,13 +323,14 @@ class DriveTab(QWidget):
             )
         else:
             self._set_status("导航指令失败，已停车 — 可重新点击目标")
+        # self._nav_freeze_odom removed
 
     def _calib_yaw(self) -> None:
         if not self._btn_calib_yaw.isEnabled():
             self._set_status("固件不支持 YAW_CALIB")
             return
         self._stop_drive()
-        ref_yaw = normalize_yaw(self._calib_yaw_spin.value())
+        ref_yaw = _normalize_yaw_local(self._calib_yaw_spin.value())
         reply = QMessageBox.question(
             self,
             "校准并重置地图",
@@ -338,31 +347,25 @@ class DriveTab(QWidget):
 
     def _reset_map_origin(self, yaw_deg: float = 0.0) -> None:
         self._odom.reset_origin(self._last_enc, yaw_deg)
-        self._map.set_pose(self._odom.pose)
-        self._map.set_target(None, None)
+        # self._map.set_pose(self._odom.pose)
+        # self._map.set_target(None, None)
 
     def _drive_enabled(self) -> bool:
         return (
             self._worker.is_connected()
             and bool(self._caps & int(proto.Cap.DRIVE))
-            and not self._navigating
+           
         )
 
     def _update_controls(self) -> None:
         drive_on = self._drive_enabled()
-        nav_caps = bool(
-            self._caps & int(proto.Cap.ANGLE_LOOP)
-            and self._caps & int(proto.Cap.DISTANCE_LOOP)
-        )
-        calib_on = self._worker.is_connected() and bool(self._caps & int(proto.Cap.YAW_CALIB))
+
         for btn in self._direction_buttons.values():
             btn.setEnabled(drive_on)
         self._magnitude.setEnabled(drive_on)
-        self._map.setEnabled(self._worker.is_connected() and nav_caps and not self._navigating)
-        self._nav_turn_rpm.setEnabled(nav_caps and not self._navigating)
-        self._nav_drive_rpm.setEnabled(nav_caps and not self._navigating)
-        self._btn_calib_yaw.setEnabled(calib_on and not self._navigating)
-        self._calib_yaw_spin.setEnabled(calib_on and not self._navigating)
+        
+        self._btn_calib_yaw.setEnabled(self._worker.is_connected() and bool(self._caps & int(proto.Cap.YAW_CALIB)))
+        self._calib_yaw_spin.setEnabled(self._worker.is_connected() and bool(self._caps & int(proto.Cap.YAW_CALIB)))
         if not drive_on and self._active_key is not None:
             self._active_key = None
 
@@ -373,7 +376,7 @@ class DriveTab(QWidget):
                 f"遥控中 [{motor_text}] throttle={vec.throttle:+d} steer={vec.steer:+d}"
             )
             return
-        if self._active_key or self._navigating:
+        if self._active_key:
             return
         if not self._worker.is_connected():
             self._set_status("未连接")
@@ -398,35 +401,25 @@ class DriveTab(QWidget):
         if hw_rev == proto.HW_REV_CAR_2WD_V1:
             self._motor_combo.setCurrentIndex(0)
         self._motor_count = int(self._motor_combo.currentData())
-        self._odom.set_motor_count(self._motor_count)
+        # odom removed
         self._update_controls()
         self._refresh_status()
 
-    def on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
-        self._last_enc = counts
-        if self._nav_freeze_odom:
-            return
-        if not self._odom.origin_valid:
-            self._odom.reset_origin(counts, self._odom.pose.yaw_deg)
-        else:
-            self._odom.integrate_encoders(counts)
-        self._map.set_pose(self._odom.pose)
+    def on_encoder_counts(self, counts): pass
 
-    def on_attitude_yaw(self, yaw_deg: float) -> None:
-        if not self._nav_freeze_odom:
-            self._odom.update_yaw(yaw_deg)
-            self._map.set_pose(self._odom.pose)
+    def on_attitude_yaw(self, yaw_deg): pass
 
     def reset(self) -> None:
         self._active_key = None
         self._navigating = False
-        self._nav_freeze_odom = False
+        # self._nav_id removed
+        # self._nav_freeze_odom removed
         self._caps = 0
         self._last_enc = None
         self._odom.reset_origin()
-        self._map.set_pose(MapPose())
-        self._map.set_target(None, None)
-        self._map.set_navigating(False)
+        # self._map.set_pose(MapPose())
+        # self._map.set_target(None, None)
+        # # self._map.set_navigating(False)
         if self._worker.is_connected():
             self._worker.request_drive_stream(0, 0)
         self._update_controls()
@@ -439,3 +432,13 @@ class DriveTab(QWidget):
             return
         self._stop_drive()
         super().focusOutEvent(event)
+
+    def _on_joystick_direction(self, throttle, steer):
+        if not self._drive_enabled():
+            return
+        self._worker.request_drive_stream(throttle, steer)
+        self._set_status(chr(74)+chr(111)+chr(121)+chr(115)+chr(116)+chr(105)+chr(99)+chr(107)+chr(58)+chr(32)+chr(116)+chr(104)+chr(114)+chr(111)+chr(116)+chr(116)+chr(108)+chr(101)+chr(61)+chr(123)+chr(58)+chr(43)+chr(100)+chr(125)+chr(32)+chr(115)+chr(116)+chr(101)+chr(101)+chr(114)+chr(61)+chr(123)+chr(58)+chr(43)+chr(100)+chr(125)).format(throttle, steer)
+
+    def _on_joystick_released(self):
+        self._worker.request_drive_stream(0, 0)
+        self._refresh_status()

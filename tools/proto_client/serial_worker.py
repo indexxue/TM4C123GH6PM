@@ -53,6 +53,8 @@ class NavResult:
     """导航序列结束（含超时截断）；ok 表示流程已走完可接受下一次点击。"""
     ok: bool = True
     command_failed: bool = False
+    superseded: bool = False
+    nav_id: int = 0
     delta_yaw: int = 0
     dist_mm: int = 0
     turned: bool = False
@@ -117,6 +119,8 @@ class SerialWorker(QThread):
         self._drive_next_send = 0.0
         self._last_angle_loop: Optional[proto.AngleLoopPush] = None
         self._last_distance_loop: Optional[proto.DistanceLoopPush] = None
+        self._nav_latest_id = 0
+        self._nav_latest_payload: Optional[bytes] = None
 
     @property
     def hello_info(self) -> Optional[proto.HelloInfo]:
@@ -196,9 +200,15 @@ class SerialWorker(QThread):
     @Slot(int, int, int, int)
     def request_navigate(self, delta_yaw_deg: int, dist_mm: int,
                          max_turn_rpm: int = 80, max_drive_rpm: int = 60) -> None:
-        payload = struct.pack("<hiii", int(delta_yaw_deg), int(dist_mm),
-                              int(max_turn_rpm), int(max_drive_rpm))
-        self._cmd_queue.put(("navigate", payload, None))
+        self._nav_latest_id += 1
+        self._nav_latest_payload = struct.pack(
+            "<hiii",
+            int(delta_yaw_deg),
+            int(dist_mm),
+            int(max_turn_rpm),
+            int(max_drive_rpm),
+        )
+        self._cmd_queue.put(("navigate", b"", None))
 
     @Slot(int)
     def request_apply_subscription(self, optional_mask: int = 0) -> None:
@@ -489,7 +499,7 @@ class SerialWorker(QThread):
                     self._on_drive_stop_rsp(frame)
             elif kind == "navigate":
                 if self.is_connected():
-                    self._run_navigate(payload)
+                    self._process_navigate_chain()
 
     def _flush_serial_input(self) -> None:
         if self._ser is None:
@@ -641,6 +651,8 @@ class SerialWorker(QThread):
         self._subscribed = False
         self._optional_mask = 0
         self._critical_depth = 0
+        self._nav_latest_id = 0
+        self._nav_latest_payload = None
         self.log.emit(f"已连接 {port} @ {baudrate}")
         self.connected_changed.emit(True)
 
@@ -918,6 +930,7 @@ class SerialWorker(QThread):
                 # 双发命令时固件可能回两条相同 seq 的空 ACK，第二条忽略
                 if len(frame.payload) == 0 and frame.cmd in (
                     int(proto.Cmd.TELEMETRY_PUSH),
+                    int(proto.Cmd.DRIVE_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_SPEED) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SPEED_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_ANGLE) | proto.RESPONSE_BIT,
@@ -1115,60 +1128,200 @@ class SerialWorker(QThread):
         frame_bytes = proto.encode_frame(int(proto.Cmd.DRIVE), seq, payload)
         self._write_frame(frame_bytes)
 
+    def _nav_is_superseded(self, nav_id: int) -> bool:
+        return self._nav_latest_id > nav_id
+
+    def _coalesce_navigate_requests(self) -> None:
+        """合并队列中积压的 navigate，只保留最新目标。"""
+        deferred: list[tuple[str, bytes, Optional[Callable]]] = []
+        while True:
+            try:
+                item = self._cmd_queue.get_nowait()
+            except queue.Empty:
+                break
+            kind, payload, cb = item
+            if kind == "navigate":
+                continue
+            deferred.append(item)
+        for item in deferred:
+            self._cmd_queue.put(item)
+
+    def _process_navigate_chain(self) -> None:
+        while self._nav_latest_payload is not None:
+            nav_id = self._nav_latest_id
+            payload = self._nav_latest_payload
+            superseded, result = self._run_navigate_once(payload, nav_id)
+            if superseded:
+                self.navigation_finished.emit(result)
+                self._coalesce_navigate_requests()
+                continue
+            self.navigation_finished.emit(result)
+            break
+
+    def _make_nav_result(
+        self,
+        *,
+        nav_id: int,
+        superseded: bool = False,
+        command_failed: bool = False,
+        delta_yaw: int = 0,
+        dist_mm: int = 0,
+        turned: bool = False,
+        drove: bool = False,
+        angle_done: bool = False,
+        distance_done: bool = False,
+        actual_delta_yaw: int = 0,
+        final_dist_mm: Optional[int] = None,
+    ) -> NavResult:
+        return NavResult(
+            ok=not superseded and not command_failed,
+            command_failed=command_failed,
+            superseded=superseded,
+            nav_id=nav_id,
+            delta_yaw=delta_yaw,
+            dist_mm=dist_mm,
+            turned=turned,
+            drove=drove,
+            angle_done=angle_done,
+            distance_done=distance_done,
+            actual_delta_yaw=actual_delta_yaw,
+            final_dist_mm=final_dist_mm,
+        )
+
+    def _nav_abort_result(self, nav_id: int) -> NavResult:
+        self.log.emit("地图导航: 目标已更新，停止当前趟")
+        return self._make_nav_result(nav_id=nav_id, superseded=True)
+
+    def _send_nav_request(
+        self,
+        cmd: int,
+        payload: bytes = b"",
+        *,
+        timeout: float = 4.0,
+        retries: int = 2,
+    ) -> Optional[proto.Frame]:
+        """导航专用：订阅推送繁忙时不等待线路空闲，直接发并延长超时。"""
+        for attempt in range(retries):
+            if attempt > 0:
+                time.sleep(0.08)
+                self._pump_serial()
+            frame = self._send_request(
+                cmd,
+                payload,
+                timeout=timeout,
+                duplicate_tx=self._critical_cmd(cmd),
+            )
+            if frame is not None:
+                return frame
+        return None
+
+    def _absorb_orphan_acks(self, duration_s: float = 0.35) -> None:
+        deadline = time.monotonic() + duration_s
+        while time.monotonic() < deadline:
+            self._pump_serial()
+            time.sleep(0.01)
+
+    def _nav_send_maneuver(
+        self,
+        cmd: int,
+        payload: bytes,
+        *,
+        wait_ack: bool = True,
+    ) -> Optional[proto.Frame]:
+        if wait_ack:
+            return self._send_nav_request(cmd, payload)
+        seq = self._next_seq()
+        frame_bytes = proto.encode_frame(cmd, seq, payload)
+        if not self._write_frame(frame_bytes):
+            return None
+        if self._critical_cmd(cmd) and proto.HC05_SAFE_TX:
+            time.sleep(proto.SET_SPEED_DUP_TX_INTERVAL_S)
+            self._write_frame(frame_bytes)
+        return proto.Frame(cmd=cmd, seq=seq, flags=0, payload=b"")
+
     def _wait_angle_maneuver(
         self,
         expected_delta_yaw: int,
-        timeout_s: float = proto.NAV_STEP_TIMEOUT_S,
+        nav_id: int,
+        max_s: float = proto.NAV_MANEUVER_MAX_S,
     ) -> ManeuverWait:
-        deadline = time.monotonic() + timeout_s
+        overall_deadline = time.monotonic() + max_s
         last_current: Optional[int] = None
-        while time.monotonic() < deadline:
+        near_tol = proto.maneuver_angle_done_tol_deg(expected_delta_yaw)
+
+        while time.monotonic() < overall_deadline:
+            if self._nav_is_superseded(nav_id):
+                return ManeuverWait(False, timed_out=True, value=last_current)
+
             sample = self._last_angle_loop
             if sample is not None and sample.target_yaw == expected_delta_yaw:
                 last_current = sample.current_yaw
                 err = abs(sample.target_yaw - sample.current_yaw)
-                if err <= 8 and abs(sample.turn_rpm) <= 3:
+                if err <= near_tol:
                     return ManeuverWait(True, value=last_current)
+
             self._pump_serial()
+            self._coalesce_navigate_requests()
             time.sleep(0.05)
+
         return ManeuverWait(False, timed_out=True, value=last_current)
 
     def _wait_distance_maneuver(
         self,
         expected_dist_mm: int,
-        timeout_s: float = proto.NAV_STEP_TIMEOUT_S,
+        nav_id: int,
+        max_s: float = proto.NAV_MANEUVER_MAX_S,
     ) -> ManeuverWait:
-        deadline = time.monotonic() + timeout_s
+        overall_deadline = time.monotonic() + max_s
         last_current: Optional[int] = None
-        while time.monotonic() < deadline:
+        near_tol = proto.maneuver_distance_done_tol_mm(expected_dist_mm)
+
+        while time.monotonic() < overall_deadline:
+            if self._nav_is_superseded(nav_id):
+                return ManeuverWait(False, timed_out=True, value=last_current)
+
             sample = self._last_distance_loop
             if sample is not None and sample.target_mm == expected_dist_mm:
                 last_current = sample.current_mm
                 err = abs(sample.target_mm - sample.current_mm)
-                if err <= 30 and abs(sample.cmd_rpm) <= 3:
+                if err <= near_tol:
                     return ManeuverWait(True, value=last_current)
+
             self._pump_serial()
+            self._coalesce_navigate_requests()
             time.sleep(0.05)
+
         return ManeuverWait(False, timed_out=True, value=last_current)
 
-    def _stop_nav_legs(self) -> None:
-        self._send_request_retry(int(proto.Cmd.DISTANCE_STOP), b"", timeout=1.5, retries=1)
-        self._send_request_retry(int(proto.Cmd.ANGLE_STOP), b"", timeout=1.5, retries=1)
+    def _stop_nav_legs(self, *, wait_ack: bool = True) -> None:
+        if wait_ack:
+            self._send_nav_request(
+                int(proto.Cmd.DISTANCE_STOP), b"", timeout=2.0, retries=1
+            )
+            self._send_nav_request(
+                int(proto.Cmd.ANGLE_STOP), b"", timeout=2.0, retries=1
+            )
+            return
+        self._nav_send_maneuver(int(proto.Cmd.DISTANCE_STOP), b"", wait_ack=False)
+        self._nav_send_maneuver(int(proto.Cmd.ANGLE_STOP), b"", wait_ack=False)
+        self._absorb_orphan_acks()
 
-    def _run_navigate(self, payload: bytes) -> None:
+    def _run_navigate_once(self, payload: bytes, nav_id: int) -> tuple[bool, NavResult]:
         delta_yaw, dist_mm, max_turn, max_drive = struct.unpack_from("<hiii", payload, 0)
         self._drive_stream_active = False
         self._begin_critical()
-        self._wait_rx_quiet(quiet_s=0.06, timeout_s=0.5)
-        self._send_request_retry(int(proto.Cmd.DRIVE_STOP), b"", timeout=1.5, retries=1)
-        self._send_request_retry(int(proto.Cmd.ANGLE_STOP), b"", timeout=1.5, retries=1)
-        self._send_request_retry(int(proto.Cmd.DISTANCE_STOP), b"", timeout=1.5, retries=1)
-        self._wait_rx_quiet(quiet_s=0.12, timeout_s=0.8)
+        self._pump_serial()
+        self._send_nav_request(int(proto.Cmd.DRIVE_STOP), b"", timeout=2.0, retries=1)
+        self._stop_nav_legs(wait_ack=True)
+        self._pump_serial()
+
+        if self._nav_is_superseded(nav_id):
+            self._end_critical()
+            return True, self._nav_abort_result(nav_id)
 
         self._last_angle_loop = None
         self._last_distance_loop = None
 
-        ok = True
         command_failed = False
         turned = False
         drove = False
@@ -1180,70 +1333,89 @@ class SerialWorker(QThread):
         if abs(delta_yaw) >= 4:
             turned = True
             self._last_angle_loop = None
-            frame = self._send_request_retry(
+            frame = self._nav_send_maneuver(
                 int(proto.Cmd.SET_ANGLE),
                 proto.build_set_angle(delta_yaw, 0, max_turn),
-                timeout=3.0,
-                retries=1,
+                wait_ack=True,
             )
+            if self._nav_is_superseded(nav_id):
+                self._stop_nav_legs(wait_ack=False)
+                self._end_critical()
+                return True, self._nav_abort_result(nav_id)
             if frame is None or frame.is_nak:
                 self.log.emit("地图导航: 转角指令失败，跳过本步")
                 command_failed = True
             else:
-                wait = self._wait_angle_maneuver(delta_yaw)
+                wait = self._wait_angle_maneuver(delta_yaw, nav_id)
+                if self._nav_is_superseded(nav_id):
+                    self._stop_nav_legs(wait_ack=False)
+                    self._end_critical()
+                    return True, self._nav_abort_result(nav_id)
                 if wait.value is not None:
                     actual_delta_yaw = wait.value
-                elif wait.timed_out:
+                elif not wait.done:
                     actual_delta_yaw = delta_yaw
                 if wait.done:
                     angle_done = True
                     self.log.emit(
-                        f"地图导航: 转角完成 Δθ={actual_delta_yaw:+d}° / 目标 {delta_yaw:+d}°"
+                        f"地图导航: 转角到位 Δθ={actual_delta_yaw:+d}° / 目标 {delta_yaw:+d}°"
                     )
                 else:
                     self.log.emit(
-                        f"地图导航: 转角 {proto.NAV_STEP_TIMEOUT_S:.0f}s 未完全到位"
-                        f"（约 {actual_delta_yaw:+d}°），继续下一步"
+                        f"地图导航: 转角超时（{proto.NAV_MANEUVER_MAX_S:.0f}s 内未接近目标"
+                        f"，约 {actual_delta_yaw:+d}°），继续下一步"
                     )
-            self._stop_nav_legs()
-            self._wait_rx_quiet(quiet_s=0.10, timeout_s=0.6)
+            self._stop_nav_legs(wait_ack=True)
+            self._pump_serial()
+
+        if self._nav_is_superseded(nav_id):
+            self._end_critical()
+            return True, self._nav_abort_result(nav_id)
 
         if abs(dist_mm) >= 20:
             drove = True
             self._last_distance_loop = None
-            self._wait_rx_quiet(quiet_s=0.06, timeout_s=0.5)
-            frame = self._send_request_retry(
+            self._pump_serial()
+            frame = self._nav_send_maneuver(
                 int(proto.Cmd.SET_DISTANCE),
                 proto.build_set_distance(dist_mm, max_drive),
-                timeout=3.0,
-                retries=1,
+                wait_ack=True,
             )
+            if self._nav_is_superseded(nav_id):
+                self._stop_nav_legs(wait_ack=False)
+                self._end_critical()
+                return True, self._nav_abort_result(nav_id)
             if frame is None or frame.is_nak:
                 self.log.emit("地图导航: 距离指令失败")
                 command_failed = True
             else:
-                wait = self._wait_distance_maneuver(dist_mm)
+                wait = self._wait_distance_maneuver(dist_mm, nav_id)
+                if self._nav_is_superseded(nav_id):
+                    self._stop_nav_legs(wait_ack=False)
+                    self._end_critical()
+                    return True, self._nav_abort_result(nav_id)
                 if wait.value is not None:
                     final_dist_mm = wait.value
                 if wait.done:
                     distance_done = True
                     self.log.emit(
-                        f"地图导航: 行驶完成 目标={dist_mm:+d} mm 实际≈{final_dist_mm:+d} mm"
+                        f"地图导航: 行驶到位 目标={dist_mm:+d} mm 实际≈"
+                        f"{final_dist_mm if final_dist_mm is not None else 0:+d} mm"
                     )
                 else:
                     self.log.emit(
-                        f"地图导航: 行驶 {proto.NAV_STEP_TIMEOUT_S:.0f}s 未完全到位"
-                        f"（约 {final_dist_mm if final_dist_mm is not None else 0:+d} mm），结束本趟"
+                        f"地图导航: 行驶超时（{proto.NAV_MANEUVER_MAX_S:.0f}s 内未接近目标"
+                        f"，约 {final_dist_mm if final_dist_mm is not None else 0:+d} mm），结束本趟"
                     )
 
-        self._stop_nav_legs()
+        self._stop_nav_legs(wait_ack=True)
         self._last_angle_loop = None
         self._last_distance_loop = None
-        self._wait_rx_quiet(quiet_s=0.12, timeout_s=0.8)
+        self._pump_serial()
         self._end_critical()
         self.log.emit("地图导航: 本趟结束，可进行下一步")
-        result = NavResult(
-            ok=True,
+        return False, self._make_nav_result(
+            nav_id=nav_id,
             command_failed=command_failed,
             delta_yaw=delta_yaw,
             dist_mm=dist_mm,
@@ -1254,7 +1426,6 @@ class SerialWorker(QThread):
             actual_delta_yaw=actual_delta_yaw,
             final_dist_mm=final_dist_mm,
         )
-        self.navigation_finished.emit(result)
 
     def _run_calib_yaw(self, payload: bytes) -> None:
         """先停角度环/遥控，静止后再发 CALIB_YAW。"""

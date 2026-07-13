@@ -1,0 +1,87 @@
+SEGGER J-Link Commander V8.18 (Compiled Mar  5 2025 14:43:35)
+DLL version V8.18, compiled Mar  5 2025 14:42:43
+
+
+J-Link Command File read successfully.
+Processing script file...
+J-Link>si SWD
+J-Link connection not established yet but required for command.
+Connecting to J-Link via USB...O.K.
+Firmware: J-Link V9 compiled Dec 13 2022 11:14:50
+Hardware version: V9.70
+J-Link uptime (since boot): N/A (Not supported by this model)
+S/N: 69730338
+License(s): RDI, GDB, FlashDL, FlashBP, JFlash
+VTref=3.258V
+Selecting SWD as current target interface.
+J-Link>speed 400
+Selecting 400 kHz as target interface speed
+J-Link>device TM4C123GH6PM
+J-Link>connect
+Device "TM4C123GH6PM" selected.
+
+
+Connecting to target via SWD
+Found SW-DP with ID 0x2BA01477
+DPv0 detected
+CoreSight SoC-400 or earlier
+Scanning AP map to find all available APs
+AP[1]: Stopped AP scan as end of AP map has been reached
+AP[0]: AHB-AP (IDR: 0x24770011, ADDR: 0x00000000)
+Iterating through AP map to find AHB-AP to use
+AP[0]: Core found
+AP[0]: AHB-AP ROM base: 0xE00FF000
+CPUID register: 0x410FC241. Implementer code: 0x41 (ARM)
+Found Cortex-M4 r0p1, Little endian.
+FPUnit: 6 code (BP) slots and 2 literal slots
+CoreSight components:
+ROMTbl[0] @ E00FF000
+[0][0]: E000E000 CID B105E00D PID 000BB00C SCS-M7
+[0][1]: E0001000 CID B105E00D PID 003BB002 DWT
+[0][2]: E0002000 CID B105E00D PID 002BB003 FPB
+[0][3]: E0000000 CID B105E00D PID 003BB001 ITM
+[0][4]: E0040000 CID B105900D PID 000BB9A1 TPIU
+[0][5]: E0041000 CID B105900D PID 000BB925 ETM
+Memory zones:
+  Zone: "Default" Description: Default access mode
+Cortex-M4 identified.
+J-Link>halt
+PC = 00009BBA, CycleCnt = 83E05AA3
+R0 = 00000000, R1 = A5A5A5A5, R2 = A5A5A5A5, R3 = 00000001
+R4 = 20002440, R5 = A5A5A5A5, R6 = 20002444, R7 = A5A5A5A5
+R8 = A5A5A5A5, R9 = A5A5A5A5, R10= A5A5A5A5, R11= A5A5A5A5
+R12= A5A5A5A5
+SP(R13)= 20003930, MSP= 20007FE0, PSP= 20003930, R14(LR) = 0000AAC1
+XPSR = 61000000: APSR = nZCvq, EPSR = 01000000, IPSR = 000 (NoException)
+CFBP = 02000000, CONTROL = 02, FAULTMASK = 00, BASEPRI = 00, PRIMASK = 00
+
+FPS0 = 44A50000, FPS1 = 00000000, FPS2 = 3CA3D70A, FPS3 = C2D80000
+FPS4 = C3DB0000, FPS5 = 427C0000, FPS6 = 00000000, FPS7 = 00000000
+FPS8 = 3F7D704A, FPS9 = 00000000, FPS10= 3E4CCCCD, FPS11= C1400000
+FPS12= 00000000, FPS13= 00000000, FPS14= 00000000, FPS15= 41400000
+FPS16= 00000000, FPS17= 00000000, FPS18= 00000000, FPS19= 00000000
+FPS20= 00000000, FPS21= 00000000, FPS22= 00000000, FPS23= 00000000
+FPS24= 00000000, FPS25= 00000000, FPS26= 00000000, FPS27= 00000000
+FPS28= 00000000, FPS29= 00000000, FPS30= 00000000, FPS31= 00000000
+FPSCR= 00000000
+J-Link>loadfile "D:\Ti\tm4c123-project\projects\car-4wd\build\car-4wd.elf"
+'loadfile': Performing implicit reset & halt of MCU.
+Reset type: NORMAL (https://wiki.segger.com/J-Link_Reset_Strategies)
+Reset: Halt core after reset via DEMCR.VC_CORERESET.
+Reset: Reset device via AIRCR.SYSRESETREQ.
+Downloading file [D:\Ti\tm4c123-project\projects\car-4wd\build\car-4wd.elf]...
+J-Link: Flash download: Bank 0 @ 0x00000000: 2 ranges affected (61440 bytes)
+J-Link: Flash download: Total: 3.532s (Prepare: 0.622s, Compare: 0.119s, Erase: 0.382s, Program & Verify: 2.269s, Restore: 0.138s)
+J-Link: Flash download: Program & Verify speed: 26 KB/s
+O.K.
+J-Link>r
+Reset delay: 0 ms
+Reset type: NORMAL (https://wiki.segger.com/J-Link_Reset_Strategies)
+Reset: Halt core after reset via DEMCR.VC_CORERESET.
+Reset: Reset device via AIRCR.SYSRESETREQ.
+J-Link>g
+Memory map 'after startup completion point' is active
+J-Link>exit
+
+Script processing completed.
+

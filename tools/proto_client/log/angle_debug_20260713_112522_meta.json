@@ -1,0 +1,40 @@
+{
+  "exported_at": "2026-07-13T11:25:22.402+08:00",
+  "log_dir": "D:\\Ti\\tm4c123-project\\tools\\proto_client\\log",
+  "csv_file": "angle_debug_20260713_112522.csv",
+  "recording_started_at": "2026-07-13T11:25:19.816+08:00",
+  "motor_count": 4,
+  "angle_subscribed": true,
+  "rpm_subscribed": true,
+  "sample_counts": {
+    "record_start": 1,
+    "cmd_set_angle": 1,
+    "motor_rpm": 19,
+    "angle_loop": 19,
+    "attitude": 19,
+    "encoder": 10,
+    "cmd_angle_stop": 1,
+    "record_stop": 1
+  },
+  "row_count": 71,
+  "commands": [
+    {
+      "wall_time": "2026-07-13T11:25:19.817+08:00",
+      "t_s": 0.00061,
+      "name": "set_angle",
+      "target": 30,
+      "base": 50,
+      "max_turn": 0,
+      "note": ""
+    },
+    {
+      "wall_time": "2026-07-13T11:25:22.400+08:00",
+      "t_s": 2.584206,
+      "name": "angle_stop",
+      "target": null,
+      "base": null,
+      "max_turn": null,
+      "note": ""
+    }
+  ]
+}

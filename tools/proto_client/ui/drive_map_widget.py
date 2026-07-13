@@ -1,156 +1,154 @@
-"""遥控页地图：显示位姿、目标点，左键点击导航。"""
+# virtual joystick widget
 
 from __future__ import annotations
-
 import math
 from typing import Optional
-
 from PySide6.QtCore import QPointF, Qt, Signal
 from PySide6.QtGui import QBrush, QColor, QFont, QMouseEvent, QPainter, QPen, QPolygonF
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
-from map_odometry import MapPose
+def _angle_from_center(dx, dy):
+    if abs(dx) < 1e-6 and abs(dy) < 1e-6: return 0.0
+    return math.degrees(math.atan2(dx, -dy))
 
+_SECTORS = [
+    (-22.5, 22.5,   (1,0)),
+    (22.5, 67.5,    (1,1)),
+    (67.5, 112.5,   (0,1)),
+    (112.5, 157.5,  (-1,1)),
+    (157.5, 180.0,  (-1,0)),
+    (-180.0,-157.5, (-1,0)),
+    (-157.5,-112.5, (-1,-1)),
+    (-112.5,-67.5,  (0,-1)),
+    (-67.5, -22.5,  (1,-1)),
+]
+class DriveJoystick(QWidget):
 
-class DriveMapWidget(QWidget):
-    target_clicked = Signal(float, float)
+    direction_activated = Signal(int, int)
+    direction_released = Signal()
 
-    def __init__(self, parent: Optional[QWidget] = None):
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setMinimumSize(360, 360)
+        self.setMinimumSize(200, 200)
         self.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
         self.setMouseTracking(True)
-        self._mm_per_px = 4.0
-        self._pose = MapPose()
-        self._target: Optional[tuple[float, float]] = None
-        self._navigating = False
+        self._current_angle = None
+        self._active = False
+        self._magnitude = 500
+        self._drag_pos = None
 
-    def set_scale_mm_per_px(self, value: float) -> None:
-        self._mm_per_px = max(0.5, float(value))
+    def set_magnitude(self, value):
+        self._magnitude = max(100, min(1000, value))
+
+    def clear(self):
+        self._active = False
+        self._current_angle = None
+        self._drag_pos = None
         self.update()
 
-    def set_pose(self, pose: MapPose) -> None:
-        self._pose = pose
-        self.update()
-
-    def set_target(self, x_mm: Optional[float], y_mm: Optional[float]) -> None:
-        if x_mm is None or y_mm is None:
-            self._target = None
-        else:
-            self._target = (x_mm, y_mm)
-        self.update()
-
-    def set_navigating(self, active: bool) -> None:
-        self._navigating = active
-        self.update()
-
-    def target_mm(self) -> Optional[tuple[float, float]]:
-        return self._target
-
-    def _widget_center(self) -> QPointF:
+    def _center(self):
         return QPointF(self.width() * 0.5, self.height() * 0.5)
 
-    def _world_to_widget(self, x_mm: float, y_mm: float) -> QPointF:
-        c = self._widget_center()
-        return QPointF(c.x() + x_mm / self._mm_per_px, c.y() - y_mm / self._mm_per_px)
+    def _radius(self):
+        return min(self.width(), self.height()) * 0.42
 
-    def _widget_to_world(self, px: float, py: float) -> tuple[float, float]:
-        c = self._widget_center()
-        x_mm = (px - c.x()) * self._mm_per_px
-        y_mm = (c.y() - py) * self._mm_per_px
-        return x_mm, y_mm
+    def _pos_to_angle(self, pos):
+        c = self._center()
+        dx = pos.x() - c.x()
+        dy = pos.y() - c.y()
+        if math.hypot(dx, dy) < self._radius() * 0.15:
+            return None
+        return _angle_from_center(dx, dy)
 
-    def paintEvent(self, _event) -> None:
+    def _angle_to_ts(self, angle_deg):
+        mag = self._magnitude
+        diag = max(1, int(mag * 0.707))
+        for lo, hi, (t, s) in _SECTORS:
+            if lo <= angle_deg < hi:
+                return (t * (diag if t and s else mag), s * (diag if t and s else mag))
+        return (0, 0)
+
+    def paintEvent(self, _event):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
         rect = self.rect()
         painter.fillRect(rect, QColor(28, 32, 38))
-
-        center = self._widget_center()
-        grid_pen = QPen(QColor(55, 62, 72))
-        grid_pen.setWidth(1)
-        painter.setPen(grid_pen)
-        step_px = max(20.0, 500.0 / self._mm_per_px)
-        x = center.x()
-        while x < rect.width():
-            painter.drawLine(int(x), 0, int(x), rect.height())
-            x += step_px
-        x = center.x() - step_px
-        while x > 0:
-            painter.drawLine(int(x), 0, int(x), rect.height())
-            x -= step_px
-        y = center.y()
-        while y < rect.height():
-            painter.drawLine(0, int(y), rect.width(), int(y))
-            y += step_px
-        y = center.y() - step_px
-        while y > 0:
-            painter.drawLine(0, int(y), rect.width(), int(y))
-            y -= step_px
-
-        axis_pen = QPen(QColor(90, 100, 115))
-        axis_pen.setWidth(2)
-        painter.setPen(axis_pen)
-        painter.drawLine(int(center.x()), 0, int(center.x()), rect.height())
-        painter.drawLine(0, int(center.y()), rect.width(), int(center.y()))
-
-        painter.setPen(QColor(140, 150, 165))
-        painter.setFont(QFont("Segoe UI", 9))
-        painter.drawText(int(center.x()) + 6, 16, "+Y 前")
-        painter.drawText(rect.width() - 36, int(center.y()) - 6, "+X")
-
-        if self._target is not None:
-            tx, ty = self._target
-            tp = self._world_to_widget(tx, ty)
-            cp = self._world_to_widget(self._pose.x_mm, self._pose.y_mm)
-            dash = QPen(QColor(80, 180, 255, 180))
-            dash.setStyle(Qt.PenStyle.DashLine)
-            dash.setWidth(2)
-            painter.setPen(dash)
-            painter.drawLine(cp, tp)
-
-            painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(80, 180, 255, 200)))
-            painter.drawEllipse(tp, 8, 8)
-            painter.setPen(QColor(200, 230, 255))
-            painter.drawText(int(tp.x()) + 10, int(tp.y()) + 4, "目标")
-
-        car_pt = self._world_to_widget(self._pose.x_mm, self._pose.y_mm)
-        self._draw_car(painter, car_pt, self._pose.yaw_deg)
-
-        if self._navigating:
-            painter.setPen(QColor(255, 200, 80))
-            painter.drawText(8, rect.height() - 10, "导航中…")
-
+        c = self._center()
+        r = self._radius()
+        painter.setPen(QPen(QColor(70, 80, 95), 2))
+        painter.setBrush(QBrush(QColor(38, 42, 50)))
+        painter.drawEllipse(c, r, r)
+        painter.setPen(QPen(QColor(55, 62, 72), 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(c, r * 0.5, r * 0.5)
         painter.setPen(QColor(120, 130, 145))
-        painter.drawText(
-            8,
-            18,
-            f"({self._pose.x_mm:.0f}, {self._pose.y_mm:.0f}) mm  yaw {self._pose.yaw_deg:+.0f}°",
-        )
-
-    def _draw_car(self, painter: QPainter, center: QPointF, yaw_deg: float) -> None:
-        size = 14.0
-        rad = math.radians(yaw_deg)
-        tip = QPointF(
-            center.x() + size * math.sin(rad),
-            center.y() - size * math.cos(rad),
-        )
-        left = QPointF(
-            center.x() + size * 0.65 * math.sin(rad + 2.4),
-            center.y() - size * 0.65 * math.cos(rad + 2.4),
-        )
-        right = QPointF(
-            center.x() + size * 0.65 * math.sin(rad - 2.4),
-            center.y() - size * 0.65 * math.cos(rad - 2.4),
-        )
-        poly = QPolygonF([tip, left, right])
-        painter.setPen(QPen(QColor(40, 40, 40), 1))
-        painter.setBrush(QBrush(QColor(255, 180, 60)))
-        painter.drawPolygon(poly)
-
-    def mousePressEvent(self, event: QMouseEvent) -> None:
-        if event.button() == Qt.MouseButton.LeftButton:
-            x_mm, y_mm = self._widget_to_world(event.position().x(), event.position().y())
-            self.target_clicked.emit(x_mm, y_mm)
+        fn=chr(83)+chr(101)+chr(103)+chr(111)+chr(101)+chr(32)+chr(85)+chr(73)
+        painter.setFont(QFont(chr(34)+fn+chr(34), 10))
+        painter.drawText(int(c.x()) - 14, int(c.y()) - r * 0.78, chr(21069))
+        painter.drawText(int(c.x()) - 14, int(c.y()) + r * 0.82, chr(21518))
+        painter.drawText(int(c.x()) - r * 0.82, int(c.y()) + 5, chr(24038))
+        painter.drawText(int(c.x()) + r * 0.72, int(c.y()) + 5, chr(21491))
+        if self._drag_pos is not None and self._active:
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(80,180,255,180)))
+            painter.drawEllipse(self._drag_pos,6,6)
+            dash=QPen(QColor(80,180,255,120))
+            dash.setStyle(Qt.PenStyle.DashLine)
+            dash.setWidth(1)
+            painter.setPen(dash)
+            painter.drawLine(c,self._drag_pos)
+        painter.setPen(QPen(QColor(40,40,40),1))
+        painter.setBrush(QBrush(QColor(255,180,60)))
+        angle=self._current_angle if self._current_angle is not None else 0.0
+        s=14.0
+        rad=math.radians(angle)
+        tip=QPointF(c.x()+s*math.sin(rad),c.y()-s*math.cos(rad))
+        lx=QPointF(c.x()+s*0.65*math.sin(rad+2.4),c.y()-s*0.65*math.cos(rad+2.4))
+        rx=QPointF(c.x()+s*0.65*math.sin(rad-2.4),c.y()-s*0.65*math.cos(rad-2.4))
+        painter.drawPolygon(QPolygonF([tip,lx,rx]))
+        if self._active and self._current_angle is not None:
+            painter.setPen(QColor(140,150,165))
+            label=(chr(123)+chr(48)+chr(58)+chr(43)+chr(46)+chr(48)+chr(102)+chr(125)+chr(176)).format(self._current_angle)
+            painter.drawText(8,rect.height()-10,label)
+    def mousePressEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton:
+            self._handle_drag(event.position())
         super().mousePressEvent(event)
+
+    def mouseMoveEvent(self,event):
+        if event.buttons()&Qt.MouseButton.LeftButton:
+            self._handle_drag(event.position())
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self,event):
+        if event.button()==Qt.MouseButton.LeftButton and self._active:
+            self._active=False
+            self._current_angle=None
+            self._drag_pos=None
+            self.direction_released.emit()
+            self.update()
+        super().mouseReleaseEvent(event)
+    def _handle_drag(self,pos):
+        angle=self._pos_to_angle(pos)
+        if angle is None:
+            if self._active:
+                self._active=False
+                self._current_angle=None
+                self._drag_pos=None
+                self.direction_released.emit()
+                self.update()
+            return
+        self._active=True
+        self._current_angle=angle
+        c=self._center()
+        dx=pos.x()-c.x()
+        dy=pos.y()-c.y()
+        dist=math.hypot(dx,dy)
+        r=self._radius()
+        if dist>r:
+            self._drag_pos=QPointF(c.x()+dx*r/dist,c.y()+dy*r/dist)
+        else:
+            self._drag_pos=pos
+        t,s=self._angle_to_ts(angle)
+        self.direction_activated.emit(t,s)
+        self.update()
