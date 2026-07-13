@@ -6,6 +6,7 @@ from __future__ import annotations
 
 import json
 import queue
+import struct
 import threading
 import time
 from dataclasses import dataclass
@@ -40,6 +41,28 @@ class PendingRequest:
     response: Optional[proto.Frame] = None
 
 
+@dataclass
+class ManeuverWait:
+    done: bool
+    timed_out: bool = False
+    value: Optional[int] = None
+
+
+@dataclass
+class NavResult:
+    """导航序列结束（含超时截断）；ok 表示流程已走完可接受下一次点击。"""
+    ok: bool = True
+    command_failed: bool = False
+    delta_yaw: int = 0
+    dist_mm: int = 0
+    turned: bool = False
+    drove: bool = False
+    angle_done: bool = False
+    distance_done: bool = False
+    actual_delta_yaw: int = 0
+    final_dist_mm: Optional[int] = None
+
+
 class SerialWorker(QThread):
     log = Signal(str)
     connected_changed = Signal(bool)
@@ -56,6 +79,7 @@ class SerialWorker(QThread):
     param_read_result = Signal(int, bytes)
     param_write_result = Signal(int, bool, str)
     param_list_received = Signal(list)
+    navigation_finished = Signal(object)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -87,6 +111,12 @@ class SerialWorker(QThread):
         self._baudrate = 115200
         self._reconnect_at = 0.0
         self._reconnect_backoff_s = 1.0
+        self._drive_stream_active = False
+        self._drive_throttle = 0
+        self._drive_steer = 0
+        self._drive_next_send = 0.0
+        self._last_angle_loop: Optional[proto.AngleLoopPush] = None
+        self._last_distance_loop: Optional[proto.DistanceLoopPush] = None
 
     @property
     def hello_info(self) -> Optional[proto.HelloInfo]:
@@ -154,9 +184,21 @@ class SerialWorker(QThread):
     def request_drive(self, throttle: int, steer: int) -> None:
         self._cmd_queue.put(("drive", proto.build_drive(throttle, steer), None))
 
+    @Slot(int, int)
+    def request_drive_stream(self, throttle: int, steer: int) -> None:
+        """持续遥控：worker 按 DRIVE_STREAM_INTERVAL_S 重发，全 0 时停车。"""
+        self._cmd_queue.put(("drive_stream", proto.build_drive(throttle, steer), None))
+
     @Slot()
     def request_drive_stop(self) -> None:
         self._cmd_queue.put(("drive_stop", b"", None))
+
+    @Slot(int, int, int, int)
+    def request_navigate(self, delta_yaw_deg: int, dist_mm: int,
+                         max_turn_rpm: int = 80, max_drive_rpm: int = 60) -> None:
+        payload = struct.pack("<hiii", int(delta_yaw_deg), int(dist_mm),
+                              int(max_turn_rpm), int(max_drive_rpm))
+        self._cmd_queue.put(("navigate", payload, None))
 
     @Slot(int)
     def request_apply_subscription(self, optional_mask: int = 0) -> None:
@@ -314,6 +356,14 @@ class SerialWorker(QThread):
                 self._next_ping = now + proto.PING_INTERVAL_S
 
             if (
+                self._drive_stream_active
+                and self._critical_depth == 0
+                and now >= self._drive_next_send
+            ):
+                self._send_drive_stream_frame()
+                self._drive_next_send = now + proto.DRIVE_STREAM_INTERVAL_S
+
+            if (
                 self._critical_depth == 0
                 and proto.TELEMETRY_POLL_HZ > 0
                 and now >= self._next_telemetry
@@ -427,6 +477,9 @@ class SerialWorker(QThread):
                         payload,
                     )
                     self._on_drive_rsp(frame)
+            elif kind == "drive_stream":
+                if self.is_connected():
+                    self._apply_drive_stream(payload)
             elif kind == "drive_stop":
                 if self.is_connected():
                     frame = self._send_request_retry(
@@ -434,6 +487,9 @@ class SerialWorker(QThread):
                         b"",
                     )
                     self._on_drive_stop_rsp(frame)
+            elif kind == "navigate":
+                if self.is_connected():
+                    self._run_navigate(payload)
 
     def _flush_serial_input(self) -> None:
         if self._ser is None:
@@ -653,6 +709,9 @@ class SerialWorker(QThread):
         self._next_telemetry = now + 3600.0
 
     def _close_serial(self) -> None:
+        self._drive_stream_active = False
+        self._drive_throttle = 0
+        self._drive_steer = 0
         if self._ser is not None:
             try:
                 self._ser.close()
@@ -839,9 +898,13 @@ class SerialWorker(QThread):
                 elif push.channel_id == proto.CHANNEL_ID_MOTOR_RPM:
                     self.motor_rpm_received.emit(proto.parse_motor_rpm_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ANGLE_LOOP:
-                    self.angle_loop_received.emit(proto.parse_angle_loop_push(push.payload))
+                    sample = proto.parse_angle_loop_push(push.payload)
+                    self._last_angle_loop = sample
+                    self.angle_loop_received.emit(sample)
                 elif push.channel_id == proto.CHANNEL_ID_DISTANCE_LOOP:
-                    self.distance_loop_received.emit(proto.parse_distance_loop_push(push.payload))
+                    sample = proto.parse_distance_loop_push(push.payload)
+                    self._last_distance_loop = sample
+                    self.distance_loop_received.emit(sample)
                 elif push.channel_id == proto.CHANNEL_ID_ENCODER:
                     self.encoder_counts_received.emit(proto.parse_encoder_push(push.payload))
                 self.push_received.emit(push)
@@ -1021,6 +1084,177 @@ class SerialWorker(QThread):
             timeout=4.0,
             duplicate_tx=proto.HC05_SAFE_TX,
         )
+
+    def _apply_drive_stream(self, payload: bytes) -> None:
+        throttle, steer = struct.unpack_from("<hh", payload, 0)
+        if throttle == 0 and steer == 0:
+            self._drive_stream_active = False
+            self._drive_throttle = 0
+            self._drive_steer = 0
+            if self.is_connected():
+                frame = self._send_request_retry(
+                    int(proto.Cmd.DRIVE_STOP),
+                    b"",
+                    timeout=1.5,
+                    retries=1,
+                )
+                self._on_drive_stop_rsp(frame)
+            return
+
+        self._drive_throttle = throttle
+        self._drive_steer = steer
+        self._drive_stream_active = True
+        self._drive_next_send = 0.0
+        self._send_drive_stream_frame()
+
+    def _send_drive_stream_frame(self) -> None:
+        if not self.is_connected():
+            return
+        payload = proto.build_drive(self._drive_throttle, self._drive_steer)
+        seq = self._next_seq()
+        frame_bytes = proto.encode_frame(int(proto.Cmd.DRIVE), seq, payload)
+        self._write_frame(frame_bytes)
+
+    def _wait_angle_maneuver(
+        self,
+        expected_delta_yaw: int,
+        timeout_s: float = proto.NAV_STEP_TIMEOUT_S,
+    ) -> ManeuverWait:
+        deadline = time.monotonic() + timeout_s
+        last_current: Optional[int] = None
+        while time.monotonic() < deadline:
+            sample = self._last_angle_loop
+            if sample is not None and sample.target_yaw == expected_delta_yaw:
+                last_current = sample.current_yaw
+                err = abs(sample.target_yaw - sample.current_yaw)
+                if err <= 8 and abs(sample.turn_rpm) <= 3:
+                    return ManeuverWait(True, value=last_current)
+            self._pump_serial()
+            time.sleep(0.05)
+        return ManeuverWait(False, timed_out=True, value=last_current)
+
+    def _wait_distance_maneuver(
+        self,
+        expected_dist_mm: int,
+        timeout_s: float = proto.NAV_STEP_TIMEOUT_S,
+    ) -> ManeuverWait:
+        deadline = time.monotonic() + timeout_s
+        last_current: Optional[int] = None
+        while time.monotonic() < deadline:
+            sample = self._last_distance_loop
+            if sample is not None and sample.target_mm == expected_dist_mm:
+                last_current = sample.current_mm
+                err = abs(sample.target_mm - sample.current_mm)
+                if err <= 30 and abs(sample.cmd_rpm) <= 3:
+                    return ManeuverWait(True, value=last_current)
+            self._pump_serial()
+            time.sleep(0.05)
+        return ManeuverWait(False, timed_out=True, value=last_current)
+
+    def _stop_nav_legs(self) -> None:
+        self._send_request_retry(int(proto.Cmd.DISTANCE_STOP), b"", timeout=1.5, retries=1)
+        self._send_request_retry(int(proto.Cmd.ANGLE_STOP), b"", timeout=1.5, retries=1)
+
+    def _run_navigate(self, payload: bytes) -> None:
+        delta_yaw, dist_mm, max_turn, max_drive = struct.unpack_from("<hiii", payload, 0)
+        self._drive_stream_active = False
+        self._begin_critical()
+        self._wait_rx_quiet(quiet_s=0.06, timeout_s=0.5)
+        self._send_request_retry(int(proto.Cmd.DRIVE_STOP), b"", timeout=1.5, retries=1)
+        self._send_request_retry(int(proto.Cmd.ANGLE_STOP), b"", timeout=1.5, retries=1)
+        self._send_request_retry(int(proto.Cmd.DISTANCE_STOP), b"", timeout=1.5, retries=1)
+        self._wait_rx_quiet(quiet_s=0.12, timeout_s=0.8)
+
+        self._last_angle_loop = None
+        self._last_distance_loop = None
+
+        ok = True
+        command_failed = False
+        turned = False
+        drove = False
+        angle_done = False
+        distance_done = False
+        actual_delta_yaw = 0
+        final_dist_mm: Optional[int] = None
+
+        if abs(delta_yaw) >= 4:
+            turned = True
+            self._last_angle_loop = None
+            frame = self._send_request_retry(
+                int(proto.Cmd.SET_ANGLE),
+                proto.build_set_angle(delta_yaw, 0, max_turn),
+                timeout=3.0,
+                retries=1,
+            )
+            if frame is None or frame.is_nak:
+                self.log.emit("地图导航: 转角指令失败，跳过本步")
+                command_failed = True
+            else:
+                wait = self._wait_angle_maneuver(delta_yaw)
+                if wait.value is not None:
+                    actual_delta_yaw = wait.value
+                elif wait.timed_out:
+                    actual_delta_yaw = delta_yaw
+                if wait.done:
+                    angle_done = True
+                    self.log.emit(
+                        f"地图导航: 转角完成 Δθ={actual_delta_yaw:+d}° / 目标 {delta_yaw:+d}°"
+                    )
+                else:
+                    self.log.emit(
+                        f"地图导航: 转角 {proto.NAV_STEP_TIMEOUT_S:.0f}s 未完全到位"
+                        f"（约 {actual_delta_yaw:+d}°），继续下一步"
+                    )
+            self._stop_nav_legs()
+            self._wait_rx_quiet(quiet_s=0.10, timeout_s=0.6)
+
+        if abs(dist_mm) >= 20:
+            drove = True
+            self._last_distance_loop = None
+            self._wait_rx_quiet(quiet_s=0.06, timeout_s=0.5)
+            frame = self._send_request_retry(
+                int(proto.Cmd.SET_DISTANCE),
+                proto.build_set_distance(dist_mm, max_drive),
+                timeout=3.0,
+                retries=1,
+            )
+            if frame is None or frame.is_nak:
+                self.log.emit("地图导航: 距离指令失败")
+                command_failed = True
+            else:
+                wait = self._wait_distance_maneuver(dist_mm)
+                if wait.value is not None:
+                    final_dist_mm = wait.value
+                if wait.done:
+                    distance_done = True
+                    self.log.emit(
+                        f"地图导航: 行驶完成 目标={dist_mm:+d} mm 实际≈{final_dist_mm:+d} mm"
+                    )
+                else:
+                    self.log.emit(
+                        f"地图导航: 行驶 {proto.NAV_STEP_TIMEOUT_S:.0f}s 未完全到位"
+                        f"（约 {final_dist_mm if final_dist_mm is not None else 0:+d} mm），结束本趟"
+                    )
+
+        self._stop_nav_legs()
+        self._last_angle_loop = None
+        self._last_distance_loop = None
+        self._wait_rx_quiet(quiet_s=0.12, timeout_s=0.8)
+        self._end_critical()
+        self.log.emit("地图导航: 本趟结束，可进行下一步")
+        result = NavResult(
+            ok=True,
+            command_failed=command_failed,
+            delta_yaw=delta_yaw,
+            dist_mm=dist_mm,
+            turned=turned,
+            drove=drove,
+            angle_done=angle_done,
+            distance_done=distance_done,
+            actual_delta_yaw=actual_delta_yaw,
+            final_dist_mm=final_dist_mm,
+        )
+        self.navigation_finished.emit(result)
 
     def _run_calib_yaw(self, payload: bytes) -> None:
         """先停角度环/遥控，静止后再发 CALIB_YAW。"""

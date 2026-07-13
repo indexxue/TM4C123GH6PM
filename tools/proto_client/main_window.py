@@ -197,6 +197,7 @@ class MainWindow(QMainWindow):
             self._dashboard.reset()
             self._plot.reset()
             self._pid_tuning.reset()
+            self._drive.reset()
 
     def _on_hello(self, info: proto.HelloInfo) -> None:
         self._proto_ver = info.proto_ver
@@ -213,6 +214,7 @@ class MainWindow(QMainWindow):
         if info.hw_rev == proto.HW_REV_CAR_4WD_V1:
             self._append_log("提示: 固件为四轮车型，上位机默认按两轮调试；可在各页切换「四轮」")
         self._pid_tuning.on_hello(info.caps)
+        self._drive.on_hello(info.caps, info.hw_rev)
         if info.proto_ver < proto.PROTO_VER:
             self._append_log(f"提示: 固件 proto_ver={info.proto_ver}，姿态按 v1 f32 解析")
 
@@ -246,6 +248,7 @@ class MainWindow(QMainWindow):
                 r, p, y = (int(round(self._deg_to_180(v))) for v in (roll, pitch, yaw))
                 self._dashboard.update_attitude_text(r, p, y)
                 self._plot.update_attitude(roll, pitch, yaw)
+                self._drive.on_attitude_yaw(yaw)
             elif push.channel_id == proto.CHANNEL_ID_LINE_ADC:
                 values = proto.parse_line_adc_push(push.payload)
                 self._dashboard.update_line_adc(values)
@@ -273,6 +276,7 @@ class MainWindow(QMainWindow):
     def _on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
         self._dashboard.update_encoder_counts(counts)
         self._plot.on_encoder_counts(counts)
+        self._drive.on_encoder_counts(counts)
 
     def _on_param_read(self, param_id: int, payload: bytes) -> None:
         self._param_panel.apply_read(param_id, payload, self._schema)
