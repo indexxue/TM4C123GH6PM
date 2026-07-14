@@ -26,3 +26,7 @@ Thumbs.db Desktop.ini
 # Python
 __pycache__/
 *.pyc
+
+# Local scratch / runtime logs (do not commit)
+tmp/
+tools/proto_client/log/
