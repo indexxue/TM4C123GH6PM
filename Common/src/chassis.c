@@ -33,7 +33,7 @@
 
 #ifndef CHASSIS_ANGLE_MIN_TURN_RPM
 /** 接近目标且差速低于此值时直接停车，避免末段抖动 */
-#define CHASSIS_ANGLE_MIN_TURN_RPM    8.0f
+#define CHASSIS_ANGLE_MIN_TURN_RPM    3.0f
 #endif
 
 #ifndef CHASSIS_ANGLE_YAW_LPF_ALPHA
@@ -169,10 +169,14 @@ static void chassis_distance_complete(void)
 static void chassis_angle_complete(void)
 {
     chassis_reset_targets();
+    s_angle_target_yaw = 0;
+    s_angle_target_yaw_f = 0.0f;
+    s_angle_current_yaw = 0;
     s_angle_turn_rpm = 0;
     s_active = FALSE;
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     s_angle_odom_valid = FALSE;
+    s_angle_yaw_filt_valid = FALSE;
     pid_reset(&s_pid_yaw);
     attitude_yaw_hold_set(FALSE);
     chassis_reset_speed_pids();
@@ -392,12 +396,13 @@ static f32_t chassis_angle_done_tol_deg(f32_t target_deg)
         return CHASSIS_ANGLE_DEADBAND_DEG;
     }
 
-    tol = a * 0.25f;
-    if (tol < 8.0f) {
-        tol = 8.0f;
+    /* 12% 容差（原 25% 过于宽松，45° 目标容许 11° 误差无法接受） */
+    tol = a * 0.12f;
+    if (tol < 5.0f) {
+        tol = 5.0f;
     }
-    if (tol > a * 0.75f) {
-        tol = a * 0.75f;
+    if (tol > a * 0.60f) {
+        tol = a * 0.60f;
     }
     if (tol < CHASSIS_ANGLE_DEADBAND_DEG) {
         tol = CHASSIS_ANGLE_DEADBAND_DEG;
@@ -509,12 +514,14 @@ static void chassis_angle_update_lr(f32_t dt_s)
     /*
      * P+I：连续域误差 target - yaw（不 wrap）；D 用 gz 阻尼而非 d(error)/dt，
      * 避免 mag 停转跳变导致 D 项反向猛拉。
-     * turn>0 → 右轮更快（left=base-turn, right=base+turn）。
+     * turn>0 → 右轮更快（left=base-turn, right=base+turn），即左转（负 yaw）。
+     * yaw_err = target - current > 0 表示需要右转（正 yaw），turn 应为负。
+     * gz>0（右转）→ D 项应为正（左转）→ 阻尼右转，防止过冲振荡。
      */
-    turn_pi = pid_update(&s_pid_yaw, 0.0f, -yaw_err, dt_s);
+    turn_pi = pid_update(&s_pid_yaw, 0.0f, yaw_err, dt_s);
     turn_d = 0.0f;
-    if ((g != NULL) && (fabsf(yaw_err) > s_angle_done_tol_deg * 2.0f)) {
-        turn_d = -(g->kd * gz_dps * CHASSIS_ANGLE_GZ_DAMP_SCALE);
+    if (g != NULL) {
+        turn_d = g->kd * gz_dps * CHASSIS_ANGLE_GZ_DAMP_SCALE;
     }
     turn_rpm = turn_pi + turn_d;
 
@@ -542,7 +549,8 @@ static void chassis_angle_update_lr(f32_t dt_s)
         s_angle_turn_rpm = (s32_t)(turn_rpm - 0.5f);
     }
 
-    chassis_apply_lr_rpm(left, right);
+    /* 角度环：电机物理接线与标准差速模型符号相反，交换左右轮 */
+    chassis_apply_lr_rpm(right, left);
 }
 
 static void chassis_distance_update_lr(f32_t dt_s)
@@ -773,7 +781,7 @@ void chassis_init(void)
         pid_set_integral_limit(&s_pid[i], CHASSIS_PID_INTEGRAL_MAX);
     }
 
-    pid_init(&s_pid_yaw, 2.0f, 0.0f, 0.5f);
+    pid_init(&s_pid_yaw, 1.5f, 0.2f, 0.5f);
     pid_set_output_limits(&s_pid_yaw, -CHASSIS_ANGLE_PID_OUT_MAX_RPM, CHASSIS_ANGLE_PID_OUT_MAX_RPM);
     pid_set_integral_limit(&s_pid_yaw, CHASSIS_ANGLE_PID_INTEGRAL_MAX);
 

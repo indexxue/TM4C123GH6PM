@@ -416,7 +416,7 @@ class DriveTab(QWidget):
         # self._nav_freeze_odom removed
         self._caps = 0
         self._last_enc = None
-        self._odom.reset_origin()
+        # self._odom removed
         # self._map.set_pose(MapPose())
         # self._map.set_target(None, None)
         # # self._map.set_navigating(False)

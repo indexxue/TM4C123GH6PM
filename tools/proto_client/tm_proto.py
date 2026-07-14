@@ -32,12 +32,12 @@ NAV_MANEUVER_MAX_S = 90.0
 
 
 def maneuver_angle_done_tol_deg(target_deg: int) -> int:
-    """与固件 chassis_angle_done_tol_deg 一致。"""
+    """与固件 chassis_angle_done_tol_deg 一致（12% 容差，最低 5°）。"""
     a = abs(int(target_deg))
     if a < 1:
         return 3
-    tol = max(8, a // 4)
-    cap = int(a * 0.75)
+    tol = max(5, int(a * 0.12 + 0.5))
+    cap = int(a * 0.60)
     if tol > cap:
         tol = max(3, cap)
     return max(3, tol)

@@ -111,7 +111,7 @@
 #define PROTO_PUSH_SUPPRESS_MS      280U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 350U
-#define PROTO_PUSH_SUPPRESS_SET_ANGLE_MS       350U
+#define PROTO_PUSH_SUPPRESS_SET_ANGLE_MS       60U
 #define PROTO_PUSH_SUPPRESS_SET_DISTANCE_MS    350U
 
 /** 与 app.c APP_CTRL_PERIOD_MS 一致，SET_SPEED 后立即 tick 用 */
@@ -1595,12 +1595,17 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
 {
     if ((cmd == PROTO_CMD_SUBSCRIBE) || (cmd == PROTO_CMD_UNSUBSCRIBE) ||
         (cmd == PROTO_CMD_SET_SPEED) || (cmd == PROTO_CMD_SPEED_STOP) ||
-        (cmd == PROTO_CMD_SET_ANGLE) || (cmd == PROTO_CMD_ANGLE_STOP) ||
+        (cmd == PROTO_CMD_ANGLE_STOP) ||
         (cmd == PROTO_CMD_SET_DISTANCE) || (cmd == PROTO_CMD_DISTANCE_STOP) ||
         (cmd == PROTO_CMD_CALIB_YAW) ||
         (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
         proto_rx_gate_hold_cmd();
         proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
+    }
+
+    /* SET_ANGLE 不抑制推送：角度环遥测是观察机动状态的唯一途径 */
+    if (cmd == PROTO_CMD_SET_ANGLE) {
+        proto_rx_gate_hold_cmd();
     }
 
     switch (cmd) {

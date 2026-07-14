@@ -369,6 +369,8 @@ class PlotTab(QWidget):
             on_log_start=self.start_angle_log,
             on_log_export=self.export_angle_log,
             on_log_command=self.log_angle_command,
+            on_get_recorder=self._get_angle_recorder,
+            on_get_pid_params=self._get_angle_pid_params,
         )
         # 目标曲线由固件 ANGLE_LOOP 推送的绝对航向更新，不再绑定 spin 框
         self._angle_panel.setMaximumWidth(360)
@@ -478,6 +480,40 @@ class PlotTab(QWidget):
 
     def angle_log_is_recording(self) -> bool:
         return self._angle_recorder.active
+
+    def _get_angle_recorder(self) -> object:
+        """供 AngleControlPanel 获取当前 Recorder。"""
+        return self._angle_recorder
+
+    def _get_angle_pid_params(self) -> dict:
+        """返回当前已知的 PID yaw 参数（从编辑器 UI 控件读取）。"""
+        params: dict = {}
+        # 尝试从编辑器 UI 控件获取
+        if hasattr(self, "_angle_panel") and self._angle_panel._pid_yaw_editor is not None:
+            editor = self._angle_panel._pid_yaw_editor
+            try:
+                fields = getattr(editor, "_fields", {})
+                for key in ("kp", "ki", "kd"):
+                    widget = fields.get(key)
+                    if widget is not None:
+                        text = widget.text().strip()
+                        if text:
+                            params[key] = float(text)
+            except Exception:
+                pass
+        # 从 spd_limit 获取 max_rpm
+        if hasattr(self, "_angle_panel") and self._angle_panel._spd_limit_editor is not None:
+            editor = self._angle_panel._spd_limit_editor
+            try:
+                fields = getattr(editor, "_fields", {})
+                widget = fields.get("max_rpm")
+                if widget is not None:
+                    text = widget.text().strip()
+                    if text:
+                        params["max_rpm"] = float(text)
+            except Exception:
+                pass
+        return params
 
     def on_angle_loop(self, sample: proto.AngleLoopPush) -> None:
         self._angle_current_yaw = sample.current_yaw

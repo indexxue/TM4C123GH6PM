@@ -1,13 +1,17 @@
-"""航向角环控制面板（SET_ANGLE / pid_yaw 快捷读）。"""
+"""航向角环控制面板（SET_ANGLE / pid_yaw 快捷读 / 自动测试序列）。"""
 
 from __future__ import annotations
 
+import json
+import threading
+from pathlib import Path
 from typing import Callable, Optional
 
 import tm_proto as proto
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtWidgets import (
     QCheckBox,
+    QComboBox,
     QFormLayout,
     QGroupBox,
     QHBoxLayout,
@@ -19,6 +23,13 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from angle_test_runner import (
+    AngleTestRunner,
+    DEFAULT_TEST_ANGLES,
+    QUICK_TEST_ANGLES,
+    TestSequenceConfig,
+    TestSequenceResult,
+)
 from serial_worker import SerialWorker
 from ui.param_panel import ParamEditor
 
@@ -38,6 +49,10 @@ class AngleControlPanel(QGroupBox):
     YAW_STEP = 30
     DEFAULT_BASE_RPM = 0
 
+    # 测试进度信号
+    test_log = Signal(str)
+    test_finished = Signal(object)
+
     def __init__(
         self,
         worker: SerialWorker,
@@ -47,6 +62,8 @@ class AngleControlPanel(QGroupBox):
         on_log_start: Optional[Callable[[], str]] = None,
         on_log_export: Optional[Callable[[], str]] = None,
         on_log_command: Optional[Callable[..., None]] = None,
+        on_get_recorder: Optional[Callable[[], object]] = None,
+        on_get_pid_params: Optional[Callable[[], dict]] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__("角度环调试", parent)
@@ -57,9 +74,13 @@ class AngleControlPanel(QGroupBox):
         self._on_log_start = on_log_start
         self._on_log_export = on_log_export
         self._on_log_command = on_log_command
+        self._on_get_recorder = on_get_recorder
+        self._on_get_pid_params = on_get_pid_params
         self._delta_yaw = self.DEFAULT_DELTA
         self._base_rpm = self.DEFAULT_BASE_RPM
         self._motor_count = proto.MOTOR_COUNT_DEFAULT
+        self._test_runner: Optional[AngleTestRunner] = None
+        self._test_running = False
 
         root = QVBoxLayout(self)
 
@@ -163,6 +184,38 @@ class AngleControlPanel(QGroupBox):
         log_layout.addWidget(self._log_hint)
         root.addWidget(log_box)
 
+        # ---- 自动测试序列 ----
+        self._test_box = QGroupBox("自动测试序列 (角度环 PID 诊断)")
+        test_layout = QVBoxLayout(self._test_box)
+
+        test_mode_row = QHBoxLayout()
+        test_mode_row.addWidget(QLabel("测试模式"))
+        self._test_mode_combo = QComboBox()
+        self._test_mode_combo.addItem("快速验证 (3 个角度)", "quick")
+        self._test_mode_combo.addItem("完整诊断 (8 个角度)", "full")
+        test_mode_row.addWidget(self._test_mode_combo, stretch=1)
+        test_layout.addLayout(test_mode_row)
+
+        test_btn_row = QHBoxLayout()
+        self._btn_run_test = QPushButton("▶ 运行自动测试")
+        self._btn_run_test.setStyleSheet(
+            "QPushButton { font-weight: bold; background: #2980b9; color: white; "
+            "padding: 6px 16px; border-radius: 4px; }"
+            "QPushButton:hover { background: #3498db; }"
+            "QPushButton:disabled { background: #555; color: #888; }"
+        )
+        self._btn_abort_test = QPushButton("中断测试")
+        self._btn_abort_test.setEnabled(False)
+        test_btn_row.addWidget(self._btn_run_test, stretch=2)
+        test_btn_row.addWidget(self._btn_abort_test, stretch=1)
+        test_layout.addLayout(test_btn_row)
+
+        self._test_progress = QLabel("就绪 — 点击按钮开始自动测试序列")
+        self._test_progress.setWordWrap(True)
+        self._test_progress.setStyleSheet("color: palette(mid); font-size: 11px;")
+        test_layout.addWidget(self._test_progress)
+        root.addWidget(self._test_box)
+
         self._status = QLabel("")
         root.addWidget(self._status)
 
@@ -178,6 +231,10 @@ class AngleControlPanel(QGroupBox):
         self._delta_yaw_spin.valueChanged.connect(self._on_delta_spin_changed)
         self._btn_log_start.clicked.connect(lambda: self._start_log(silent=False))
         self._btn_log_export.clicked.connect(lambda: self._export_log(silent=False))
+        self._btn_run_test.clicked.connect(self._run_test_sequence)
+        self._btn_abort_test.clicked.connect(self._abort_test)
+        self.test_log.connect(self._set_status)
+        self.test_finished.connect(self._on_test_finished)
         worker.hello_received.connect(self._update_calib_available)
 
         self.set_motor_count(self._motor_count)
@@ -342,3 +399,133 @@ class AngleControlPanel(QGroupBox):
 
     def _set_status(self, text: str) -> None:
         self._status.setText(text)
+
+    # ------------------------------------------------------------------
+    # 自动测试序列
+    # ------------------------------------------------------------------
+
+    def _run_test_sequence(self) -> None:
+        """启动自动测试序列（在后台线程中运行）。"""
+        if not self._worker.is_connected():
+            self._set_status("请先连接设备")
+            return
+
+        if self._test_running:
+            self._set_status("测试已在运行中")
+            return
+
+        # 确保记录已开始
+        if self._on_log_start is not None:
+            self._start_log(silent=True)
+
+        # 获取 recorder
+        recorder = None
+        if self._on_get_recorder is not None:
+            recorder = self._on_get_recorder()
+        if recorder is None:
+            self._set_status("记录器未就绪，请先开始记录")
+            return
+
+        # 获取 PID 参数
+        pid_params: dict = {}
+        if self._on_get_pid_params is not None:
+            pid_params = self._on_get_pid_params()
+
+        # 选择测试序列
+        mode = self._test_mode_combo.currentData()
+        if mode == "quick":
+            angles = list(QUICK_TEST_ANGLES)
+        else:
+            angles = list(DEFAULT_TEST_ANGLES)
+
+        config = TestSequenceConfig(
+            angles=angles,
+            base_rpm=self._base_rpm.value(),
+            max_turn_rpm=self._max_turn.value(),
+            maneuver_timeout_s=30.0,
+            settle_wait_s=1.5,
+            inter_maneuver_delay_s=1.0,
+        )
+
+        self._test_running = True
+        self._btn_run_test.setEnabled(False)
+        self._btn_abort_test.setEnabled(True)
+        self._test_progress.setText("正在运行测试序列...")
+
+        def _run() -> None:
+            runner = AngleTestRunner(
+                send_fn=self._worker.request_set_angle,
+                stop_fn=self._worker.request_angle_stop,
+                recorder=recorder,
+                pid_yaw_kp=pid_params.get("kp"),
+                pid_yaw_ki=pid_params.get("ki"),
+                pid_yaw_kd=pid_params.get("kd"),
+                spd_limit_max_rpm=pid_params.get("max_rpm"),
+            )
+            runner.on_log = lambda msg: self.test_log.emit(msg)
+            self._test_runner = runner
+            result = runner.run_sequence(config)
+            self.test_finished.emit(result)
+
+        thread = threading.Thread(target=_run, daemon=True)
+        thread.start()
+
+    def _abort_test(self) -> None:
+        """中断正在运行的测试。"""
+        if self._test_runner is not None:
+            self._test_runner.abort()
+        self._test_running = False
+        self._btn_run_test.setEnabled(True)
+        self._btn_abort_test.setEnabled(False)
+        self._test_progress.setText("测试已中断")
+        self._set_status("测试已中断")
+
+    def _on_test_finished(self, result: TestSequenceResult) -> None:
+        """测试完成回调（由 test_finished 信号触发）。"""
+        self._test_running = False
+        self._btn_run_test.setEnabled(True)
+        self._btn_abort_test.setEnabled(False)
+        self._test_runner = None
+
+        summary = (
+            f"测试完成: {result.passed}/{len(result.steps)} 通过\n"
+            f"CSV: {Path(result.csv_path).name if result.csv_path else '—'}\n"
+            f"报告: {Path(result.report_path).name if result.report_path else '—'}"
+        )
+        self._test_progress.setText(summary)
+
+        # 自动导出
+        if self._chk_auto_export.isChecked():
+            self._export_log(silent=False, from_stop=True)
+
+        self._set_status(f"测试完成: {result.passed}/{len(result.steps)} 通过")
+
+        # 显示快速摘要对话框
+        lines = []
+        for s in result.steps:
+            status = "✓" if s.success else "✗"
+            if s.metrics is not None:
+                m = s.metrics
+                rise = f"上升={m.rise_time_s:.1f}s" if m.rise_time_s is not None else "上升=—"
+                settle = f" 稳态误差={m.steady_state_error_deg:.1f}°" if m.completed else ""
+                lines.append(f"  {s.label}: {status} {rise}{settle}")
+            else:
+                lines.append(f"  {s.label}: {status} (无指标)")
+        details = "\n".join(lines) if lines else "无详情"
+        QMessageBox.information(
+            self,
+            "角度环自动测试结果",
+            f"{summary}\n\n详情:\n{details}",
+        )
+
+    def set_test_result_callback(self, callback: Callable[[TestSequenceResult], None]) -> None:
+        """设置测试完成后的回调（用于外部处理报告）。"""
+        if not self._test_running:
+            self.test_finished.connect(callback)
+        # 避免重复连接
+        try:
+            self.test_finished.disconnect(self._on_test_finished)
+        except (TypeError, RuntimeError):
+            pass
+        self.test_finished.connect(self._on_test_finished)
+        self.test_finished.connect(callback)
