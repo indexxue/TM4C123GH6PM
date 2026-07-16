@@ -61,6 +61,9 @@ s32_t chassis_get_distance_max_rpm(void);
 /** 逻辑 RPM（与 cfg_motor_rpm 同坐标系） */
 s32_t chassis_get_wheel_rpm(u8_t motor_id);
 
+/** 4 路编码器原始计数（用于遥测诊断 M3/M4） */
+void chassis_get_encoder_counts(s32_t out[4]);
+
 /** 角度环是否激活 */
 bool_t chassis_angle_is_active(void);
 /** 距离环是否激活 */

@@ -138,6 +138,13 @@ class PlotTab(QWidget):
     HISTORY = 600
     TIME_WINDOW_S = 60.0
     MOTOR_COLORS = ["#e74c3c", "#3498db", "#2ecc71", "#f39c12"]
+    # 半透明 RGB 元组：重叠曲线可透过上层看到下层
+    _MOTOR_RGBA = [
+        (231, 76, 60, 130),    # M1 #e74c3c
+        (52, 152, 219, 130),   # M2 #3498db
+        (46, 204, 113, 130),   # M3 #2ecc71
+        (243, 156, 18, 130),   # M4 #f39c12
+    ]
     MOTOR_NAMES = ["M1", "M2", "M3", "M4"]
 
     def __init__(
@@ -696,12 +703,12 @@ class PlotTab(QWidget):
         self._rpm_curves = []
         self._target_curves = []
         for i, name in enumerate(self.MOTOR_NAMES):
-            color = self.MOTOR_COLORS[i]
-            curve = self._plot_rpm.plot(pen=pg.mkPen(color, width=2))
+            rgba = self._MOTOR_RGBA[i]
+            curve = self._plot_rpm.plot(pen=pg.mkPen(rgba, width=2))
             rpm_legend.addItem(curve, f"{name} 实测")
             self._rpm_curves.append(curve)
             tgt_curve = self._plot_rpm.plot(
-                pen=pg.mkPen(color, width=2, style=Qt.PenStyle.DashLine),
+                pen=pg.mkPen(rgba, width=2, style=Qt.PenStyle.DashLine),
             )
             rpm_legend.addItem(tgt_curve, f"{name} 目标")
             self._target_curves.append(tgt_curve)

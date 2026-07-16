@@ -220,6 +220,69 @@ static void attitude_load_nvs_gyro_offset(void)
     FusionBiasSetOffset(&s_bias, offset);
 }
 
+/**
+ * 启动时自动采集陀螺零偏：假设小车静止，采集 gyro_samples 帧求均值，
+ * 写入 NVS 供后续启动直接加载。仅在校准数据为空（全 0）时触发。
+ */
+#define ATTITUDE_AUTO_CALIB_GYRO_SAMPLES 150U  /* 3s @ 50Hz */
+static void attitude_auto_calib_gyro_bias_if_needed(const imu_sample_t *imu)
+{
+    static uint16_t s_calib_count;
+    static float s_calib_sum_x;
+    static float s_calib_sum_y;
+    static float s_calib_sum_z;
+    static bool_t s_calib_done;
+    const nvs_cfg_t *cfg;
+    float avg_x, avg_y, avg_z;
+    nvs_imu_offset_t offset;
+
+    if (s_calib_done != FALSE) {
+        return;
+    }
+
+    cfg = nvs_cfg_get();
+    if (cfg == NULL) {
+        s_calib_done = TRUE;
+        return;
+    }
+
+    /* 仅当 NVS 中 gyro offset 全为 0（未校准过）时才自动采集 */
+    if (cfg->imu_offset.gyro[0] != 0.0f || cfg->imu_offset.gyro[1] != 0.0f ||
+        cfg->imu_offset.gyro[2] != 0.0f) {
+        s_calib_done = TRUE;
+        return;
+    }
+
+    if (s_calib_count < ATTITUDE_AUTO_CALIB_GYRO_SAMPLES) {
+        FusionVector gyro = attitude_raw_to_gyro_dps(imu);
+
+        s_calib_sum_x += gyro.axis.x;
+        s_calib_sum_y += gyro.axis.y;
+        s_calib_sum_z += gyro.axis.z;
+        s_calib_count++;
+        return;
+    }
+
+    avg_x = s_calib_sum_x / (float)ATTITUDE_AUTO_CALIB_GYRO_SAMPLES;
+    avg_y = s_calib_sum_y / (float)ATTITUDE_AUTO_CALIB_GYRO_SAMPLES;
+    avg_z = s_calib_sum_z / (float)ATTITUDE_AUTO_CALIB_GYRO_SAMPLES;
+
+    s_calib_done = TRUE;
+
+    offset.gyro[0] = avg_x;
+    offset.gyro[1] = avg_y;
+    offset.gyro[2] = avg_z;
+    offset.accel[0] = 0.0f;
+    offset.accel[1] = 0.0f;
+    offset.accel[2] = 0.0f;
+
+    if (nvs_param_set_imu_offset(&offset, NVS_WRITE_SRC_PROTOCOL) == STATUS_OK) {
+        FusionVector fv = {.axis.x = avg_x, .axis.y = avg_y, .axis.z = avg_z};
+
+        FusionBiasSetOffset(&s_bias, fv);
+    }
+}
+
 static void attitude_load_nvs_mag_heading_offset(void)
 {
     const nvs_cfg_t *cfg = nvs_cfg_get();
@@ -380,6 +443,8 @@ static void attitude_update_fusion(const imu_sample_t *imu, const magnetometer_s
     bool_t mag_ok = FALSE;
 
     FusionVector gyro_raw;
+
+    attitude_auto_calib_gyro_bias_if_needed(imu);
 
     gyro_raw = attitude_raw_to_gyro_dps(imu);
     accelerometer = attitude_raw_to_accel_g(imu);

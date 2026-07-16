@@ -46,6 +46,12 @@
 #define CHASSIS_ANGLE_GZ_DAMP_SCALE   0.12f
 #endif
 
+#ifndef CHASSIS_ANGLE_MIN_TICKS
+/** 最小机动 tick 数（20ms/tick）：防止小角度时齿轮回差导致里程计虚高、PID 过早收力。
+ *  15 ticks = 300ms，足以消除齿轮箱回差。 */
+#define CHASSIS_ANGLE_MIN_TICKS       15U
+#endif
+
 #ifndef CHASSIS_DISTANCE_DEADBAND_MM
 /** |误差| 低于此值视为到位并停车 */
 #define CHASSIS_DISTANCE_DEADBAND_MM   8.0f
@@ -98,6 +104,7 @@ static bool_t s_angle_yaw_filt_valid;
 static f32_t s_angle_odom_yaw;
 static bool_t s_angle_odom_valid;
 static f32_t s_angle_done_tol_deg;
+static u16_t s_angle_tick_count;
 static int32_t s_odom_enc_prev[CHASSIS_MOTOR_COUNT];
 
 static s32_t s_dist_target_mm;
@@ -173,6 +180,7 @@ static void chassis_angle_complete(void)
     s_angle_target_yaw_f = 0.0f;
     s_angle_current_yaw = 0;
     s_angle_turn_rpm = 0;
+    s_angle_tick_count = 0;
     s_active = FALSE;
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     s_angle_odom_valid = FALSE;
@@ -224,6 +232,11 @@ static void chassis_odom_enc_snapshot(void)
     }
 }
 
+#ifndef CHASSIS_ODOM_4WD_AVG
+/** 1=4WD 里程计平均 M1+M3 / M2+M4；0=仅用 M1/M2（与 2WD 一致） */
+#define CHASSIS_ODOM_4WD_AVG  0
+#endif
+
 static void chassis_odom_side_deltas(u8_t motor_count, int32_t *d_left, int32_t *d_right)
 {
     int32_t c0 = cfg_encoder_count(0);
@@ -236,6 +249,7 @@ static void chassis_odom_side_deltas(u8_t motor_count, int32_t *d_left, int32_t 
     *d_left = d0;
     *d_right = d1;
 
+#if CHASSIS_ODOM_4WD_AVG
     if (motor_count < CHASSIS_MOTOR_COUNT) {
         return;
     }
@@ -256,6 +270,9 @@ static void chassis_odom_side_deltas(u8_t motor_count, int32_t *d_left, int32_t 
             *d_right = (d1 + d3) / 2;
         }
     }
+#else
+    (void)motor_count;
+#endif
 }
 
 static void chassis_angle_odom_begin_maneuver(void)
@@ -396,13 +413,13 @@ static f32_t chassis_angle_done_tol_deg(f32_t target_deg)
         return CHASSIS_ANGLE_DEADBAND_DEG;
     }
 
-    /* 12% 容差（原 25% 过于宽松，45° 目标容许 11° 误差无法接受） */
-    tol = a * 0.12f;
-    if (tol < 5.0f) {
-        tol = 5.0f;
+    /* 5% 容差，下限 2°（12% 过大，90°→10.8° 造成 ~30% 欠转） */
+    tol = a * 0.05f;
+    if (tol < 2.0f) {
+        tol = 2.0f;
     }
-    if (tol > a * 0.60f) {
-        tol = a * 0.60f;
+    if (tol > a * 0.50f) {
+        tol = a * 0.50f;
     }
     if (tol < CHASSIS_ANGLE_DEADBAND_DEG) {
         tol = CHASSIS_ANGLE_DEADBAND_DEG;
@@ -445,6 +462,7 @@ static void chassis_angle_clear_state(void)
     s_angle_yaw_filt_valid = FALSE;
     s_angle_odom_valid = FALSE;
     s_angle_done_tol_deg = CHASSIS_ANGLE_DEADBAND_DEG;
+    s_angle_tick_count = 0;
     pid_reset(&s_pid_yaw);
     attitude_yaw_hold_set(FALSE);
 }
@@ -501,13 +519,17 @@ static void chassis_angle_update_lr(f32_t dt_s)
     }
 
     s_angle_current_yaw = chassis_yaw_deg_to_i16(s_angle_yaw_filt);
+    s_angle_tick_count++;
     /* 连续域目标 - 当前：相对 Δθ 不受 ±180 wrap 影响 */
     yaw_err = s_angle_target_yaw_f - s_angle_yaw_filt;
     base_rpm = chassis_clamp_rpm((f32_t)s_angle_base_rpm);
 
-    if (fabsf(yaw_err) <= s_angle_done_tol_deg) {
-        chassis_angle_complete();
-        return;
+    /* 最小机动 tick 内不判定到位：防止齿轮回差导致里程计虚高、PID 过早收力 */
+    if (s_angle_tick_count >= CHASSIS_ANGLE_MIN_TICKS) {
+        if (fabsf(yaw_err) <= s_angle_done_tol_deg) {
+            chassis_angle_complete();
+            return;
+        }
     }
 
     g = cfg_pid_yaw();
@@ -525,7 +547,8 @@ static void chassis_angle_update_lr(f32_t dt_s)
     }
     turn_rpm = turn_pi + turn_d;
 
-    if ((fabsf(yaw_err) <= s_angle_done_tol_deg * 1.5f) &&
+    if (s_angle_tick_count >= CHASSIS_ANGLE_MIN_TICKS &&
+        (fabsf(yaw_err) <= s_angle_done_tol_deg * 1.5f) &&
         (fabsf(turn_rpm) < CHASSIS_ANGLE_MIN_TURN_RPM)) {
         chassis_angle_complete();
         return;
@@ -538,6 +561,14 @@ static void chassis_angle_update_lr(f32_t dt_s)
         turn_rpm = max_turn;
     } else if (turn_rpm < -max_turn) {
         turn_rpm = -max_turn;
+    }
+
+    /* 最小机动 tick 内保持最低差速，确保齿轮回差被消除 */
+    if (s_angle_tick_count < CHASSIS_ANGLE_MIN_TICKS) {
+        f32_t min_turn = CHASSIS_ANGLE_MIN_TURN_RPM * 6.0f;
+        if (fabsf(turn_rpm) < min_turn) {
+            turn_rpm = (turn_rpm >= 0.0f) ? min_turn : -min_turn;
+        }
     }
 
     left = (s32_t)(base_rpm - turn_rpm);
@@ -886,11 +917,13 @@ void chassis_set_wheel_rpm(u8_t motor_id, s32_t rpm)
         return;
     }
 
+    chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
     s_target_rpm[motor_id - 1U] = chassis_clamp_rpm((f32_t)rpm);
     s_active = TRUE;
+    chassis_unlock();
 }
 
 static void chassis_apply_lr_rpm(s32_t left_rpm, s32_t right_rpm)
@@ -914,10 +947,12 @@ static void chassis_apply_lr_rpm(s32_t left_rpm, s32_t right_rpm)
 
 void chassis_set_lr_rpm(s32_t left_rpm, s32_t right_rpm)
 {
+    chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
     chassis_apply_lr_rpm(left_rpm, right_rpm);
+    chassis_unlock();
 }
 
 void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t steer_max)
@@ -936,9 +971,11 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
         steer_max = 1000;
     }
 
+    chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_reset_speed_pids();
 
     max_rpm = (lim != NULL) ? lim->max_rpm : 300.0f;
     base_rpm = ((f32_t)throttle / (f32_t)throttle_max) * max_rpm;
@@ -946,16 +983,19 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
     left = (s32_t)(base_rpm - turn_rpm);
     right = (s32_t)(base_rpm + turn_rpm);
     chassis_apply_lr_rpm(left, right);
+    chassis_unlock();
 }
 
 void chassis_set_angle(s16_t target_yaw_deg, s32_t base_rpm, s32_t max_turn_rpm)
 {
+    chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_ANGLE;
     chassis_distance_clear_state();
     chassis_reset_speed_pids();
     s_angle_base_rpm = base_rpm;
     s_angle_max_turn_rpm = max_turn_rpm;
     s_angle_turn_rpm = 0;
+    s_angle_tick_count = 0;
     s_angle_yaw_filt_valid = FALSE;
     pid_reset(&s_pid_yaw);
     attitude_yaw_hold_set(TRUE);
@@ -966,10 +1006,12 @@ void chassis_set_angle(s16_t target_yaw_deg, s32_t base_rpm, s32_t max_turn_rpm)
     s_angle_target_yaw = chassis_yaw_deg_to_i16(s_angle_target_yaw_f);
     s_angle_done_tol_deg = chassis_angle_done_tol_deg(s_angle_target_yaw_f);
     s_active = TRUE;
+    chassis_unlock();
 }
 
 void chassis_set_distance(s32_t target_dist_mm, s32_t max_rpm)
 {
+    chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_DISTANCE;
     chassis_angle_clear_state();
     chassis_reset_speed_pids();
@@ -982,6 +1024,7 @@ void chassis_set_distance(s32_t target_dist_mm, s32_t max_rpm)
     s_dist_target_mm = target_dist_mm;
     s_dist_done_tol_mm = chassis_distance_done_tol_mm(s_dist_target_mm_f);
     s_active = TRUE;
+    chassis_unlock();
 }
 
 s32_t chassis_get_wheel_rpm(u8_t motor_id)
@@ -997,6 +1040,15 @@ s32_t chassis_get_wheel_rpm(u8_t motor_id)
         return (s32_t)(rpm + 0.5f);
     }
     return (s32_t)(rpm - 0.5f);
+}
+
+void chassis_get_encoder_counts(s32_t out[4])
+{
+    u8_t i;
+
+    for (i = 0U; i < 4U; i++) {
+        out[i] = cfg_encoder_count(i);
+    }
 }
 
 void chassis_tick(u32_t period_ms)

@@ -931,9 +931,10 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
 
     cfg->last_mode = NVS_RUN_MODE_IDLE;
 
-    /* 出厂 encoder_dir_mask 由 encoder_polarity_board.h / encoder_polarity.h 决定 */
+    /* 出厂 encoder_dir_mask / motor_dir_mask 由 encoder_polarity_board.h / encoder_polarity.h 决定 */
     if (profile->product_id != DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
         cfg->encoder_dir_mask = encoder_polarity_default_mask();
+        cfg->motor_dir_mask = motor_polarity_default_mask();
     }
 }
 
@@ -950,11 +951,8 @@ static void nvs_cfg_reconcile_encoder_dir(nvs_cfg_t *cfg)
     }
 
     expected = encoder_polarity_default_mask();
-    /*
-     * M1/M2 左右轮以板级宏为准；保留 M3/M4 用户位。
-     * 清理旧固件误将 M1 写入 encoder_dir_mask 的情况（如 0x03 → 0x02）。
-     */
-    cfg->encoder_dir_mask = (cfg->encoder_dir_mask & 0x0CU) | expected;
+    /* 编码器极性是板级固定属性，全部以编译期默认值为准 */
+    cfg->encoder_dir_mask = expected;
 }
 
 static void nvs_cfg_reconcile_motor_dir(nvs_cfg_t *cfg)
@@ -970,8 +968,8 @@ static void nvs_cfg_reconcile_motor_dir(nvs_cfg_t *cfg)
     }
 
     expected = motor_polarity_default_mask();
-    cfg->motor_dir_mask = (cfg->motor_dir_mask & ~0x03U) | (expected & 0x03U) |
-                          (cfg->motor_dir_mask & 0x0CU);
+    /* 电机极性是板级固定属性（非用户偏好），全部以编译期默认值为准 */
+    cfg->motor_dir_mask = expected;
 }
 
 static int nvs_load_blob_exact(const char *ns, const char *key, void *dst, u32_t expect_len)

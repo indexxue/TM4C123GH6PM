@@ -9,7 +9,7 @@ from __future__ import annotations
 import struct
 from dataclasses import dataclass, field
 from enum import IntEnum, IntFlag
-from typing import Iterable, Optional
+from typing import Iterable, Optional, cast
 
 SOF = b"TM"
 PROTO_VER = 0x02
@@ -491,6 +491,7 @@ class AngleLoopPush:
     current_yaw: int
     turn_rpm: int
     base_rpm: int
+    enc: tuple[int, int, int, int] = (0, 0, 0, 0)
 
 
 @dataclass
@@ -505,11 +506,21 @@ def parse_angle_loop_push(payload: bytes) -> AngleLoopPush:
     if len(payload) < 12:
         raise ProtoError("角度环推送载荷过短")
     target_yaw, current_yaw, turn_rpm, base_rpm = struct.unpack_from("<hhii", payload, 0)
+    enc = (0, 0, 0, 0)
+    if len(payload) >= 28:  # 新格式含 4×i32 编码器计数
+        try:
+            enc = cast(
+                tuple[int, int, int, int],
+                struct.unpack_from("<iiii", payload, 16),
+            )
+        except struct.error:
+            pass
     return AngleLoopPush(
         target_yaw=target_yaw,
         current_yaw=current_yaw,
         turn_rpm=turn_rpm,
         base_rpm=base_rpm,
+        enc=enc,
     )
 
 

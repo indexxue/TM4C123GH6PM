@@ -996,7 +996,9 @@ static void proto_push_motor_rpm(void)
 
 static void proto_push_angle_loop(void)
 {
-    uint8_t payload[5U + 2U + 2U + 4U + 4U];
+    uint8_t payload[5U + 2U + 2U + 4U + 4U + (4U * 4U)];
+    s32_t enc[4];
+    u8_t i;
 
     payload[0] = PROTO_PUSH_CH_ANGLE_LOOP;
     proto_put_u32(&payload[1], proto_uptime_ms());
@@ -1004,6 +1006,10 @@ static void proto_push_angle_loop(void)
     proto_put_i16(&payload[7], chassis_get_angle_current_yaw());
     proto_put_i32(&payload[9], chassis_get_angle_turn_rpm());
     proto_put_i32(&payload[13], chassis_get_angle_base_rpm());
+    chassis_get_encoder_counts(enc);
+    for (i = 0U; i < 4U; i++) {
+        proto_put_i32(&payload[17U + (i * 4U)], enc[i]);
+    }
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 

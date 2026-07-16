@@ -176,6 +176,10 @@ class AngleLogSession:
             base_rpm=sample.base_rpm,
             yaw_meas_deg=round(yaw_meas_deg, 3),
             yaw_target_deg=round(yaw_target_deg, 3),
+            enc_m1=sample.enc[0],
+            enc_m2=sample.enc[1],
+            enc_m3=sample.enc[2],
+            enc_m4=sample.enc[3],
         )
 
     def record_attitude(self, roll: float, pitch: float, yaw: float) -> None:

@@ -140,6 +140,7 @@ class MainWindow(QMainWindow):
             self._param_panel.editor(18),
         )
         self._drive = DriveTab(self._worker)
+        self._drive.on_motor_count_changed = self._on_drive_motor_count_changed
         self._pid_tuning = PidTuningTab(self._worker)
 
         self._dashboard.subscribe_panel.changed.connect(self._on_subscribe_apply)
@@ -199,6 +200,10 @@ class MainWindow(QMainWindow):
             self._pid_tuning.reset()
             self._drive.reset()
 
+    def _on_drive_motor_count_changed(self, count: int) -> None:
+        self._plot.set_motor_count(count)
+        self._pid_tuning.set_motor_count(count)
+
     def _on_hello(self, info: proto.HelloInfo) -> None:
         self._proto_ver = info.proto_ver
         self._hello_label.setText(
@@ -211,8 +216,6 @@ class MainWindow(QMainWindow):
         self._dashboard.subscribe_panel.set_rpm_available(has_speed)
         self._dashboard.subscribe_panel.set_angle_available(has_angle)
         self._dashboard.subscribe_panel.set_distance_available(has_distance)
-        if info.hw_rev == proto.HW_REV_CAR_4WD_V1:
-            self._append_log("提示: 固件为四轮车型，上位机默认按两轮调试；可在各页切换「四轮」")
         self._pid_tuning.on_hello(info.caps)
         self._drive.on_hello(info.caps, info.hw_rev)
         if info.proto_ver < proto.PROTO_VER:

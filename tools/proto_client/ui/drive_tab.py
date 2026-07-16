@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
+from typing import Callable, Optional
 
 import tm_proto as proto
 # removed MapOdometry,MapPose
@@ -65,6 +65,7 @@ class DriveTab(QWidget):
         self._worker = worker
         self._caps = 0
         self._motor_count = proto.MOTOR_COUNT_DEFAULT
+        self.on_motor_count_changed: Callable[[int], None] = lambda count: None
         self._active_key: Optional[str] = None
         self._direction_buttons: dict[str, QPushButton] = {}
         self._navigating = False
@@ -216,7 +217,7 @@ class DriveTab(QWidget):
 
     def _on_motor_combo(self) -> None:
         self._motor_count = int(self._motor_combo.currentData())
-        # odom removed
+        self.on_motor_count_changed(self._motor_count)
         self._refresh_status()
 
     def _vector_for_key(self, key: str) -> DriveVector:
@@ -400,8 +401,10 @@ class DriveTab(QWidget):
         self._caps = caps
         if hw_rev == proto.HW_REV_CAR_2WD_V1:
             self._motor_combo.setCurrentIndex(0)
+        elif hw_rev == proto.HW_REV_CAR_4WD_V1:
+            self._motor_combo.setCurrentIndex(1)
         self._motor_count = int(self._motor_combo.currentData())
-        # odom removed
+        self.on_motor_count_changed(self._motor_count)
         self._update_controls()
         self._refresh_status()
 

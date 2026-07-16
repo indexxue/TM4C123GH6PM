@@ -21,7 +21,7 @@
 /* --- 电机输出：逻辑 RPM 是否对 H 桥取反（实板 M1/M2 物理正方向与线序相反） --- */
 #define MOTOR_POL_M1_CMD_INVERT       1
 #define MOTOR_POL_M2_CMD_INVERT       1
-#define MOTOR_POL_M3_CMD_INVERT       0
+#define MOTOR_POL_M3_CMD_INVERT       1
 #define MOTOR_POL_M4_CMD_INVERT       0
 
 #endif /* ENCODER_POLARITY_BOARD_H */
