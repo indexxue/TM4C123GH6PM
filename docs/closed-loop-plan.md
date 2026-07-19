@@ -14,7 +14,7 @@
 |------|----------|--------|------|
 | **内环** | 四轮（或两轮）轮速 | 编码器 | 各电机 PWM / 等效 RPM |
 | **外环 — 遥控** | 车体线速度 + 转向 | 无（开环期望） | 左右轮速设定 |
-| **外环 — 循迹** | 横向偏差（相对黑线） | 5 路 TCRT5000 ADC | 转向修正量叠加到基准速度 |
+| **外环 — 循迹** | 横向偏差（相对黑线） | 6 路 TCRT5000 ADC | 转向修正量叠加到基准速度 |
 | **可选** | 航向角 | IMU yaw / 编码器差速 | 转向修正（后续迭代） |
 
 最终用户可见能力：
@@ -45,7 +45,7 @@
 
 ```text
   遥控：throttle/steer → 左右轮目标 RPM（差速，开环期望）
-  循迹：5 路 ADC → 横向偏差 → pid_line → turn 修正
+  循迹：6 路 ADC → 横向偏差 → pid_line → turn 修正
                     ↓
             四轮速度 PID（内环）← 必做
                     ↓
@@ -91,7 +91,7 @@
 |------|------|----------|
 | 电机 PWM + 方向 | 开环固定占空比 50% | `projects/car-4wd/board/src/motor.c` |
 | 编码器计数 | M1/M2 硬件 QEI，M3/M4 软件 QEI | `encoder.c`、`bsp_sw_qei` |
-| 循迹 ADC | 5 路采样就绪 | `line.c`、`APP_CTRL_PERIOD_MS=20` |
+| 循迹 ADC | 6 路采样就绪 | `line.c`、`APP_CTRL_PERIOD_MS=20` |
 | IMU / 磁力计 / 姿态 | Mahony + Fusion，50 Hz | `Common/src/attitude.c`、`app.c` |
 | NVS 参数框架 | `pid_speed`、`pid_line`、`kinematics`、`spd_limit` 已有默认值 | `Common/src/nvs.c` |
 | 蓝牙遥控 | 开环 `proto_apply_drive` | `Common/src/proto.c` |
@@ -286,12 +286,12 @@ chassis_tick(APP_CTRL_PERIOD_MS);
 
 ### 阶段 5：循迹偏差与阈值
 
-**目的**：5 路 ADC → 横向误差，暂不控车。
+**目的**：6 路 ADC → 横向误差，暂不控车。
 
 | 项 | 内容 |
 |----|------|
-| 改动 | `line_follow.c`：`line_follow_compute_error(adc[5])` |
-| 算法 | 推荐加权重心：对低于 `cfg_line_threshold(i)` 的通道赋权重 `-2,-1,0,+1,+2`（按板子左→右顺序校准） |
+| 改动 | `line_follow.c`：`line_follow_compute_error(adc[6])` |
+| 算法 | 推荐加权重心：对低于 `cfg_line_threshold(i)` 的通道赋权重 `-5,-3,-1,+1,+3,+5`（按板子左→右顺序校准） |
 | 丢线 | 全白/全黑计数超阈值 → `LINE_STATE_LOST` |
 | 标定 | 厂测或 CMD 写 `line_th`；黑线/白底实测阈值 |
 | 日志 | `app: line err=<f> state=TRACK\|LOST` |

@@ -63,7 +63,7 @@ python -m pip install -r requirements.txt
 
 ```powershell
 cd tools\proto_client
-.\run.cmd                 # 安装依赖并启动主界面
+                 # 安装依赖并启动主界面
 ```
 
 ---

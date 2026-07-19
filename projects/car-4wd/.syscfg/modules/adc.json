@@ -7,6 +7,7 @@
     { "name": "Line2", "module": "ADC0", "channel": 5, "pin": "PD2", "role": "line" },
     { "name": "Line3", "module": "ADC0", "channel": 6, "pin": "PD1", "role": "line" },
     { "name": "Line4", "module": "ADC0", "channel": 7, "pin": "PD0", "role": "line" },
-    { "name": "Line5", "module": "ADC0", "channel": 8, "pin": "PE5", "role": "line" }
+    { "name": "Line5", "module": "ADC0", "channel": 8, "pin": "PE5", "role": "line" },
+    { "name": "Line6", "module": "ADC0", "channel": 9, "pin": "PE4", "role": "line" }
   ]
 }

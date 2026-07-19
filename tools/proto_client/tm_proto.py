@@ -63,9 +63,19 @@ DEFAULT_SUB_ULTRA_HZ = 5
 DEFAULT_SUB_MOTOR_RPM_HZ = 10
 DEFAULT_SUB_ANGLE_LOOP_HZ = 10
 DEFAULT_SUB_DISTANCE_LOOP_HZ = 10
+DEFAULT_SUB_LINE_LOOP_HZ = 10
 
-# 与固件 board.h LINE_SENSOR_COUNT 一致（car-4wd 为 5 路）
-LINE_SENSOR_COUNT = 5
+# 与固件 NVS_CFG_LINE_SENSOR_COUNT / 协议位掩码一致（两车型均为 6 路）
+LINE_SENSOR_COUNT = 6
+# 默认循迹阈值（与 NVS 出厂一致）；高 ADC ≥ 此值视为黑线
+LINE_DEFAULT_THRESHOLD = 2048
+
+# NVS param_id（与 nvs_param_id_t 一致）
+PARAM_PID_SPEED = 5
+PARAM_PID_LINE = 6
+PARAM_LINE_THRESHOLD = 11
+PARAM_LINE_POLARITY = 19
+PARAM_LINE_BASE_RPM = 20
 
 # 超声波未连接/未就绪占位（与固件 PROTO_ULTRA_INVALID_MM 一致）
 ULTRASONIC_INVALID_MM = 9999
@@ -96,6 +106,8 @@ class Cmd(IntEnum):
     CALIB_YAW = 0x0036
     SET_DISTANCE = 0x0037
     DISTANCE_STOP = 0x0038
+    SET_LINE_FOLLOW = 0x0039
+    LINE_FOLLOW_STOP = 0x003A
 
 
 class Cap(IntFlag):
@@ -107,6 +119,7 @@ class Cap(IntFlag):
     ANGLE_LOOP = 1 << 5
     YAW_CALIB = 1 << 6
     DISTANCE_LOOP = 1 << 7
+    LINE_FOLLOW = 1 << 8
 
 
 class TelChannel(IntFlag):
@@ -118,12 +131,13 @@ class TelChannel(IntFlag):
     MOTOR_RPM = 1 << 5
     ANGLE_LOOP = 1 << 6
     DISTANCE_LOOP = 1 << 7
+    LINE_LOOP = 1 << 8
 
 
 BASE_CHANNEL_MASK = int(TelChannel.ATTITUDE | TelChannel.ENCODER)
 OPTIONAL_CHANNEL_MASK = int(
     TelChannel.BATT | TelChannel.LINE_ADC | TelChannel.ULTRASONIC | TelChannel.MOTOR_RPM |
-    TelChannel.ANGLE_LOOP | TelChannel.DISTANCE_LOOP
+    TelChannel.ANGLE_LOOP | TelChannel.DISTANCE_LOOP | TelChannel.LINE_LOOP
 )
 
 CHANNEL_ID_BATTERY = 0
@@ -134,6 +148,7 @@ CHANNEL_ID_ULTRASONIC = 4
 CHANNEL_ID_MOTOR_RPM = 5
 CHANNEL_ID_ANGLE_LOOP = 6
 CHANNEL_ID_DISTANCE_LOOP = 7
+CHANNEL_ID_LINE_LOOP = 8
 
 HW_REV_CAR_4WD_V1 = 0
 HW_REV_CAR_2WD_V1 = 1
@@ -404,7 +419,7 @@ def parse_telemetry(payload: bytes, line_count: int = LINE_SENSOR_COUNT,
         if len(payload) >= old_size + 2:
             (distance_mm,) = struct.unpack_from("<H", payload, old_size)
         raw_adc = values[line_base:line_base + line_count]
-        line_det = tuple(1 if v < 2048 else 0 for v in raw_adc)
+        line_det = tuple(1 if v >= LINE_DEFAULT_THRESHOLD else 0 for v in raw_adc)
         return TelemetrySnapshot(
             batt_mv=values[0],
             batt_pct=values[1],
@@ -456,14 +471,42 @@ def parse_battery_push(payload: bytes) -> tuple[int, int]:
     return batt_mv, batt_pct
 
 
-def parse_line_adc_push(payload: bytes, line_count: int = LINE_SENSOR_COUNT) -> tuple[int, ...]:
-    """推送 / 遥测：1 字节位掩码（bit=1 表示检测到线）；兼容旧版 u16×N 原始 ADC。"""
+@dataclass
+class LineAdcPush:
+    """循迹推送：detect=0/1 元组，adc=原始 ADC。"""
+
+    detect: tuple[int, ...]
+    adc: tuple[int, ...]
+    mask: int = 0
+
+
+def parse_line_adc_push(payload: bytes, line_count: int = LINE_SENSOR_COUNT) -> LineAdcPush:
+    """解析循迹推送。
+
+    新格式：`[mask u8][adc u16 × N]`
+    兼容：仅 1 字节 mask；或仅 `u16 × N` 原始 ADC。
+    """
     if len(payload) == 1:
-        return line_mask_to_tuple(payload[0], line_count)
+        mask = payload[0]
+        detect = line_mask_to_tuple(mask, line_count)
+        return LineAdcPush(detect=detect, adc=detect, mask=mask)
+
+    new_need = 1 + (2 * line_count)
+    if len(payload) >= new_need:
+        mask = payload[0]
+        adc = struct.unpack_from(f"<{line_count}H", payload, 1)
+        return LineAdcPush(
+            detect=line_mask_to_tuple(mask, line_count),
+            adc=adc,
+            mask=mask,
+        )
+
     need = 2 * line_count
     if len(payload) < need:
         raise ProtoError(f"循迹 ADC 推送载荷过短: {len(payload)} < {need}")
-    return struct.unpack_from(f"<{line_count}H", payload, 0)
+    adc = struct.unpack_from(f"<{line_count}H", payload, 0)
+    detect = tuple(1 if v >= LINE_DEFAULT_THRESHOLD else 0 for v in adc)
+    return LineAdcPush(detect=detect, adc=adc, mask=0)
 
 
 def parse_encoder_push(payload: bytes) -> tuple[int, int, int, int]:
@@ -536,6 +579,33 @@ def parse_distance_loop_push(payload: bytes) -> DistanceLoopPush:
     )
 
 
+@dataclass
+class LineLoopPush:
+    error_x100: int
+    mask: int
+    state: int
+    left_rpm: int
+    right_rpm: int
+    turn_rpm: int
+
+
+def parse_line_loop_push(payload: bytes) -> LineLoopPush:
+    """payload 为 strip 掉 ch+uptime 后的体：error×100 i16, mask u8, state u8, L/R/turn i32。"""
+    if len(payload) < 16:
+        raise ProtoError("循迹环推送载荷过短")
+    error_x100, mask, state, left_rpm, right_rpm, turn_rpm = struct.unpack_from(
+        "<hBBiii", payload, 0
+    )
+    return LineLoopPush(
+        error_x100=error_x100,
+        mask=mask & 0xFF,
+        state=state & 0xFF,
+        left_rpm=left_rpm,
+        right_rpm=right_rpm,
+        turn_rpm=turn_rpm,
+    )
+
+
 def parse_param_list(payload: bytes) -> list[ParamListEntry]:
     entries: list[ParamListEntry] = []
     stride = 8
@@ -545,12 +615,20 @@ def parse_param_list(payload: bytes) -> list[ParamListEntry]:
     return entries
 
 
-def build_subscribe(mask: int, hz_att: int = 0, hz_enc: int = 0, hz_line: int = 0,
-                    hz_ultra: int = 0, hz_motor_rpm: int = 0,
-                    hz_angle_loop: int = 0, hz_distance_loop: int = 0) -> bytes:
-    # mask u32 + 7×u8（第 6/7 字节为 angle/distance loop Hz）
+def build_subscribe(
+    mask: int,
+    hz_att: int = 0,
+    hz_enc: int = 0,
+    hz_line: int = 0,
+    hz_ultra: int = 0,
+    hz_motor_rpm: int = 0,
+    hz_angle_loop: int = 0,
+    hz_distance_loop: int = 0,
+    hz_line_loop: int = 0,
+) -> bytes:
+    # mask u32 + 8×u8（末字节为 line_loop Hz）
     return struct.pack(
-        "<IBBBBBBB",
+        "<IBBBBBBBB",
         mask,
         hz_att & 0xFF,
         hz_enc & 0xFF,
@@ -559,6 +637,7 @@ def build_subscribe(mask: int, hz_att: int = 0, hz_enc: int = 0, hz_line: int = 
         hz_motor_rpm & 0xFF,
         hz_angle_loop & 0xFF,
         hz_distance_loop & 0xFF,
+        hz_line_loop & 0xFF,
     )
 
 
@@ -609,6 +688,18 @@ def build_set_distance(dist_mm: int, max_rpm: int = 0) -> bytes:
     return struct.pack("<ii", dist_mm, max_rpm)
 
 
+def build_set_line_follow(base_rpm=None) -> bytes:
+    """base_rpm=None 使用 NVS line_base_rpm；否则本次覆盖。"""
+    if base_rpm is None:
+        return struct.pack("<B", 0)
+    return struct.pack("<Bi", 1, int(base_rpm))
+
+
+def build_line_threshold_all(th: int = 2048) -> bytes:
+    th = max(0, min(4095, int(th)))
+    return struct.pack("<" + "H" * LINE_SENSOR_COUNT, *([th] * LINE_SENSOR_COUNT))
+
+
 def build_calib_yaw(ref_yaw: int) -> bytes:
     """静止水平时，将当前物理朝向设为 ref_yaw（-180~180°）。"""
     ref = max(-180, min(180, int(ref_yaw)))
@@ -640,6 +731,8 @@ def caps_text(caps: int) -> str:
         names.append("YAW_CALIB")
     if caps & Cap.DISTANCE_LOOP:
         names.append("DISTANCE_LOOP")
+    if caps & Cap.LINE_FOLLOW:
+        names.append("LINE_FOLLOW")
     return ", ".join(names) if names else "none"
 
 

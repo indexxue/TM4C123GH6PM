@@ -56,15 +56,18 @@ const bsp_uart_config_t BOARD_UART_DEBUG_CFG = { UART7_BASE, 115200 };
 const bsp_i2c_config_t BOARD_I2C_CFG = { I2C0_BASE, 400000 };
 
 static const bsp_adc_channel_t board_line_adc_channels[] = {
-    { 5, 0 },
-    { 4, 1 },
-    { 7, 2 },
+    { 4, 0 },
+    { 5, 1 },
+    { 6, 2 },
+    { 7, 3 },
+    { 8, 4 },
+    { 9, 5 },
 };
 const bsp_adc_config_t BOARD_LINE_ADC_CFG = {
-    .base = ADC1_BASE,
+    .base = ADC0_BASE,
     .sequence = 0,
     .channels = board_line_adc_channels,
-    .channel_count = 3,
+    .channel_count = 6,
 };
 
 static const bsp_adc_channel_t board_battery_channel = { 0, 0 };
@@ -97,11 +100,11 @@ bool Board_UartDebug_Init(void) {
 }
 
 bool Board_Periph_Init(void) {
-    if (!bsp_gpio_port_enable(0x1Bu)) {
+    if (!bsp_gpio_port_enable(0x1Fu)) {
         return false;
     }
+    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_3);
     gpio_inputs(GPIO_PORTD_BASE, GPIO_PIN_5, false);
-    gpio_outputs(GPIO_PORTE_BASE, GPIO_PIN_4 | GPIO_PIN_5);
     GPIOPinConfigure(GPIO_PB0_U1RX);
     GPIOPinTypeUART(GPIO_PORTB_BASE, GPIO_PIN_0);
     GPIOPinConfigure(GPIO_PB1_U1TX);
@@ -112,10 +115,12 @@ bool Board_Periph_Init(void) {
     GPIOPinTypeUART(GPIO_PORTE_BASE, GPIO_PIN_1);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_3);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_2);
-    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_2);
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_3);
-    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0);
+    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_2);
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_1);
+    GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_5);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_4);
     GPIOPinConfigure(GPIO_PA4_SSI0RX);
     GPIOPinConfigure(GPIO_PA5_SSI0TX);
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);
@@ -154,7 +159,7 @@ bool Board_Ultra_Init(void) {
     if (!bsp_gpio_port_enable(0x04u)) {
         return false;
     }
-    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_0);
+    gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_0 | GPIO_PIN_2);
     return true;
 }
 

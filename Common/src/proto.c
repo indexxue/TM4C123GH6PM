@@ -11,6 +11,7 @@
 #include "chassis.h"
 #include "cfg.h"
 #include "device_profile.h"
+#include "line_follow.h"
 #include "log.h"
 #include "nvs.h"
 #include "led_scene.h"
@@ -59,6 +60,8 @@
 #define PROTO_CMD_CALIB_YAW         0x0036U
 #define PROTO_CMD_SET_DISTANCE      0x0037U
 #define PROTO_CMD_DISTANCE_STOP     0x0038U
+#define PROTO_CMD_SET_LINE_FOLLOW   0x0039U
+#define PROTO_CMD_LINE_FOLLOW_STOP  0x003AU
 
 #define PROTO_ERR_UNKNOWN_CMD       0x02U
 #define PROTO_ERR_BAD_LEN           0x03U
@@ -77,6 +80,7 @@
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
 #define PROTO_CAP_YAW_CALIB         (1U << 6)
 #define PROTO_CAP_DISTANCE_LOOP     (1U << 7)
+#define PROTO_CAP_LINE_FOLLOW       (1U << 8)
 
 #define PROTO_CH_BATTERY            (1U << 0)
 #define PROTO_CH_ATTITUDE           (1U << 1)
@@ -86,10 +90,12 @@
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
 #define PROTO_CH_DISTANCE_LOOP      (1U << 7)
+#define PROTO_CH_LINE_LOOP          (1U << 8)
 
 #define PROTO_BASE_MASK             (PROTO_CH_ATTITUDE | PROTO_CH_ENCODER)
 #define PROTO_OPTIONAL_MASK         (PROTO_CH_BATTERY | PROTO_CH_LINE_ADC | PROTO_CH_ULTRASONIC | \
-                                     PROTO_CH_MOTOR_RPM | PROTO_CH_ANGLE_LOOP | PROTO_CH_DISTANCE_LOOP)
+                                     PROTO_CH_MOTOR_RPM | PROTO_CH_ANGLE_LOOP | PROTO_CH_DISTANCE_LOOP | \
+                                     PROTO_CH_LINE_LOOP)
 
 #define PROTO_PUSH_CH_BATTERY       0U
 #define PROTO_PUSH_CH_ATTITUDE      1U
@@ -99,6 +105,7 @@
 #define PROTO_PUSH_CH_MOTOR_RPM     5U
 #define PROTO_PUSH_CH_ANGLE_LOOP    6U
 #define PROTO_PUSH_CH_DISTANCE_LOOP 7U
+#define PROTO_PUSH_CH_LINE_LOOP     8U
 
 #define PROTO_DEFAULT_HZ_ATT        10U
 #define PROTO_DEFAULT_HZ_ENC        5U
@@ -108,6 +115,7 @@
 #define PROTO_DEFAULT_HZ_MOTOR_RPM  10U
 #define PROTO_DEFAULT_HZ_ANGLE_LOOP 10U
 #define PROTO_DEFAULT_HZ_DISTANCE_LOOP 10U
+#define PROTO_DEFAULT_HZ_LINE_LOOP  10U
 #define PROTO_PUSH_SUPPRESS_MS      280U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 350U
@@ -137,7 +145,8 @@
 #define PROTO_TX_QUEUE_LEN          (16U)
 #define PROTO_TX_MAX_FRAME          (2U + PROTO_HEADER_SIZE + PROTO_MAX_PAYLOAD + 2U)
 
-#define PROTO_LINE_ADC_COUNT        LINE_SENSOR_COUNT
+/* 协议固定 6 路（与 NVS line_threshold[] / 两车型 ADC 一致）；板级不足时 Line_Sample 填 0 */
+#define PROTO_LINE_ADC_COUNT        NVS_CFG_LINE_SENSOR_COUNT
 #define PROTO_ENCODER_COUNT         4U
 
 /* -------------------------------------------------------------------------- */
@@ -183,12 +192,14 @@ static struct {
     uint8_t hz_motor_rpm;
     uint8_t hz_angle_loop;
     uint8_t hz_distance_loop;
+    uint8_t hz_line_loop;
     uint32_t acc_batt_ms;
     uint32_t acc_line_ms;
     uint32_t acc_ultra_ms;
     uint32_t acc_motor_rpm_ms;
     uint32_t acc_angle_loop_ms;
     uint32_t acc_distance_loop_ms;
+    uint32_t acc_line_loop_ms;
 } s_sub;
 
 static bool_t s_ultra_ready;
@@ -541,7 +552,11 @@ static status_t proto_write_pid_line(const uint8_t *data, uint16_t len)
         return STATUS_INVALID_ARG;
     }
     (void)memcpy(&pid, data, sizeof(pid));
-    return nvs_param_set_pid_line(&pid, NVS_WRITE_SRC_PROTOCOL);
+    if (nvs_param_set_pid_line(&pid, NVS_WRITE_SRC_PROTOCOL) == STATUS_OK) {
+        chassis_reload_line_pid_gains();
+        return STATUS_OK;
+    }
+    return STATUS_FAIL;
 }
 
 static status_t proto_write_pid_yaw(const uint8_t *data, uint16_t len)
@@ -640,6 +655,31 @@ static status_t proto_write_line_threshold(const uint8_t *data, uint16_t len)
     return nvs_param_set_line_threshold(&threshold, NVS_WRITE_SRC_PROTOCOL);
 }
 
+static status_t proto_write_line_polarity(const uint8_t *data, uint16_t len)
+{
+    u8_t pol;
+
+    if ((data == NULL) || (len != sizeof(u8_t))) {
+        return STATUS_INVALID_ARG;
+    }
+    pol = data[0];
+    if (pol > 1U) {
+        return STATUS_INVALID_ARG;
+    }
+    return nvs_param_set_line_polarity(pol, NVS_WRITE_SRC_PROTOCOL);
+}
+
+static status_t proto_write_line_base_rpm(const uint8_t *data, uint16_t len)
+{
+    f32_t rpm;
+
+    if ((data == NULL) || (len != sizeof(f32_t))) {
+        return STATUS_INVALID_ARG;
+    }
+    (void)memcpy(&rpm, data, sizeof(rpm));
+    return nvs_param_set_line_base_rpm(rpm, NVS_WRITE_SRC_PROTOCOL);
+}
+
 static status_t proto_write_encoder_zero(const uint8_t *data, uint16_t len)
 {
     nvs_encoder_zero_t zero;
@@ -694,6 +734,8 @@ static const proto_param_desc_t s_param_table[] = {
     { NVS_PARAM_ENCODER_DIR,  (uint8_t)sizeof(u32_t),              proto_write_encoder_dir },
     { NVS_PARAM_IMU_OFFSET,   (uint8_t)sizeof(nvs_imu_offset_t),   proto_write_imu_offset },
     { NVS_PARAM_LINE_THRESHOLD, (uint8_t)sizeof(nvs_line_threshold_t), proto_write_line_threshold },
+    { NVS_PARAM_LINE_POLARITY, (uint8_t)sizeof(u8_t),                 proto_write_line_polarity },
+    { NVS_PARAM_LINE_BASE_RPM, (uint8_t)sizeof(f32_t),                proto_write_line_base_rpm },
     { NVS_PARAM_ENCODER_ZERO, (uint8_t)sizeof(nvs_encoder_zero_t), proto_write_encoder_zero },
     { NVS_PARAM_BATTERY_CAL,  (uint8_t)sizeof(nvs_battery_cal_t), proto_write_battery_cal },
     { NVS_PARAM_MAG_HEADING,  (uint8_t)sizeof(f32_t),             proto_write_mag_heading },
@@ -769,6 +811,12 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
     case NVS_PARAM_LINE_THRESHOLD:
         (void)memcpy(out, &cfg->line_threshold, sizeof(cfg->line_threshold));
         return (uint16_t)sizeof(cfg->line_threshold);
+    case NVS_PARAM_LINE_POLARITY:
+        out[0] = cfg->line_black_active_high;
+        return 1U;
+    case NVS_PARAM_LINE_BASE_RPM:
+        (void)memcpy(out, &cfg->line_base_rpm, sizeof(cfg->line_base_rpm));
+        return (uint16_t)sizeof(cfg->line_base_rpm);
     case NVS_PARAM_ENCODER_ZERO:
         (void)memcpy(out, &cfg->encoder_zero, sizeof(cfg->encoder_zero));
         return (uint16_t)sizeof(cfg->encoder_zero);
@@ -841,16 +889,9 @@ static uint16_t proto_sample_ultrasonic_mm(void)
 static uint8_t proto_line_detect_mask(void)
 {
     uint16_t line_adc[PROTO_LINE_ADC_COUNT];
-    uint8_t mask = 0U;
-    uint8_t i;
 
     proto_sample_line_adc(line_adc, PROTO_LINE_ADC_COUNT);
-    for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
-        if (line_adc[i] < cfg_line_threshold(i)) {
-            mask |= (uint8_t)(1U << i);
-        }
-    }
-    return mask;
+    return line_follow_mask_from_adc(line_adc, PROTO_LINE_ADC_COUNT);
 }
 
 static uint16_t proto_build_telemetry(uint8_t *out, uint16_t out_max)
@@ -973,11 +1014,18 @@ static void proto_push_battery(void)
 
 static void proto_push_line_adc(void)
 {
-    uint8_t payload[5U + 1U];
+    uint8_t payload[5U + 1U + (2U * PROTO_LINE_ADC_COUNT)];
+    uint16_t line_adc[PROTO_LINE_ADC_COUNT];
+    uint8_t i;
+
+    proto_sample_line_adc(line_adc, PROTO_LINE_ADC_COUNT);
 
     payload[0] = PROTO_PUSH_CH_LINE_ADC;
     proto_put_u32(&payload[1], proto_uptime_ms());
-    payload[5] = proto_line_detect_mask();
+    payload[5] = line_follow_mask_from_adc(line_adc, PROTO_LINE_ADC_COUNT);
+    for (i = 0U; i < PROTO_LINE_ADC_COUNT; i++) {
+        proto_put_u16(&payload[6U + (2U * i)], line_adc[i]);
+    }
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
@@ -1023,6 +1071,43 @@ static void proto_push_distance_loop(void)
     proto_put_i32(&payload[9], chassis_get_distance_current_mm());
     proto_put_i32(&payload[13], chassis_get_distance_cmd_rpm());
     proto_put_i32(&payload[17], chassis_get_distance_max_rpm());
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static s16_t proto_line_error_to_i16(f32_t err)
+{
+    /* 加权偏差约 -5..+5，×100 上报 */
+    f32_t scaled = err * 100.0f;
+    if (scaled > 32767.0f) {
+        return 32767;
+    }
+    if (scaled < -32768.0f) {
+        return -32768;
+    }
+    if (scaled >= 0.0f) {
+        return (s16_t)(scaled + 0.5f);
+    }
+    return (s16_t)(scaled - 0.5f);
+}
+
+static void proto_push_line_loop(void)
+{
+    uint8_t payload[5U + 2U + 1U + 1U + 4U + 4U + 4U];
+    f32_t left;
+    f32_t right;
+    f32_t turn;
+
+    payload[0] = PROTO_PUSH_CH_LINE_LOOP;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    proto_put_i16(&payload[5], proto_line_error_to_i16(line_follow_get_error()));
+    payload[7] = line_follow_get_detect_mask();
+    payload[8] = (uint8_t)line_follow_get_state();
+    left = line_follow_get_left_rpm();
+    right = line_follow_get_right_rpm();
+    turn = line_follow_get_turn_rpm();
+    proto_put_i32(&payload[9], (left >= 0.0f) ? (s32_t)(left + 0.5f) : (s32_t)(left - 0.5f));
+    proto_put_i32(&payload[13], (right >= 0.0f) ? (s32_t)(right + 0.5f) : (s32_t)(right - 0.5f));
+    proto_put_i32(&payload[17], (turn >= 0.0f) ? (s32_t)(turn + 0.5f) : (s32_t)(turn - 0.5f));
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
@@ -1082,6 +1167,10 @@ static uint32_t proto_caps(void)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
         caps |= PROTO_CAP_DISTANCE_LOOP;
     }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE | DEVICE_BOARD_MASK_MOTOR |
+                                   DEVICE_BOARD_MASK_ENCODER)) {
+        caps |= PROTO_CAP_LINE_FOLLOW;
+    }
     if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
         caps |= PROTO_CAP_YAW_CALIB;
     }
@@ -1134,6 +1223,7 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     uint8_t hz_motor_rpm;
     uint8_t hz_angle_loop;
     uint8_t hz_distance_loop;
+    uint8_t hz_line_loop;
 
     if (len < 4U) {
         proto_reply_nak(PROTO_CMD_SUBSCRIBE, seq, PROTO_ERR_BAD_LEN);
@@ -1175,6 +1265,13 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     } else {
         hz_distance_loop = 0U;
     }
+    if (len >= 12U) {
+        hz_line_loop = payload[11];
+    } else if ((mask & PROTO_CH_LINE_LOOP) != 0U) {
+        hz_line_loop = PROTO_DEFAULT_HZ_LINE_LOOP;
+    } else {
+        hz_line_loop = 0U;
+    }
 
     /* 先 ACK 再开推送，避免与应答争用 TX 互斥/共享缓冲 */
     proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
@@ -1199,12 +1296,14 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     s_sub.hz_motor_rpm = hz_motor_rpm;
     s_sub.hz_angle_loop = hz_angle_loop;
     s_sub.hz_distance_loop = hz_distance_loop;
+    s_sub.hz_line_loop = hz_line_loop;
     s_sub.acc_batt_ms = 0U;
     s_sub.acc_line_ms = 0U;
     s_sub.acc_ultra_ms = 0U;
     s_sub.acc_motor_rpm_ms = 0U;
     s_sub.acc_angle_loop_ms = 0U;
     s_sub.acc_distance_loop_ms = 0U;
+    s_sub.acc_line_loop_ms = 0U;
 }
 
 static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16_t len)
@@ -1540,6 +1639,62 @@ static void proto_handle_distance_stop(uint8_t seq)
     proto_reply_ack(PROTO_CMD_DISTANCE_STOP, seq, NULL, 0U);
 }
 
+static void proto_handle_set_line_follow(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    uint8_t format;
+    int32_t base_rpm = 0;
+
+    if ((proto_caps() & PROTO_CAP_LINE_FOLLOW) == 0U) {
+        proto_reply_nak(PROTO_CMD_SET_LINE_FOLLOW, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 1U) {
+        proto_reply_nak(PROTO_CMD_SET_LINE_FOLLOW, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+
+    format = payload[0];
+    switch (format) {
+    case 0U:
+        base_rpm = 0; /* 用 NVS line_base_rpm */
+        break;
+    case 1U:
+        if (len < 5U) {
+            proto_reply_nak(PROTO_CMD_SET_LINE_FOLLOW, seq, PROTO_ERR_BAD_LEN);
+            return;
+        }
+        base_rpm = proto_get_i32(&payload[1]);
+        if ((base_rpm > 1200) || (base_rpm < 0)) {
+            proto_reply_nak(PROTO_CMD_SET_LINE_FOLLOW, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+            return;
+        }
+        break;
+    default:
+        proto_reply_nak(PROTO_CMD_SET_LINE_FOLLOW, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+
+    chassis_set_line_follow(base_rpm);
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
+    proto_reply_ack(PROTO_CMD_SET_LINE_FOLLOW, seq, NULL, 0U);
+}
+
+static void proto_handle_line_follow_stop(uint8_t seq)
+{
+    if ((proto_caps() & PROTO_CAP_LINE_FOLLOW) == 0U) {
+        proto_reply_nak(PROTO_CMD_LINE_FOLLOW_STOP, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    chassis_stop();
+    s_drive_active = false;
+    s_drive_stop_req = false;
+    chassis_tick(PROTO_CHASSIS_TICK_MS);
+    proto_reply_ack(PROTO_CMD_LINE_FOLLOW_STOP, seq, NULL, 0U);
+}
+
 static int16_t proto_float_deg_to_i16(float deg)
 {
     if (deg >= 0.0f) {
@@ -1603,6 +1758,7 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         (cmd == PROTO_CMD_SET_SPEED) || (cmd == PROTO_CMD_SPEED_STOP) ||
         (cmd == PROTO_CMD_ANGLE_STOP) ||
         (cmd == PROTO_CMD_SET_DISTANCE) || (cmd == PROTO_CMD_DISTANCE_STOP) ||
+        (cmd == PROTO_CMD_SET_LINE_FOLLOW) || (cmd == PROTO_CMD_LINE_FOLLOW_STOP) ||
         (cmd == PROTO_CMD_CALIB_YAW) ||
         (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
         proto_rx_gate_hold_cmd();
@@ -1662,6 +1818,12 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         break;
     case PROTO_CMD_DISTANCE_STOP:
         proto_handle_distance_stop(seq);
+        break;
+    case PROTO_CMD_SET_LINE_FOLLOW:
+        proto_handle_set_line_follow(seq, payload, len);
+        break;
+    case PROTO_CMD_LINE_FOLLOW_STOP:
+        proto_handle_line_follow_stop(seq);
         break;
     case PROTO_CMD_CALIB_YAW:
         proto_handle_calib_yaw(seq, payload, len);
@@ -2016,6 +2178,14 @@ void proto_telemetry_tick(uint32_t period_ms)
             proto_push_distance_loop();
         }
     }
+    if ((s_sub.mask & PROTO_CH_LINE_LOOP) != 0U) {
+        s_sub.acc_line_loop_ms += period_ms;
+        if (s_sub.acc_line_loop_ms >=
+            proto_period_ms_for(s_sub.hz_line_loop, PROTO_DEFAULT_HZ_LINE_LOOP)) {
+            s_sub.acc_line_loop_ms = 0U;
+            proto_push_line_loop();
+        }
+    }
 }
 
 status_t proto_uart_service_start(void)
@@ -2061,6 +2231,7 @@ status_t proto_uart_service_start(void)
     s_sub.hz_motor_rpm = PROTO_DEFAULT_HZ_MOTOR_RPM;
     s_sub.hz_angle_loop = PROTO_DEFAULT_HZ_ANGLE_LOOP;
     s_sub.hz_distance_loop = PROTO_DEFAULT_HZ_DISTANCE_LOOP;
+    s_sub.hz_line_loop = PROTO_DEFAULT_HZ_LINE_LOOP;
     s_sub.hz_batt = PROTO_DEFAULT_HZ_BATT;
     s_ultra_ready = FALSE;
     s_ultra_init_attempted = FALSE;

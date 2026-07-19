@@ -57,6 +57,7 @@ class MainWindow(QMainWindow):
         self._worker.motor_rpm_received.connect(self._on_motor_rpm)
         self._worker.angle_loop_received.connect(self._on_angle_loop)
         self._worker.distance_loop_received.connect(self._on_distance_loop)
+        self._worker.line_loop_received.connect(self._on_line_loop)
         self._worker.encoder_counts_received.connect(self._on_encoder_counts)
         self._worker.battery_received.connect(self._on_battery)
         self._worker.optional_subscription_changed.connect(self._on_optional_subscription)
@@ -138,6 +139,8 @@ class MainWindow(QMainWindow):
             self._param_panel.editor(7),
             self._param_panel.editor(16),
             self._param_panel.editor(18),
+            self._param_panel.editor(6),
+            self._param_panel.editor(20),
         )
         self._drive = DriveTab(self._worker)
         self._drive.on_motor_count_changed = self._on_drive_motor_count_changed
@@ -213,9 +216,11 @@ class MainWindow(QMainWindow):
         has_speed = bool(info.caps & int(proto.Cap.SPEED_LOOP))
         has_angle = bool(info.caps & int(proto.Cap.ANGLE_LOOP))
         has_distance = bool(info.caps & int(proto.Cap.DISTANCE_LOOP))
+        has_line = bool(info.caps & int(proto.Cap.LINE_FOLLOW))
         self._dashboard.subscribe_panel.set_rpm_available(has_speed)
         self._dashboard.subscribe_panel.set_angle_available(has_angle)
         self._dashboard.subscribe_panel.set_distance_available(has_distance)
+        self._dashboard.subscribe_panel.set_line_follow_available(has_line)
         self._pid_tuning.on_hello(info.caps)
         self._drive.on_hello(info.caps, info.hw_rev)
         if info.proto_ver < proto.PROTO_VER:
@@ -227,6 +232,7 @@ class MainWindow(QMainWindow):
         self._plot.set_rpm_subscribed(bool(mask & int(proto.TelChannel.MOTOR_RPM)))
         self._plot.set_angle_subscribed(bool(mask & int(proto.TelChannel.ANGLE_LOOP)))
         self._plot.set_distance_subscribed(bool(mask & int(proto.TelChannel.DISTANCE_LOOP)))
+        self._plot.set_line_loop_subscribed(bool(mask & int(proto.TelChannel.LINE_LOOP)))
 
     def _on_link_alive(self, alive: bool) -> None:
         if alive:
@@ -253,9 +259,9 @@ class MainWindow(QMainWindow):
                 self._plot.update_attitude(roll, pitch, yaw)
                 self._drive.on_attitude_yaw(yaw)
             elif push.channel_id == proto.CHANNEL_ID_LINE_ADC:
-                values = proto.parse_line_adc_push(push.payload)
-                self._dashboard.update_line_adc(values)
-                self._plot.update_line_adc(values)
+                line = proto.parse_line_adc_push(push.payload)
+                self._dashboard.update_line_adc(line.detect)
+                self._plot.update_line_adc(line.adc, detect=line.detect)
             elif push.channel_id == proto.CHANNEL_ID_ULTRASONIC:
                 self._dashboard.update_ultrasonic(proto.parse_ultrasonic_push(push.payload))
         except proto.ProtoError as exc:
@@ -275,6 +281,10 @@ class MainWindow(QMainWindow):
     def _on_distance_loop(self, sample: proto.DistanceLoopPush) -> None:
         self._plot.on_distance_loop(sample)
         self._pid_tuning.on_distance_loop(sample)
+
+    def _on_line_loop(self, sample: proto.LineLoopPush) -> None:
+        self._plot.on_line_loop(sample)
+        self._pid_tuning.on_line_loop(sample)
 
     def _on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
         self._dashboard.update_encoder_counts(counts)

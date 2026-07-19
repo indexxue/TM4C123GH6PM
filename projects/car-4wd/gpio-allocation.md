@@ -28,12 +28,12 @@
 | PB0 | M4_ENCB | 输入 | SW encoder B |
 | PE3 | BAT_ADC | 输入 | ADC1 AIN0 battery |
 | PE2 | BTN_ADC | 输入 | ADC1 AIN1 button |
-| PD3 | LINE1 | 输入 | ADC1 AIN4 line 1 |
-| PD2 | LINE2 | 输入 | ADC1 AIN5 line 2 |
-| PD1 | LINE3 | 输入 | ADC1 AIN6 line 3 |
-| PD0 | LINE4 | 输入 | ADC1 AIN7 line 4 |
-| PE5 | LINE5 | 输入 | ADC1 AIN8 line 5 |
-| PE4 | LINE6 | 输入 | ADC1 AIN9 line 6 |
+| PD3 | LINE1 | 输入 | ADC0 AIN4 line 1 |
+| PD2 | LINE2 | 输入 | ADC0 AIN5 line 2 |
+| PD1 | LINE3 | 输入 | ADC0 AIN6 line 3 |
+| PD0 | LINE4 | 输入 | ADC0 AIN7 line 4 |
+| PE5 | LINE5 | 输入 | ADC0 AIN8 line 5 |
+| PE4 | LINE6 | 输入 | ADC0 AIN9 line 6 |
 | PB1 | BUZZER | 输出 | buzzer |
 | PC3 | RGB_LED | 输出 | WS2812 |
 | PC2 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
@@ -104,6 +104,7 @@
 | PD1 | LINE3 | 输入 |
 | PD0 | LINE4 | 输入 |
 | PE5 | LINE5 | 输入 |
+| PE4 | LINE6 | 输入 |
 
 ### 其他传感器
 

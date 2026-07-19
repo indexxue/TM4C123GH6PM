@@ -16,15 +16,17 @@
 | PC6 | M1_ENCB | 输入 | QEI1 PHB |
 | PD6 | M2_ENCA | 输入 | QEI0 PHA |
 | PD7 | M2_ENCB | 输入 | QEI0 PHB |
-| PE3 | LINE1 | 输入 | ADC1 AIN0 line 1 / battery |
-| PE2 | LINE2 | 输入 | ADC1 AIN1 line 2 / button |
-| PD2 | LINE3 | 输入 | ADC1 AIN5 line 3 |
-| PD3 | LINE4 | 输入 | ADC1 AIN4 line 4 |
-| PD0 | LINE5 | 输入 | ADC1 AIN7 line 5 |
-| PD1 | BUTTON | 输入 | ADC1 AIN6 extra button |
+| PE3 | BAT_ADC | 输入 | ADC1 AIN0 battery |
+| PE2 | BTN_ADC | 输入 | ADC1 AIN1 button |
+| PD3 | LINE1 | 输入 | ADC0 AIN4 line 1 |
+| PD2 | LINE2 | 输入 | ADC0 AIN5 line 2 |
+| PD1 | LINE3 | 输入 | ADC0 AIN6 line 3 |
+| PD0 | LINE4 | 输入 | ADC0 AIN7 line 4 |
+| PE5 | LINE5 | 输入 | ADC0 AIN8 line 5 |
+| PE4 | LINE6 | 输入 | ADC0 AIN9 line 6 |
 | PC0 | BUZZER | 输出 | buzzer |
-| PE4 | RGB_LED | 输出 | WS2812 |
-| PE5 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
+| PC3 | RGB_LED | 输出 | WS2812 |
+| PC2 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
 | PD5 | ULTRA_ECHO | 输入 | HC-SR04 echo |
 | PB0 | BT_RX | 输入 | UART1 RX |
 | PB1 | BT_TX | 输出 | UART1 TX |
@@ -77,26 +79,28 @@
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PE3 | LINE1 | 输入 |
-| PE2 | LINE2 | 输入 |
-| PD2 | LINE3 | 输入 |
-| PD3 | LINE4 | 输入 |
-| PD0 | LINE5 | 输入 |
+| PD3 | LINE1 | 输入 |
+| PD2 | LINE2 | 输入 |
+| PD1 | LINE3 | 输入 |
+| PD0 | LINE4 | 输入 |
+| PE5 | LINE5 | 输入 |
+| PE4 | LINE6 | 输入 |
 
 ### 其他传感器
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PE5 | ULTRA_TRIG | 输出 |
+| PE3 | BAT_ADC | 输入 |
+| PC2 | ULTRA_TRIG | 输出 |
 | PD5 | ULTRA_ECHO | 输入 |
 
 ### 人机交互
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PD1 | BUTTON | 输入 |
+| PE2 | BTN_ADC | 输入 |
 | PC0 | BUZZER | 输出 |
-| PE4 | RGB_LED | 输出 |
+| PC3 | RGB_LED | 输出 |
 
 ## 生成代码
 

@@ -24,6 +24,7 @@ from angle_log_export import AngleLoopRecorder, log_dir
 from serial_worker import SerialWorker
 from ui.angle_panel import AngleControlPanel
 from ui.distance_panel import DistanceControlPanel
+from ui.line_panel import LineControlPanel
 from ui.param_panel import ParamEditor
 from ui.speed_panel import SpeedControlPanel
 
@@ -75,18 +76,23 @@ def distance_plot_y_range(values: list[float]) -> tuple[float, float]:
 
 
 class LineSensorStrip(QWidget):
-    """五路循迹传感器：横向条带 + 0/1 状态指示。"""
+    """六路循迹：色条高亮检测状态；可显示 0/1 或原始 ADC。
 
-    SENSOR_COLORS = ["#f1c40f", "#1abc9c", "#9b59b6", "#ecf0f1", "#e67e22"]
+    左→右：PD3 PD2 PD1 PD0 PE5 PE4；PD1/PD0（L3/L4）为中线。
+    """
+
+    SENSOR_COLORS = ["#f1c40f", "#1abc9c", "#9b59b6", "#ecf0f1", "#e67e22", "#3498db"]
+    SENSOR_PINS = ["PD3", "PD2", "PD1", "PD0", "PE5", "PE4"]
+    CENTER_INDICES = (2, 3)  # L3/L4 = PD1/PD0
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
-        hint = QLabel("左 ←  L1 … L5  → 右   （1=检测到线，0=未检测）")
-        hint.setStyleSheet("color: #666; font-size: 11px;")
-        layout.addWidget(hint)
+        self._hint = QLabel("左 ←  L1(PD3) … L3/L4(PD1/PD0 中线) … L6(PE4)  → 右")
+        self._hint.setStyleSheet("color: #666; font-size: 11px;")
+        layout.addWidget(self._hint)
 
         row = QHBoxLayout()
         row.setSpacing(12)
@@ -99,12 +105,14 @@ class LineSensorStrip(QWidget):
             cell.setMinimumSize(72, 88)
             cell.setMaximumWidth(100)
             cell_layout = QVBoxLayout(cell)
-            name = QLabel(f"L{i + 1}")
+            pin = self.SENSOR_PINS[i] if i < len(self.SENSOR_PINS) else ""
+            center = " 中" if i in self.CENTER_INDICES else ""
+            name = QLabel(f"L{i + 1}\n{pin}{center}")
             name.setAlignment(Qt.AlignmentFlag.AlignCenter)
             name.setStyleSheet("font-weight: bold;")
             val = QLabel("—")
             val.setAlignment(Qt.AlignmentFlag.AlignCenter)
-            val.setStyleSheet("font-size: 18px;")
+            val.setStyleSheet("font-size: 16px;")
             cell_layout.addWidget(name)
             cell_layout.addStretch()
             cell_layout.addWidget(val)
@@ -115,19 +123,35 @@ class LineSensorStrip(QWidget):
 
         layout.addLayout(row)
 
-    def update_values(self, values: tuple[int, ...]) -> None:
+    def update_values(
+        self,
+        values: tuple[int, ...],
+        *,
+        detect: Optional[tuple[int, ...]] = None,
+        show_adc: bool = False,
+    ) -> None:
+        self._hint.setText(
+            "左 ← PD3…PD1/PD0(中)…PE4 → 右   （ADC≥阈值=黑线→黑底；白底=未压线）"
+            if show_adc
+            else "左 ← PD3…PD1/PD0(中)…PE4 → 右   （黑底=压到黑线，白底=未压线）"
+        )
         for i, val in enumerate(values[: len(self._cells)]):
-            on = int(val) != 0
-            self._value_labels[i].setText("1" if on else "0")
-            color = self.SENSOR_COLORS[i % len(self.SENSOR_COLORS)]
-            if on:
-                bg = color
-                fg = "#1a1a1a"
-                border = color
+            if detect is not None and i < len(detect):
+                on = int(detect[i]) != 0
             else:
-                bg = "#2b2b2b"
-                fg = "#888"
-                border = "#444"
+                # 无固件 mask 时：默认高 ADC 为黑（与 line_polarity=1 一致）
+                on = int(val) >= proto.LINE_DEFAULT_THRESHOLD
+            self._value_labels[i].setText(str(int(val)) if show_adc else ("黑" if on else "白"))
+            if on:
+                # 压到黑线：黑底白字
+                bg = "#111111"
+                fg = "#f5f5f5"
+                border = "#000000"
+            else:
+                # 白底/未压线：浅底深字
+                bg = "#e8e8e8"
+                fg = "#333333"
+                border = "#b0b0b0"
             self._cells[i].setStyleSheet(
                 f"QFrame {{ background: {bg}; border: 2px solid {border}; border-radius: 8px; }}"
                 f"QLabel {{ color: {fg}; background: transparent; }}"
@@ -154,6 +178,8 @@ class PlotTab(QWidget):
         spd_limit_editor: Optional[ParamEditor] = None,
         pid_yaw_editor: Optional[ParamEditor] = None,
         pid_dist_editor: Optional[ParamEditor] = None,
+        pid_line_editor: Optional[ParamEditor] = None,
+        line_base_editor: Optional[ParamEditor] = None,
         parent: Optional[QWidget] = None,
     ):
         super().__init__(parent)
@@ -178,6 +204,13 @@ class PlotTab(QWidget):
         self._dist_current_mm: Optional[int] = None
         self._dist_cmd_rpm = 0
         self._dist_max_rpm = 0
+        self._line_loop_subscribed = False
+        self._line_error = 0.0
+        self._line_left_rpm = 0
+        self._line_right_rpm = 0
+        self._line_turn_rpm = 0
+        self._line_state = 0
+        self._line_mask = 0
 
         root = QVBoxLayout(self)
         root.addWidget(self._build_toolbar())
@@ -185,7 +218,7 @@ class PlotTab(QWidget):
         root.addWidget(self._views)
 
         self._build_attitude_view()
-        self._build_line_view()
+        self._build_line_view(worker, pid_line_editor, line_base_editor)
         self._build_encoder_view()
         self._build_rpm_view(worker, pid_editor, spd_limit_editor)
         self._build_angle_view(worker, pid_yaw_editor, spd_limit_editor)
@@ -612,31 +645,78 @@ class PlotTab(QWidget):
         self._att_yaw: list[float] = []
         self._views.addTab(page, "姿态")
 
-    def _build_line_view(self) -> None:
+    def _build_line_view(
+        self,
+        worker: SerialWorker,
+        pid_line_editor: Optional[ParamEditor],
+        line_base_editor: Optional[ParamEditor],
+    ) -> None:
         page = QWidget()
-        layout = QVBoxLayout(page)
+        layout = QHBoxLayout(page)
+
+        chart_col = QVBoxLayout()
+
+        self._lbl_line_hint = QLabel("等待订阅循迹 ADC / 循迹环…")
+        self._lbl_line_hint.setStyleSheet("color: #c8860a;")
+        chart_col.addWidget(self._lbl_line_hint)
 
         self._line_strip = LineSensorStrip()
-        layout.addWidget(self._line_strip)
+        chart_col.addWidget(self._line_strip)
 
-        self._plot_line = pg.PlotWidget(title="循迹历史 (0/1)")
+        self._plot_line = pg.PlotWidget(title="循迹 ADC")
         self._plot_line.showGrid(x=True, y=True, alpha=0.3)
-        self._plot_line.setLabel("left", "on-line")
+        self._plot_line.setLabel("left", "ADC")
         self._plot_line.setLabel("bottom", "时间", units="s")
-        self._plot_line.setYRange(-0.1, 1.2)
-        self._plot_line.setLimits(yMin=-0.2, yMax=1.3)
+        self._plot_line.setYRange(0, 4095)
+        self._plot_line.setLimits(yMin=-50, yMax=4200)
         legend = self._plot_line.addLegend(offset=(10, 10))
         self._line_curves = []
         for i, color in enumerate(LineSensorStrip.SENSOR_COLORS[: proto.LINE_SENSOR_COUNT]):
             curve = self._plot_line.plot(pen=pg.mkPen(color, width=2), name=f"L{i + 1}")
             self._line_curves.append(curve)
             legend.addItem(curve, f"L{i + 1}")
-        layout.addWidget(self._plot_line, stretch=1)
+        chart_col.addWidget(self._plot_line, stretch=1)
+
+        self._plot_line_loop = pg.PlotWidget(title="循迹环：偏差 / 左右转速")
+        loop_legend = self._plot_line_loop.addLegend(offset=(10, 10))
+        self._plot_line_loop.setLabel("left", "error / RPM")
+        self._plot_line_loop.setLabel("bottom", "时间", units="s")
+        self._plot_line_loop.showGrid(x=True, y=True, alpha=0.3)
+        self._curve_line_err = self._plot_line_loop.plot(pen=pg.mkPen("#e74c3c", width=2))
+        self._curve_line_left = self._plot_line_loop.plot(pen=pg.mkPen("#3498db", width=2))
+        self._curve_line_right = self._plot_line_loop.plot(pen=pg.mkPen("#2ecc71", width=2))
+        self._curve_line_turn = self._plot_line_loop.plot(
+            pen=pg.mkPen("#f39c12", width=2, style=Qt.PenStyle.DashLine),
+        )
+        loop_legend.addItem(self._curve_line_err, "error×10")
+        loop_legend.addItem(self._curve_line_left, "left RPM")
+        loop_legend.addItem(self._curve_line_right, "right RPM")
+        loop_legend.addItem(self._curve_line_turn, "turn RPM")
+        chart_col.addWidget(self._plot_line_loop, stretch=1)
+
+        self._lbl_line_loop_live = QLabel("error=—  mask=—  state=—  L/R/turn=—")
+        chart_col.addWidget(self._lbl_line_loop_live)
+        layout.addLayout(chart_col, stretch=3)
+
+        self._line_panel = LineControlPanel(
+            worker,
+            pid_line_editor,
+            line_base_editor,
+            on_clear_plot=self.reset_line_plot,
+        )
+        self._line_panel.setMaximumWidth(360)
+        layout.addWidget(self._line_panel, stretch=1)
 
         self._line_time: list[float] = []
         self._line_data: list[list[float]] = [[] for _ in range(proto.LINE_SENSOR_COUNT)]
         self._line_last: tuple[int, ...] = tuple(0 for _ in range(proto.LINE_SENSOR_COUNT))
-        self._views.addTab(page, "循迹")
+        self._line_detect_last: tuple[int, ...] = tuple(0 for _ in range(proto.LINE_SENSOR_COUNT))
+        self._line_loop_time: list[float] = []
+        self._line_loop_err: list[float] = []
+        self._line_loop_left: list[float] = []
+        self._line_loop_right: list[float] = []
+        self._line_loop_turn: list[float] = []
+        self._views.addTab(page, "循迹 / 调试")
 
     def _build_encoder_view(self) -> None:
         page = QWidget()
@@ -854,6 +934,8 @@ class PlotTab(QWidget):
         for series in self._line_data:
             series.clear()
         self._line_last = tuple(0 for _ in range(proto.LINE_SENSOR_COUNT))
+        self._line_detect_last = tuple(0 for _ in range(proto.LINE_SENSOR_COUNT))
+        self.reset_line_plot()
 
         self.reset_encoder_plot()
         self.reset_rpm_plot()
@@ -865,7 +947,53 @@ class PlotTab(QWidget):
         self.set_rpm_subscribed(False)
         self.set_angle_subscribed(False)
         self.set_distance_subscribed(False)
+        self.set_line_loop_subscribed(False)
+        if hasattr(self, "_line_panel"):
+            self._line_panel.set_running(False)
         self._redraw_all()
+
+    def set_line_loop_subscribed(self, subscribed: bool) -> None:
+        self._line_loop_subscribed = subscribed
+        if subscribed:
+            self._lbl_line_hint.setText(
+                "循迹环已订阅 — 上图 ADC，下图 error×10 / 左右转速 / turn"
+            )
+            self._lbl_line_hint.setStyleSheet("color: #2d7a2d;")
+        else:
+            self._lbl_line_hint.setText(
+                "未订阅循迹环：在仪表盘勾选「循迹环」或点「开启循迹」自动订阅"
+            )
+            self._lbl_line_hint.setStyleSheet("color: #c8860a;")
+
+    def reset_line_plot(self) -> None:
+        self._line_time.clear()
+        for series in self._line_data:
+            series.clear()
+        self._line_loop_time.clear()
+        self._line_loop_err.clear()
+        self._line_loop_left.clear()
+        self._line_loop_right.clear()
+        self._line_loop_turn.clear()
+        self._line_error = 0.0
+        self._line_left_rpm = 0
+        self._line_right_rpm = 0
+        self._line_turn_rpm = 0
+        self._line_state = 0
+        self._line_mask = 0
+        if not self._charts_paused:
+            self._redraw_line()
+            self._redraw_line_loop()
+        else:
+            self._refresh_line_loop_live_label()
+
+    def _refresh_line_loop_live_label(self) -> None:
+        suffix = "  [暂停]" if self._charts_paused else ""
+        self._lbl_line_loop_live.setText(
+            f"error={self._line_error:.2f}  mask=0x{self._line_mask:02X}  "
+            f"state={self._line_state}  "
+            f"L={self._line_left_rpm} R={self._line_right_rpm} turn={self._line_turn_rpm}"
+            f"{suffix}"
+        )
 
     def reset_encoder_plot(self) -> None:
         self._enc_time.clear()
@@ -913,7 +1041,9 @@ class PlotTab(QWidget):
         )
 
     def _redraw_line(self) -> None:
-        self._line_strip.update_values(self._line_last)
+        self._line_strip.update_values(
+            self._line_last, detect=self._line_detect_last, show_adc=True
+        )
         for i, curve in enumerate(self._line_curves):
             n = min(len(self._line_time), len(self._line_data[i]))
             if n > 0:
@@ -921,6 +1051,34 @@ class PlotTab(QWidget):
             else:
                 curve.setData([], [])
         self._set_time_window(self._plot_line, self._line_time)
+
+    def _redraw_line_loop(self) -> None:
+        n = min(
+            len(self._line_loop_time),
+            len(self._line_loop_err),
+            len(self._line_loop_left),
+            len(self._line_loop_right),
+            len(self._line_loop_turn),
+        )
+        xs = self._line_loop_time[-n:] if n else []
+        self._curve_line_err.setData(xs, self._line_loop_err[-n:] if n else [])
+        self._curve_line_left.setData(xs, self._line_loop_left[-n:] if n else [])
+        self._curve_line_right.setData(xs, self._line_loop_right[-n:] if n else [])
+        self._curve_line_turn.setData(xs, self._line_loop_turn[-n:] if n else [])
+        self._set_time_window(self._plot_line_loop, self._line_loop_time)
+        self._refresh_line_loop_live_label()
+
+    def _redraw_all(self) -> None:
+        self._redraw_attitude()
+        self._redraw_line()
+        if hasattr(self, "_plot_line_loop"):
+            self._redraw_line_loop()
+        self._redraw_encoder()
+        self._redraw_rpm()
+        if hasattr(self, "_plot_angle"):
+            self._redraw_angle()
+        if hasattr(self, "_plot_distance"):
+            self._redraw_distance()
 
     def _redraw_encoder(self) -> None:
         n = min(len(self._enc_time), *(len(s) for s in self._enc_data)) if self._enc_time else 0
@@ -1002,8 +1160,23 @@ class PlotTab(QWidget):
             )
         self.on_attitude_yaw_for_angle(y)
 
-    def update_line_adc(self, values: tuple[int, ...]) -> None:
+    def update_line_adc(
+        self,
+        values: tuple[int, ...],
+        *,
+        detect: Optional[tuple[int, ...]] = None,
+    ) -> None:
         self._line_last = values
+        if detect is not None:
+            self._line_detect_last = detect
+        elif len(values) > 0 and max(values) <= 1:
+            self._line_detect_last = values
+        else:
+            # 无固件 mask 时：ADC≥默认阈值视为黑线（高电平为黑）
+            self._line_detect_last = tuple(
+                1 if int(v) >= proto.LINE_DEFAULT_THRESHOLD else 0
+                for v in values[: proto.LINE_SENSOR_COUNT]
+            )
         t = self._plot_time_s()
         self._line_time.append(t)
         if len(self._line_time) > self.HISTORY:
@@ -1014,6 +1187,35 @@ class PlotTab(QWidget):
                 self._line_data[i].pop(0)
         if not self._charts_paused:
             self._redraw_line()
+
+    def on_line_loop(self, sample: proto.LineLoopPush) -> None:
+        self._line_error = sample.error_x100 / 100.0
+        self._line_mask = sample.mask
+        self._line_state = sample.state
+        self._line_left_rpm = sample.left_rpm
+        self._line_right_rpm = sample.right_rpm
+        self._line_turn_rpm = sample.turn_rpm
+
+        t = self._plot_time_s()
+        self._line_loop_time.append(t)
+        # error×10 便于与 RPM 同轴观察（误差约 ±5 → ±50）
+        self._line_loop_err.append(self._line_error * 10.0)
+        self._line_loop_left.append(float(sample.left_rpm))
+        self._line_loop_right.append(float(sample.right_rpm))
+        self._line_loop_turn.append(float(sample.turn_rpm))
+        self._trim_series(
+            self._line_loop_time,
+            self._line_loop_err,
+            self._line_loop_left,
+            self._line_loop_right,
+            self._line_loop_turn,
+        )
+        if sample.state == 0 and hasattr(self, "_line_panel"):
+            self._line_panel.set_running(False)
+        if not self._charts_paused:
+            self._redraw_line_loop()
+        else:
+            self._refresh_line_loop_live_label()
 
     def on_encoder_counts(self, counts: tuple[int, int, int, int]) -> None:
         self._lbl_enc_live.setText(self._format_motor_live_text(list(counts)))

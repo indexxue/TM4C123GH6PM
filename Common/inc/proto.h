@@ -18,6 +18,11 @@
  * 距离环相关命令（小端）：
  * - PROTO_CMD_SET_DISTANCE (0x0037)：payload [dist_mm i32][max_rpm i32] — 相对位移 Δs（mm）
  * - PROTO_CMD_DISTANCE_STOP (0x0038)：停止距离环
+ * 循迹环相关命令（小端）：
+ * - PROTO_CMD_SET_LINE_FOLLOW (0x0039)：payload[0]=format；
+ *   0: 无附加（用 NVS line_base_rpm）；
+ *   1: [base_rpm i32]
+ * - PROTO_CMD_LINE_FOLLOW_STOP (0x003A)：停止循迹环
  * 订阅 PROTO_CH_ANGLE_LOOP (bit6) / PROTO_CH_DISTANCE_LOOP (bit7) 可推送对应环状态
  */
 
@@ -37,11 +42,14 @@ extern "C" {
 #define PROTO_CMD_CALIB_YAW         0x0036U
 #define PROTO_CMD_SET_DISTANCE      0x0037U
 #define PROTO_CMD_DISTANCE_STOP     0x0038U
+#define PROTO_CMD_SET_LINE_FOLLOW   0x0039U
+#define PROTO_CMD_LINE_FOLLOW_STOP  0x003AU
 
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
 #define PROTO_CAP_YAW_CALIB         (1U << 6)
 #define PROTO_CAP_DISTANCE_LOOP     (1U << 7)
+#define PROTO_CAP_LINE_FOLLOW       (1U << 8)
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
 #define PROTO_CH_DISTANCE_LOOP      (1U << 7)

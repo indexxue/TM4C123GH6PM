@@ -117,15 +117,16 @@ LOOP_PROFILES: list[PidLoopProfile] = [
         title="循迹环 (pid_line)",
         param_id=6,
         param_name="pid_line",
-        tel_channel=None,
-        cap_flag=None,
-        default_kp=2.0,
+        tel_channel=int(proto.TelChannel.LINE_LOOP),
+        cap_flag=int(proto.Cap.LINE_FOLLOW),
+        default_kp=8.0,
         default_ki=0.0,
-        default_kd=0.1,
+        default_kd=0.25,
         guide=(
-            "循迹环根据横向偏差修正转向，需实车沿黑线观察。\n"
-            "本页可读写 pid_line；自动阶跃测试需手推小车或后续接循迹偏差推送。\n"
-            "建议：基准速度先低（80 RPM 级），Kp 从小到大，Kd 抑制 S 弯摆动。"
+            "循迹环：6 路 ADC 加权偏差 → pid_line → 左右差速；内环为速度 PID。\n"
+            "1. 仪表盘勾选「循迹 ADC」+「循迹环」观察曲线；「姿态/循迹/速度」→「循迹/调试」可启停。\n"
+            "2. 基准转速先低（60~80 RPM）；弯道冲出全白会短时按上次方向搜索，勿把 Kp 设太小。\n"
+            "3. 反应慢/冲过弯→加大 Kp（6~12）；S 弯摆动→加 Kd 或略降 Kp/base。"
         ),
     ),
 ]
@@ -483,6 +484,11 @@ class PidTuningTab(QWidget):
             return
         self._append_sample(float(sample.current_mm), float(sample.target_mm))
 
+    def on_line_loop(self, sample: proto.LineLoopPush) -> None:
+        if not self._recording or self._current_loop().key != "line":
+            return
+        self._append_sample(sample.error_x100 / 100.0, 0.0)
+
     def reset(self) -> None:
         self._caps = 0
         self._recording = False
@@ -529,10 +535,6 @@ class PidTuningTab(QWidget):
 
     def _start_step(self) -> None:
         loop = self._current_loop()
-        if loop.key == "line":
-            self._write_pid()
-            self._set_status("循迹环请实车验证；已请求写入 pid_line")
-            return
         if not self._ensure_telemetry(loop):
             return
 
@@ -546,6 +548,11 @@ class PidTuningTab(QWidget):
             self._start_angle_step()
         elif loop.key == "distance":
             self._start_distance_step()
+        elif loop.key == "line":
+            # 不自动开电机；订阅 LINE_LOOP 后实车循迹，曲线记 error→0
+            payload = proto.build_set_line_follow(None)
+            self._worker.request_set_line_follow(payload)
+            self._set_status("已下发 SET_LINE_FOLLOW；记录 error→0（请实车沿黑线）")
 
     def _start_speed_step(self) -> None:
         sc = self._current_scenario()
@@ -588,6 +595,8 @@ class PidTuningTab(QWidget):
             self._worker.request_angle_stop()
         elif loop.key == "distance":
             self._worker.request_distance_stop()
+        elif loop.key == "line":
+            self._worker.request_line_follow_stop()
         self._update_metrics()
         self._set_status("已停止并计算指标")
 

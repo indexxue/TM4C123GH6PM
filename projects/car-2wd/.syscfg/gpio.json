@@ -10,15 +10,17 @@
     { "port": "C", "pin": 6, "label": "M1_ENCB", "direction": "input", "_usage": "QEI1 PHB" },
     { "port": "D", "pin": 6, "label": "M2_ENCA", "direction": "input", "_usage": "QEI0 PHA" },
     { "port": "D", "pin": 7, "label": "M2_ENCB", "direction": "input", "_usage": "QEI0 PHB" },
-    { "port": "E", "pin": 3, "label": "LINE1", "direction": "input", "_usage": "ADC1 AIN0 line 1 / battery" },
-    { "port": "E", "pin": 2, "label": "LINE2", "direction": "input", "_usage": "ADC1 AIN1 line 2 / button" },
-    { "port": "D", "pin": 2, "label": "LINE3", "direction": "input", "_usage": "ADC1 AIN5 line 3" },
-    { "port": "D", "pin": 3, "label": "LINE4", "direction": "input", "_usage": "ADC1 AIN4 line 4" },
-    { "port": "D", "pin": 0, "label": "LINE5", "direction": "input", "_usage": "ADC1 AIN7 line 5" },
-    { "port": "D", "pin": 1, "label": "BUTTON", "direction": "input", "_usage": "ADC1 AIN6 extra button" },
+    { "port": "E", "pin": 3, "label": "BAT_ADC", "direction": "input", "_usage": "ADC1 AIN0 battery" },
+    { "port": "E", "pin": 2, "label": "BTN_ADC", "direction": "input", "_usage": "ADC1 AIN1 button" },
+    { "port": "D", "pin": 3, "label": "LINE1", "direction": "input", "_usage": "ADC0 AIN4 line 1" },
+    { "port": "D", "pin": 2, "label": "LINE2", "direction": "input", "_usage": "ADC0 AIN5 line 2" },
+    { "port": "D", "pin": 1, "label": "LINE3", "direction": "input", "_usage": "ADC0 AIN6 line 3" },
+    { "port": "D", "pin": 0, "label": "LINE4", "direction": "input", "_usage": "ADC0 AIN7 line 4" },
+    { "port": "E", "pin": 5, "label": "LINE5", "direction": "input", "_usage": "ADC0 AIN8 line 5" },
+    { "port": "E", "pin": 4, "label": "LINE6", "direction": "input", "_usage": "ADC0 AIN9 line 6" },
     { "port": "C", "pin": 0, "label": "BUZZER", "direction": "output", "_usage": "buzzer" },
-    { "port": "E", "pin": 4, "label": "RGB_LED", "direction": "output", "_usage": "WS2812" },
-    { "port": "E", "pin": 5, "label": "ULTRA_TRIG", "direction": "output", "_usage": "HC-SR04 trigger" },
+    { "port": "C", "pin": 3, "label": "RGB_LED", "direction": "output", "_usage": "WS2812" },
+    { "port": "C", "pin": 2, "label": "ULTRA_TRIG", "direction": "output", "_usage": "HC-SR04 trigger" },
     { "port": "D", "pin": 5, "label": "ULTRA_ECHO", "direction": "input", "_usage": "HC-SR04 echo" },
     { "port": "B", "pin": 0, "label": "BT_RX", "direction": "input", "_usage": "UART1 RX" },
     { "port": "B", "pin": 1, "label": "BT_TX", "direction": "output", "_usage": "UART1 TX" },
@@ -34,8 +36,8 @@
   "pinout_groups": {
     "motor": ["M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2", "M1_PWM", "M2_PWM"],
     "encoder": ["M1_ENCA", "M1_ENCB", "M2_ENCA", "M2_ENCB"],
-    "line": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5"],
-    "button": ["BUTTON"],
+    "line": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5", "LINE6"],
+    "button": ["BTN_ADC"],
     "comm": ["BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX"],
     "sensor": ["BAT_ADC", "ULTRA_TRIG", "ULTRA_ECHO"],
     "hmi": ["BUZZER", "RGB_LED"]
@@ -45,8 +47,8 @@
     "方向控制 (4 路)": ["M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2"],
     "编码器 (QEI)": ["M1_ENCA", "M1_ENCB", "M2_ENCA", "M2_ENCB"],
     "通信接口": ["BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX"],
-    "循迹传感器 (ADC)": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5"],
-    "其他传感器": ["ULTRA_TRIG", "ULTRA_ECHO"],
-    "人机交互": ["BUTTON", "BUZZER", "RGB_LED"]
+    "循迹传感器 (ADC)": ["LINE1", "LINE2", "LINE3", "LINE4", "LINE5", "LINE6"],
+    "其他传感器": ["BAT_ADC", "ULTRA_TRIG", "ULTRA_ECHO"],
+    "人机交互": ["BTN_ADC", "BUZZER", "RGB_LED"]
   }
 }

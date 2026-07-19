@@ -10,7 +10,7 @@
 #include "bsp_uart.h"
 #include "board.h"
 
-#define LINE_SENSOR_COUNT 3U
+#define LINE_SENSOR_COUNT 6U
 
 static bool s_line_adc_ready;
 

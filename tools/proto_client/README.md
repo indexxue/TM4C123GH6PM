@@ -41,12 +41,14 @@ tools/proto_client/
 
 | Tab | 功能 |
 |-----|------|
-| 仪表盘 | 常驻姿态/编码器 + 按需订阅（电量、循迹等） |
-| **姿态 / 循迹 / 速度** | 子页：姿态曲线、循迹条带、编码器曲线、转速曲线 + SET_SPEED |
+| 仪表盘 | 常驻姿态/编码器 + 按需订阅（电量、循迹 ADC、**循迹环**、超声、RPM 等） |
+| **姿态 / 循迹 / 速度** | 子页：姿态、**循迹/调试**（ADC+环曲线+启停+pid_line）、编码器、转速/角度/距离 |
 | 遥控 | DRIVE / DRIVE_STOP |
 | 右侧参数 | schema.json 全部 NVS 参数读写 |
 
 连接成功后自动 SUBSCRIBE：姿态 + 编码器；若固件 caps 含 `SPEED_LOOP` 则**自动**订阅 **MOTOR_RPM** 推送。
+
+「循迹 / 调试」：开启/停止循迹（`SET_LINE_FOLLOW` / `LINE_FOLLOW_STOP`），编辑 `pid_line` 与 `line_base_rpm`，曲线为 6 路 ADC + error/L/R/turn。
 
 「姿态 / 循迹 / 速度」→「转速 / 调试」页：M1~M4 独立曲线（可勾选显示/隐藏），支持 **两轮 / 四轮** 车型切换（HELLO `hw_rev` 自动识别）。
 

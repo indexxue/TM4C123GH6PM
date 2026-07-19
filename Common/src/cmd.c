@@ -381,6 +381,75 @@ static void cmd_param(int argc, const char *argv[])
         pid.ki = (f32_t)strtof(argv[3], NULL);
         pid.kd = (f32_t)strtof(argv[4], NULL);
         if (nvs_param_set_pid_line(&pid, NVS_WRITE_SRC_CMD) == STATUS_OK) {
+            chassis_reload_line_pid_gains();
+            cmd_reply_ok("param", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    if ((argc == 3) && (strcmp(argv[1], "line_th") == 0)) {
+        nvs_line_threshold_t th;
+        u16_t v;
+        u8_t i;
+
+        v = (u16_t)strtoul(argv[2], NULL, 0);
+        if (v > 4095U) {
+            cmd_reply_ng();
+            return;
+        }
+        for (i = 0U; i < NVS_CFG_LINE_SENSOR_COUNT; i++) {
+            th.threshold[i] = v;
+        }
+        if (nvs_param_set_line_threshold(&th, NVS_WRITE_SRC_CMD) == STATUS_OK) {
+            cmd_reply_ok("param", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    if ((argc == 4) && (strcmp(argv[1], "line_th") == 0)) {
+        nvs_line_threshold_t th;
+        u32_t idx;
+        u16_t v;
+
+        idx = strtoul(argv[2], NULL, 0);
+        v = (u16_t)strtoul(argv[3], NULL, 0);
+        if ((idx >= NVS_CFG_LINE_SENSOR_COUNT) || (v > 4095U)) {
+            cmd_reply_ng();
+            return;
+        }
+        th = nvs_cfg_get()->line_threshold;
+        th.threshold[idx] = v;
+        if (nvs_param_set_line_threshold(&th, NVS_WRITE_SRC_CMD) == STATUS_OK) {
+            cmd_reply_ok("param", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    if ((argc == 3) && (strcmp(argv[1], "line_pol") == 0)) {
+        u32_t pol = strtoul(argv[2], NULL, 0);
+
+        if (pol > 1U) {
+            cmd_reply_ng();
+            return;
+        }
+        if (nvs_param_set_line_polarity((u8_t)pol, NVS_WRITE_SRC_CMD) == STATUS_OK) {
+            cmd_reply_ok("param", "ok");
+            return;
+        }
+        cmd_reply_ng();
+        return;
+    }
+
+    if ((argc == 3) && (strcmp(argv[1], "line_base") == 0)) {
+        f32_t rpm = (f32_t)strtof(argv[2], NULL);
+
+        if (nvs_param_set_line_base_rpm(rpm, NVS_WRITE_SRC_CMD) == STATUS_OK) {
             cmd_reply_ok("param", "ok");
             return;
         }
@@ -414,6 +483,33 @@ static void cmd_param(int argc, const char *argv[])
         return;
     }
 
+    cmd_reply_ng();
+}
+
+static void cmd_line(int argc, const char *argv[])
+{
+    s32_t base_rpm = 0;
+
+    if ((argc == 2) && (strcmp(argv[1], "start") == 0)) {
+        chassis_set_line_follow(0);
+        cmd_reply_ok("line", "start");
+        return;
+    }
+    if ((argc == 3) && (strcmp(argv[1], "start") == 0)) {
+        base_rpm = (s32_t)strtol(argv[2], NULL, 0);
+        if ((base_rpm < 0) || (base_rpm > 1200)) {
+            cmd_reply_ng();
+            return;
+        }
+        chassis_set_line_follow(base_rpm);
+        cmd_reply_ok("line", "start");
+        return;
+    }
+    if ((argc == 2) && (strcmp(argv[1], "stop") == 0)) {
+        chassis_stop();
+        cmd_reply_ok("line", "stop");
+        return;
+    }
     cmd_reply_ng();
 }
 
@@ -472,6 +568,32 @@ static void cmd_adc(int argc, const char *argv[])
     uint32_t bat_raw = 0U;
     uint32_t btn_raw = 0U;
     char buf[CMD_STATUS_BUF_SIZE];
+
+    if ((argc >= 2) && (strcmp(argv[1], "line") == 0)) {
+        uint16_t line[LINE_SENSOR_COUNT];
+        static const char *const pins[LINE_SENSOR_COUNT] = {
+            "PD3", "PD2", "PD1", "PD0", "PE5", "PE4"
+        };
+        size_t i;
+        int n;
+
+        if (!Line_IsReady() || !Line_Sample(line, LINE_SENSOR_COUNT)) {
+            cmd_reply_ng();
+            return;
+        }
+        n = snprintf(buf, sizeof(buf), "line");
+        for (i = 0U; (i < LINE_SENSOR_COUNT) && (n > 0) && ((size_t)n < sizeof(buf)); i++) {
+            int w = snprintf(buf + n, sizeof(buf) - (size_t)n,
+                             " L%u(%s)=%u",
+                             (unsigned)(i + 1U), pins[i], (unsigned)line[i]);
+            if (w < 0) {
+                break;
+            }
+            n += w;
+        }
+        cmd_reply_ok("adc", buf);
+        return;
+    }
 
     (void)argc;
     (void)argv;
@@ -592,14 +714,16 @@ void cmd_register_defaults(void)
     (void)cmd_register("version", cmd_version, "firmware version string");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
-    (void)cmd_register("adc", cmd_adc, "adc sample (bat_raw btn_raw btn_id)");
+    (void)cmd_register("adc", cmd_adc, "adc [line] — bat/btn 或 6 路循迹 ADC");
     (void)cmd_register("ftmenter", cmd_ftmenter, "switch to factory slot (APP_B)");
     (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A)");
     (void)cmd_register("slot", cmd_slot, "show boot slot (0=A 1=B)");
 #if defined(NVS_CMD_RAW_KV)
     (void)cmd_register("nvs", cmd_nvs, "nvs get <ns> <key>");
 #endif
-    (void)cmd_register("param", cmd_param, "param mot_dir|max_rpm|pid_spd|pid_line|pid_yaw|pid_dist ...");
+    (void)cmd_register("param", cmd_param,
+                       "param mot_dir|max_rpm|pid_spd|pid_line|pid_yaw|pid_dist|line_th|line_pol|line_base ...");
+    (void)cmd_register("line", cmd_line, "line start [base_rpm]|stop");
     (void)cmd_register("cfg", cmd_cfg, "cfg show|reset");
 }
 

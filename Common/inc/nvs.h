@@ -63,6 +63,8 @@ typedef enum {
 #define NVS_CFG_KEY_ENC_DIR         "enc_dir"
 #define NVS_CFG_KEY_IMU_OFF         "imu_off"
 #define NVS_CFG_KEY_LINE_TH         "line_th"
+#define NVS_CFG_KEY_LINE_POL        "line_pol"
+#define NVS_CFG_KEY_LINE_BASE       "line_base"
 #define NVS_CFG_KEY_ENC_ZERO        "enc_zero"
 #define NVS_CFG_KEY_BAT_CAL         "bat_cal"
 #define NVS_CFG_KEY_MAG_HDG         "mag_hdg"
@@ -103,6 +105,7 @@ typedef struct {
 } nvs_imu_offset_t;
 
 typedef struct {
+    /** 各路二值化阈值；出厂统一 2048，上位机可调 */
     u16_t threshold[NVS_CFG_LINE_SENSOR_COUNT];
 } nvs_line_threshold_t;
 
@@ -132,6 +135,12 @@ typedef struct {
     u32_t encoder_dir_mask;
     nvs_imu_offset_t imu_offset;
     nvs_line_threshold_t line_threshold;
+    /**
+     * 黑线电平：0=低电平为黑（ADC < threshold）；
+     * 1=高电平为黑（ADC >= threshold，默认）
+     */
+    u8_t line_black_active_high;
+    f32_t line_base_rpm;
     nvs_encoder_zero_t encoder_zero;
     nvs_battery_cal_t battery_cal;
     /** 磁力计航向零点偏移（度）；显示 yaw = FusionCompass - offset */
@@ -170,6 +179,8 @@ typedef enum {
     NVS_PARAM_PID_YAW,
     NVS_PARAM_MAG_HEADING,
     NVS_PARAM_PID_DIST,
+    NVS_PARAM_LINE_POLARITY,
+    NVS_PARAM_LINE_BASE_RPM,
     NVS_PARAM_COUNT
 } nvs_param_id_t;
 
@@ -218,6 +229,8 @@ status_t nvs_param_set_motor_dir_mask(u32_t mask, nvs_write_src_t src);
 status_t nvs_param_set_encoder_dir_mask(u32_t mask, nvs_write_src_t src);
 status_t nvs_param_set_imu_offset(const nvs_imu_offset_t *offset, nvs_write_src_t src);
 status_t nvs_param_set_line_threshold(const nvs_line_threshold_t *threshold, nvs_write_src_t src);
+status_t nvs_param_set_line_polarity(u8_t black_active_high, nvs_write_src_t src);
+status_t nvs_param_set_line_base_rpm(f32_t base_rpm, nvs_write_src_t src);
 status_t nvs_param_set_encoder_zero(const nvs_encoder_zero_t *zero, nvs_write_src_t src);
 status_t nvs_param_set_battery_cal(const nvs_battery_cal_t *cal, nvs_write_src_t src);
 status_t nvs_param_set_mag_heading_offset(f32_t offset_deg, nvs_write_src_t src);

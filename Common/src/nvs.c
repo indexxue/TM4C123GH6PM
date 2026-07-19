@@ -127,7 +127,7 @@ static const nvs_param_policy_t s_param_policy[NVS_PARAM_COUNT] = {
     [NVS_PARAM_KINEMATICS] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
     [NVS_PARAM_MOTOR_DIR] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
     [NVS_PARAM_IMU_OFFSET] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
-    [NVS_PARAM_LINE_THRESHOLD] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
+    [NVS_PARAM_LINE_THRESHOLD] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
     [NVS_PARAM_ENCODER_ZERO] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_BATTERY_CAL] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_LAST_MODE] = {1U, NVS_SRC_INTERNAL},
@@ -135,6 +135,8 @@ static const nvs_param_policy_t s_param_policy[NVS_PARAM_COUNT] = {
     [NVS_PARAM_PID_YAW] = {0U, NVS_SRC_CMD | NVS_SRC_PROTOCOL},
     [NVS_PARAM_MAG_HEADING] = {1U, NVS_SRC_FACTORY | NVS_SRC_PROTOCOL},
     [NVS_PARAM_PID_DIST] = {0U, NVS_SRC_CMD | NVS_SRC_PROTOCOL},
+    [NVS_PARAM_LINE_POLARITY] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
+    [NVS_PARAM_LINE_BASE_RPM] = {1U, NVS_SRC_FACTORY | NVS_SRC_CMD | NVS_SRC_PROTOCOL},
 };
 
 /* -------------------------------------------------------------------------- */
@@ -897,9 +899,9 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     cfg->pid_speed.kp = 1.0f;
     cfg->pid_speed.ki = 0.20f;
     cfg->pid_speed.kd = 0.0f;
-    cfg->pid_line.kp = 2.0f;
+    cfg->pid_line.kp = 8.0f;
     cfg->pid_line.ki = 0.0f;
-    cfg->pid_line.kd = 0.1f;
+    cfg->pid_line.kd = 0.25f;
     cfg->pid_yaw.kp = 2.0f;
     cfg->pid_yaw.ki = 0.0f;
     cfg->pid_yaw.kd = 0.5f;
@@ -928,6 +930,8 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     for (i = 0U; i < NVS_CFG_LINE_SENSOR_COUNT; i++) {
         cfg->line_threshold.threshold[i] = 2048U;
     }
+    cfg->line_black_active_high = 1U; /* 默认高电平/高 ADC = 黑线 */
+    cfg->line_base_rpm = 80.0f;
 
     cfg->last_mode = NVS_RUN_MODE_IDLE;
 
@@ -1040,6 +1044,9 @@ static status_t nvs_cfg_persist_defaults(void)
                     sizeof(s_cfg.imu_offset));
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_TH, &s_cfg.line_threshold,
                     sizeof(s_cfg.line_threshold));
+    NVS_APPEND_U32(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_POL, (u32_t)s_cfg.line_black_active_high);
+    NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_BASE, &s_cfg.line_base_rpm,
+                    sizeof(s_cfg.line_base_rpm));
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_ENC_ZERO, &s_cfg.encoder_zero,
                     sizeof(s_cfg.encoder_zero));
     NVS_APPEND_BLOB(NVS_CFG_NS_CAL, NVS_CFG_KEY_BAT_CAL, &s_cfg.battery_cal,
@@ -1193,6 +1200,15 @@ static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg)
 
     if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_TH, &cfg->line_threshold,
                             (u32_t)sizeof(cfg->line_threshold)) == 0) {
+        /* keep default */
+    }
+
+    if (nvs_get_u32_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_POL, &u32_val) == STATUS_OK) {
+        cfg->line_black_active_high = (u8_t)((u32_val != 0U) ? 1U : 0U);
+    }
+
+    if (nvs_load_blob_exact(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_BASE, &cfg->line_base_rpm,
+                            (u32_t)sizeof(cfg->line_base_rpm)) == 0) {
         /* keep default */
     }
 
@@ -1525,6 +1541,37 @@ status_t nvs_param_set_line_threshold(const nvs_line_threshold_t *threshold, nvs
                                   threshold, sizeof(*threshold));
 }
 
+status_t nvs_param_set_line_polarity(u8_t black_active_high, nvs_write_src_t src)
+{
+    status_t st;
+
+    st = nvs_param_check_write(NVS_PARAM_LINE_POLARITY, src);
+    if (st != STATUS_OK) {
+        return st;
+    }
+
+    s_cfg.line_black_active_high = (black_active_high != 0U) ? 1U : 0U;
+    return nvs_param_persist_u32(NVS_PARAM_LINE_POLARITY, NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_POL,
+                                 (u32_t)s_cfg.line_black_active_high);
+}
+
+status_t nvs_param_set_line_base_rpm(f32_t base_rpm, nvs_write_src_t src)
+{
+    status_t st;
+
+    st = nvs_param_check_write(NVS_PARAM_LINE_BASE_RPM, src);
+    if (st != STATUS_OK) {
+        return st;
+    }
+    if ((base_rpm < 0.0f) || (base_rpm > 1200.0f)) {
+        return STATUS_INVALID_ARG;
+    }
+
+    s_cfg.line_base_rpm = base_rpm;
+    return nvs_param_persist_blob(NVS_PARAM_LINE_BASE_RPM, NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_BASE,
+                                  &s_cfg.line_base_rpm, (u32_t)sizeof(s_cfg.line_base_rpm));
+}
+
 status_t nvs_param_set_encoder_zero(const nvs_encoder_zero_t *zero, nvs_write_src_t src)
 {
     status_t st;
@@ -1639,6 +1686,21 @@ status_t nvs_factory_reset(void)
 
     st = nvs_set_blob_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_TH, &s_cfg.line_threshold,
                            (u32_t)sizeof(s_cfg.line_threshold));
+    if (st != STATUS_OK) {
+        goto done;
+    }
+
+    {
+        u32_t pol = (u32_t)s_cfg.line_black_active_high;
+
+        st = nvs_set_blob_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_POL, &pol, (u32_t)sizeof(pol));
+        if (st != STATUS_OK) {
+            goto done;
+        }
+    }
+
+    st = nvs_set_blob_impl(NVS_CFG_NS_CAL, NVS_CFG_KEY_LINE_BASE, &s_cfg.line_base_rpm,
+                           (u32_t)sizeof(s_cfg.line_base_rpm));
     if (st != STATUS_OK) {
         goto done;
     }

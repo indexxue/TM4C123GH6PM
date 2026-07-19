@@ -110,9 +110,21 @@ static void adc_module_clock_init(uint32_t base)
     }
 }
 
+static void adc_fifo_flush(uint32_t base, uint32_t sequence)
+{
+    uint32_t junk[8];
+
+    /* 一次读空 FIFO，避免残留样本导致通道错位（首/末通道表现为“不变”） */
+    (void)ADCSequenceDataGet(base, sequence, junk);
+    if (ADCSequenceOverflow(base, sequence) != 0) {
+        ADCSequenceOverflowClear(base, sequence);
+    }
+}
+
 static void adc_sequence_recover(const bsp_adc_config_t *cfg)
 {
     ADCIntClear(cfg->base, cfg->sequence);
+    adc_fifo_flush(cfg->base, cfg->sequence);
     ADCSequenceDisable(cfg->base, cfg->sequence);
     ADCSequenceEnable(cfg->base, cfg->sequence);
 }
@@ -147,9 +159,7 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
 
     for (i = 0U; i < cfg->channel_count; i++) {
         uint32_t ctl = adc_ctl_for_channel(cfg->channels[i].channel);
-        if (cfg->channel_count > 1U) {
-            ctl |= ADC_CTL_SHOLD_64;
-        }
+        /* TM4C123 无独立 S&H 配置；勿 OR ADC_CTL_SHOLD_*（部分器件才有效） */
         if (i == (cfg->channel_count - 1U)) {
             ctl |= ADC_CTL_END | ADC_CTL_IE;
         }
@@ -157,6 +167,7 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
     }
 
     ADCSequenceEnable(cfg->base, cfg->sequence);
+    adc_fifo_flush(cfg->base, cfg->sequence);
     ADCIntClear(cfg->base, cfg->sequence);
     return true;
 }
@@ -164,7 +175,8 @@ bool bsp_adc_init(const bsp_adc_config_t *cfg)
 bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
 {
     bsp_timeout_t timeout;
-    bool ok = false;
+    int32_t got;
+    size_t i;
 
     if ((cfg == NULL) || (values == NULL) || (count < cfg->channel_count)) {
         return false;
@@ -174,6 +186,11 @@ bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
         return false;
     }
 
+    for (i = 0U; i < cfg->channel_count; i++) {
+        values[i] = 0U;
+    }
+
+    adc_fifo_flush(cfg->base, cfg->sequence);
     ADCIntClear(cfg->base, cfg->sequence);
     ADCProcessorTrigger(cfg->base, cfg->sequence);
     bsp_timeout_start_us(&timeout, BSP_ADC_SAMPLE_TIMEOUT_US);
@@ -189,10 +206,15 @@ bool bsp_adc_sample(const bsp_adc_config_t *cfg, uint32_t *values, size_t count)
     }
 
     ADCIntClear(cfg->base, cfg->sequence);
-    ADCSequenceDataGet(cfg->base, cfg->sequence, values);
-    ok = true;
+    got = ADCSequenceDataGet(cfg->base, cfg->sequence, values);
+    if (got < (int32_t)cfg->channel_count) {
+        adc_sequence_recover(cfg);
+        adc_unlock(cfg->base);
+        return false;
+    }
+
     adc_unlock(cfg->base);
-    return ok;
+    return true;
 }
 
 bool bsp_adc_sample_one(const bsp_adc_config_t *cfg, uint32_t *value)

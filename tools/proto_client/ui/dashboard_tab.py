@@ -35,7 +35,7 @@ class DashboardTab(QWidget):
         layout.addRow("电池", self.lbl_batt)
         layout.addRow("姿态 (°)", self.lbl_att)
         layout.addRow("编码器", self.lbl_enc)
-        layout.addRow("循迹 0/1", self.lbl_line)
+        layout.addRow("循迹 黑/白", self.lbl_line)
         layout.addRow("超声波", self.lbl_ultra)
         layout.addRow("Uptime", self.lbl_uptime)
         root.addLayout(layout)
@@ -88,8 +88,10 @@ class DashboardTab(QWidget):
         self.lbl_att.setText(f"roll={roll}  pitch={pitch}  yaw={yaw}")
 
     def update_line_adc(self, values: tuple[int, ...]) -> None:
+        """仪表盘：1=黑线（ADC≥阈值），0=白底。"""
         if self._line_subscribed:
-            self.lbl_line.setText("  ".join(str(v) for v in values))
+            parts = [("黑" if (int(v) & 1) else "白") for v in values]
+            self.lbl_line.setText("  ".join(parts))
 
     def update_uptime(self, uptime_ms: int) -> None:
         self.lbl_uptime.setText(f"{uptime_ms} ms")

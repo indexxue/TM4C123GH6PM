@@ -155,6 +155,7 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "ultrasonic.c"),
         (Join-Path $CommonSrc "attitude.c"),
         (Join-Path $CommonSrc "motion.c"),
+        (Join-Path $CommonSrc "line_follow.c"),
         (Join-Path $CommonSrc "chassis.c"),
         (Join-Path $CommonSrc "proto.c"),
         (Join-Path $CommonSrc "led_scene.c")

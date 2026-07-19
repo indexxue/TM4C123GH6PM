@@ -10,6 +10,8 @@
 #include "encoder_polarity.h"
 #include "log.h"
 
+#include <stdbool.h>
+
 void cfg_init(void)
 {
     const device_product_profile_t *profile = device_profile_product();
@@ -97,6 +99,26 @@ uint16_t cfg_line_threshold(uint8_t sensor_index)
     }
 
     return n->line_threshold.threshold[sensor_index];
+}
+
+bool cfg_line_is_black(uint8_t sensor_index, uint16_t adc)
+{
+    uint16_t th = cfg_line_threshold(sensor_index);
+
+    if (cfg_line_black_active_high() != 0U) {
+        return adc >= th;
+    }
+    return adc < th;
+}
+
+uint8_t cfg_line_black_active_high(void)
+{
+    return nvs_cfg_get()->line_black_active_high;
+}
+
+float cfg_line_base_rpm(void)
+{
+    return nvs_cfg_get()->line_base_rpm;
 }
 
 uint32_t cfg_battery_calibrate_mv(uint32_t raw_mv)

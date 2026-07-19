@@ -63,12 +63,13 @@ static const bsp_adc_channel_t board_line_adc_channels[] = {
     { 6, 2 },
     { 7, 3 },
     { 8, 4 },
+    { 9, 5 },
 };
 const bsp_adc_config_t BOARD_LINE_ADC_CFG = {
     .base = ADC0_BASE,
     .sequence = 0,
     .channels = board_line_adc_channels,
-    .channel_count = 5,
+    .channel_count = 6,
 };
 
 static const bsp_adc_channel_t board_battery_channel = { 0, 0 };
@@ -121,6 +122,7 @@ bool Board_Periph_Init(void) {
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_1);
     GPIOPinTypeADC(GPIO_PORTD_BASE, GPIO_PIN_0);
     GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_5);
+    GPIOPinTypeADC(GPIO_PORTE_BASE, GPIO_PIN_4);
     GPIOPinConfigure(GPIO_PA4_SSI0RX);
     GPIOPinConfigure(GPIO_PA5_SSI0TX);
     GPIOPinConfigure(GPIO_PA2_SSI0CLK);

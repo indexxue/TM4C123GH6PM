@@ -8,6 +8,7 @@
 
 #include "nvs.h"
 
+#include <stdbool.h>
 #include <stdint.h>
 
 void cfg_init(void);
@@ -19,6 +20,11 @@ int32_t cfg_encoder_count(uint8_t index);
 /** 按 encoder_dir_mask 翻转编码器 delta（极性宏见 encoder_polarity.h） */
 int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta);
 uint16_t cfg_line_threshold(uint8_t sensor_index);
+/** @return true 若该路判定为黑线（已含极性） */
+bool cfg_line_is_black(uint8_t sensor_index, uint16_t adc);
+/** 0=低电平为黑（默认），非 0=高电平为黑 */
+uint8_t cfg_line_black_active_high(void);
+float cfg_line_base_rpm(void);
 uint32_t cfg_battery_calibrate_mv(uint32_t raw_mv);
 
 const nvs_spd_limit_t *cfg_spd_limit(void);

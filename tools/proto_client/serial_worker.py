@@ -75,6 +75,7 @@ class SerialWorker(QThread):
     motor_rpm_received = Signal(object)
     angle_loop_received = Signal(object)
     distance_loop_received = Signal(object)
+    line_loop_received = Signal(object)
     encoder_counts_received = Signal(object)
     battery_received = Signal(int, int)
     optional_subscription_changed = Signal(int)
@@ -180,6 +181,14 @@ class SerialWorker(QThread):
     def request_distance_stop(self) -> None:
         self._cmd_queue.put(("distance_stop", b"", None))
 
+    @Slot(bytes)
+    def request_set_line_follow(self, payload: bytes) -> None:
+        self._cmd_queue.put(("set_line_follow", payload, None))
+
+    @Slot()
+    def request_line_follow_stop(self) -> None:
+        self._cmd_queue.put(("line_follow_stop", b"", None))
+
     @Slot(int)
     def request_calib_yaw(self, ref_yaw: int = 0) -> None:
         self._cmd_queue.put(("calib_yaw", proto.build_calib_yaw(ref_yaw), None))
@@ -224,10 +233,12 @@ class SerialWorker(QThread):
             int(proto.Cmd.SPEED_STOP),
             int(proto.Cmd.SET_ANGLE),
             int(proto.Cmd.ANGLE_STOP),
-            int(proto.Cmd.SET_DISTANCE),
-            int(proto.Cmd.DISTANCE_STOP),
-            int(proto.Cmd.CALIB_YAW),
-            int(proto.Cmd.SUBSCRIBE),
+        int(proto.Cmd.SET_DISTANCE),
+        int(proto.Cmd.DISTANCE_STOP),
+        int(proto.Cmd.SET_LINE_FOLLOW),
+        int(proto.Cmd.LINE_FOLLOW_STOP),
+        int(proto.Cmd.CALIB_YAW),
+        int(proto.Cmd.SUBSCRIBE),
         )
 
     def _begin_critical(self) -> None:
@@ -244,8 +255,8 @@ class SerialWorker(QThread):
             self._next_ping = now
             self._next_telemetry = now
 
-    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int, int]:
-        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor_rpm, hz_angle_loop, hz_distance_loop)。"""
+    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int, int, int]:
+        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop)。"""
         mask = proto.BASE_CHANNEL_MASK | (optional_mask & proto.OPTIONAL_CHANNEL_MASK)
         hz_line = proto.DEFAULT_SUB_LINE_HZ if optional_mask & int(proto.TelChannel.LINE_ADC) else 0
         hz_ultra = proto.DEFAULT_SUB_ULTRA_HZ if optional_mask & int(proto.TelChannel.ULTRASONIC) else 0
@@ -261,6 +272,10 @@ class SerialWorker(QThread):
         if optional_mask & int(proto.TelChannel.DISTANCE_LOOP):
             if self._hello_info and (self._hello_info.caps & int(proto.Cap.DISTANCE_LOOP)):
                 hz_distance = proto.DEFAULT_SUB_DISTANCE_LOOP_HZ
+        hz_line_loop = 0
+        if optional_mask & int(proto.TelChannel.LINE_LOOP):
+            if self._hello_info and (self._hello_info.caps & int(proto.Cap.LINE_FOLLOW)):
+                hz_line_loop = proto.DEFAULT_SUB_LINE_LOOP_HZ
         return (
             mask,
             proto.DEFAULT_SUB_ATT_HZ,
@@ -270,6 +285,7 @@ class SerialWorker(QThread):
             hz_motor,
             hz_angle,
             hz_distance,
+            hz_line_loop,
         )
 
     def _unsubscribe_optional(self) -> bool:
@@ -302,7 +318,9 @@ class SerialWorker(QThread):
             return
         if self._hello_info is None or not (self._hello_info.caps & int(proto.Cap.SUBSCRIBE)):
             return
-        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance = self._subscribe_plan(self._optional_mask)
+        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop = (
+            self._subscribe_plan(self._optional_mask)
+        )
         self._wait_rx_quiet()
         frame = self._send_request_retry(
             int(proto.Cmd.SUBSCRIBE),
@@ -315,6 +333,7 @@ class SerialWorker(QThread):
                 hz_motor_rpm=hz_motor,
                 hz_angle_loop=hz_angle,
                 hz_distance_loop=hz_distance,
+                hz_line_loop=hz_line_loop,
             ),
             timeout=3.0,
             retries=2,
@@ -335,6 +354,8 @@ class SerialWorker(QThread):
             parts.append(f"角度@{hz_angle}Hz")
         if self._optional_mask & int(proto.TelChannel.DISTANCE_LOOP) and hz_distance:
             parts.append(f"距离@{hz_distance}Hz")
+        if self._optional_mask & int(proto.TelChannel.LINE_LOOP) and hz_line_loop:
+            parts.append(f"循迹环@{hz_line_loop}Hz")
         self.log.emit(f"SUBSCRIBE ok ({' + '.join(parts)})")
         self.optional_subscription_changed.emit(self._optional_mask)
 
@@ -477,6 +498,30 @@ class SerialWorker(QThread):
             elif kind == "distance_stop":
                 if self.is_connected():
                     self._post_distance_stop()
+            elif kind == "set_line_follow":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.SET_LINE_FOLLOW),
+                        payload,
+                        timeout=2.0,
+                        retries=2,
+                    )
+                    if frame is None or frame.is_nak:
+                        self.log.emit("SET_LINE_FOLLOW 失败")
+                    else:
+                        self.log.emit("SET_LINE_FOLLOW ok")
+            elif kind == "line_follow_stop":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.LINE_FOLLOW_STOP),
+                        b"",
+                        timeout=2.0,
+                        retries=2,
+                    )
+                    if frame is None or frame.is_nak:
+                        self.log.emit("LINE_FOLLOW_STOP 失败")
+                    else:
+                        self.log.emit("LINE_FOLLOW_STOP ok")
             elif kind == "calib_yaw":
                 if self.is_connected():
                     self._run_calib_yaw(payload)
@@ -917,6 +962,8 @@ class SerialWorker(QThread):
                     sample = proto.parse_distance_loop_push(push.payload)
                     self._last_distance_loop = sample
                     self.distance_loop_received.emit(sample)
+                elif push.channel_id == proto.CHANNEL_ID_LINE_LOOP:
+                    self.line_loop_received.emit(proto.parse_line_loop_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ENCODER:
                     self.encoder_counts_received.emit(proto.parse_encoder_push(push.payload))
                 self.push_received.emit(push)
@@ -938,6 +985,8 @@ class SerialWorker(QThread):
                     int(proto.Cmd.ANGLE_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.SET_DISTANCE) | proto.RESPONSE_BIT,
                     int(proto.Cmd.DISTANCE_STOP) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.SET_LINE_FOLLOW) | proto.RESPONSE_BIT,
+                    int(proto.Cmd.LINE_FOLLOW_STOP) | proto.RESPONSE_BIT,
                     int(proto.Cmd.CALIB_YAW) | proto.RESPONSE_BIT,
                 ):
                     return

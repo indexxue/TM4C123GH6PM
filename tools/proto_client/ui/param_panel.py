@@ -29,6 +29,29 @@ def encode_c_string(text: str, size: int) -> bytes:
     return data + b"\x00" * (size - len(data))
 
 
+def expand_struct_field_types(struct_fmt: str) -> list[str]:
+    """把 '<6H' / '<fff' 展开为与 fields 一一对应的类型列表 ['H','H',...]/"""
+    fmt = struct_fmt.lstrip("<>!@=")
+    types: list[str] = []
+    i = 0
+    while i < len(fmt):
+        count = 0
+        while i < len(fmt) and fmt[i].isdigit():
+            count = count * 10 + int(fmt[i])
+            i += 1
+        if i >= len(fmt):
+            break
+        code = fmt[i]
+        i += 1
+        if count == 0:
+            count = 1
+        if code == "s":
+            types.append(f"{count}s")
+        else:
+            types.extend([code] * count)
+    return types
+
+
 class ParamEditor(QWidget):
     def __init__(
         self,
@@ -104,17 +127,28 @@ class ParamEditor(QWidget):
 
     def _pack_from_form(self) -> bytes:
         entry = self._entry
-        if entry["struct"].endswith("s"):
-            size = int(entry["struct"][:-1])
+        fmt_body = entry["struct"].lstrip("<>!@=")
+
+        # 字符串参数：如 "16s"
+        if fmt_body.endswith("s") and fmt_body[:-1].isdigit() and len(entry["fields"]) == 1:
+            size = int(fmt_body[:-1])
             text = self._fields[entry["fields"][0]].text()
             return encode_c_string(text, size)
 
-        fmt_chars = entry["struct"].lstrip("<")
+        field_types = expand_struct_field_types(entry["struct"])
+        if len(field_types) != len(entry["fields"]):
+            raise ValueError(
+                f"schema 字段数不匹配: struct={entry['struct']} "
+                f"→ {len(field_types)} 类型 vs {len(entry['fields'])} 字段"
+            )
+
         values: list[Any] = []
-        for field_name, fmt_char in zip(entry["fields"], fmt_chars):
+        for field_name, fmt_char in zip(entry["fields"], field_types):
             text = self._fields[field_name].text().strip()
             if fmt_char == "f":
                 values.append(float(text))
+            elif fmt_char == "B":
+                values.append(int(text) & 0xFF)
             elif fmt_char == "H":
                 values.append(int(text) & 0xFFFF)
             elif fmt_char in ("h", "i"):

@@ -9,6 +9,7 @@
 #include "board.h"
 #include "cfg.h"
 #include "device_profile.h"
+#include "line_follow.h"
 #include "motion.h"
 #include "nvs.h"
 #include "pid.h"
@@ -25,6 +26,7 @@
 #define CHASSIS_ANGLE_PID_INTEGRAL_MAX 120.0f
 #define CHASSIS_DISTANCE_PID_OUT_MAX_RPM 300.0f
 #define CHASSIS_DISTANCE_PID_INTEGRAL_MAX 150.0f
+#define CHASSIS_LINE_LOST_STOP_FRAMES 50U /* ~1.0 s @20ms：含丢线搜索窗口 */
 
 #ifndef CHASSIS_ANGLE_DEADBAND_DEG
 /** 极小目标时的到位下限（度） */
@@ -81,6 +83,7 @@ typedef enum {
     CHASSIS_CTRL_SPEED,
     CHASSIS_CTRL_ANGLE,
     CHASSIS_CTRL_DISTANCE,
+    CHASSIS_CTRL_LINE_FOLLOW,
 } chassis_ctrl_mode_t;
 
 static pid_t s_pid[CHASSIS_MOTOR_COUNT];
@@ -118,6 +121,7 @@ static f32_t s_dist_done_tol_mm;
 
 static void chassis_apply_lr_rpm(s32_t left_rpm, s32_t right_rpm);
 static void chassis_distance_clear_state(void);
+static void chassis_line_clear_state(void);
 static void chassis_reset_targets(void);
 static void chassis_lock(void);
 static void chassis_unlock(void);
@@ -626,6 +630,36 @@ static void chassis_distance_update_lr(f32_t dt_s)
     chassis_apply_lr_rpm(rpm_cmd, rpm_cmd);
 }
 
+static void chassis_line_clear_state(void)
+{
+    line_follow_reset();
+}
+
+static void chassis_line_update_lr(f32_t dt_s)
+{
+    f32_t left = 0.0f;
+    f32_t right = 0.0f;
+
+    line_follow_update(dt_s, &left, &right);
+
+    if (line_follow_get_lost_frames() >= CHASSIS_LINE_LOST_STOP_FRAMES) {
+        chassis_reset_targets();
+        s_active = FALSE;
+        s_ctrl_mode = CHASSIS_CTRL_IDLE;
+        chassis_line_clear_state();
+        chassis_reset_speed_pids();
+        return;
+    }
+
+    /* 与角度环相同：电机物理接线与标准差速模型符号相反，交换左右轮 */
+    chassis_apply_lr_rpm((s32_t)right, (s32_t)left);
+}
+
+void chassis_reload_line_pid_gains(void)
+{
+    line_follow_reload_pid();
+}
+
 void chassis_reload_pid_gains(void)
 {
     const nvs_pid3_t *g = cfg_pid_speed();
@@ -805,6 +839,7 @@ void chassis_init(void)
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_line_clear_state();
 
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
         pid_init(&s_pid[i], 1.0f, 0.0f, 0.0f);
@@ -820,9 +855,11 @@ void chassis_init(void)
     pid_set_output_limits(&s_pid_dist, -CHASSIS_DISTANCE_PID_OUT_MAX_RPM, CHASSIS_DISTANCE_PID_OUT_MAX_RPM);
     pid_set_integral_limit(&s_pid_dist, CHASSIS_DISTANCE_PID_INTEGRAL_MAX);
 
+    line_follow_init();
     chassis_reload_pid_gains();
     chassis_reload_angle_pid_gains();
     chassis_reload_distance_pid_gains();
+    chassis_reload_line_pid_gains();
     motion_init();
 }
 
@@ -837,6 +874,7 @@ void chassis_stop(void)
     s_ctrl_mode = CHASSIS_CTRL_IDLE;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_line_clear_state();
 
     for (i = 0U; i < CHASSIS_MOTOR_COUNT; i++) {
         pid_reset(&s_pid[i]);
@@ -866,6 +904,21 @@ bool_t chassis_angle_is_active(void)
 bool_t chassis_distance_is_active(void)
 {
     return (s_ctrl_mode == CHASSIS_CTRL_DISTANCE) ? TRUE : FALSE;
+}
+
+bool_t chassis_line_follow_is_active(void)
+{
+    return (s_ctrl_mode == CHASSIS_CTRL_LINE_FOLLOW) ? TRUE : FALSE;
+}
+
+f32_t chassis_get_line_error(void)
+{
+    return line_follow_get_error();
+}
+
+uint8_t chassis_get_line_detect_mask(void)
+{
+    return line_follow_get_detect_mask();
 }
 
 s16_t chassis_get_angle_target_yaw(void)
@@ -921,6 +974,7 @@ void chassis_set_wheel_rpm(u8_t motor_id, s32_t rpm)
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_line_clear_state();
     s_target_rpm[motor_id - 1U] = chassis_clamp_rpm((f32_t)rpm);
     s_active = TRUE;
     chassis_unlock();
@@ -951,6 +1005,7 @@ void chassis_set_lr_rpm(s32_t left_rpm, s32_t right_rpm)
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_line_clear_state();
     chassis_apply_lr_rpm(left_rpm, right_rpm);
     chassis_unlock();
 }
@@ -975,6 +1030,7 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
     s_ctrl_mode = CHASSIS_CTRL_SPEED;
     chassis_angle_clear_state();
     chassis_distance_clear_state();
+    chassis_line_clear_state();
     chassis_reset_speed_pids();
 
     max_rpm = (lim != NULL) ? lim->max_rpm : 300.0f;
@@ -991,6 +1047,7 @@ void chassis_set_angle(s16_t target_yaw_deg, s32_t base_rpm, s32_t max_turn_rpm)
     chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_ANGLE;
     chassis_distance_clear_state();
+    chassis_line_clear_state();
     chassis_reset_speed_pids();
     s_angle_base_rpm = base_rpm;
     s_angle_max_turn_rpm = max_turn_rpm;
@@ -1014,6 +1071,7 @@ void chassis_set_distance(s32_t target_dist_mm, s32_t max_rpm)
     chassis_lock();
     s_ctrl_mode = CHASSIS_CTRL_DISTANCE;
     chassis_angle_clear_state();
+    chassis_line_clear_state();
     chassis_reset_speed_pids();
     s_dist_max_rpm = max_rpm;
     s_dist_cmd_rpm = 0;
@@ -1023,6 +1081,28 @@ void chassis_set_distance(s32_t target_dist_mm, s32_t max_rpm)
     s_dist_target_mm_f = (f32_t)target_dist_mm;
     s_dist_target_mm = target_dist_mm;
     s_dist_done_tol_mm = chassis_distance_done_tol_mm(s_dist_target_mm_f);
+    s_active = TRUE;
+    chassis_unlock();
+}
+
+void chassis_set_line_follow(s32_t base_rpm)
+{
+    f32_t base;
+
+    chassis_lock();
+    s_ctrl_mode = CHASSIS_CTRL_LINE_FOLLOW;
+    chassis_angle_clear_state();
+    chassis_distance_clear_state();
+    chassis_reset_speed_pids();
+    line_follow_reset();
+    line_follow_reload_pid();
+
+    if (base_rpm > 0) {
+        base = (f32_t)base_rpm;
+    } else {
+        base = cfg_line_base_rpm();
+    }
+    line_follow_set_base_rpm(base);
     s_active = TRUE;
     chassis_unlock();
 }
@@ -1075,6 +1155,8 @@ void chassis_tick(u32_t period_ms)
         chassis_angle_update_lr(dt_s);
     } else if (s_ctrl_mode == CHASSIS_CTRL_DISTANCE) {
         chassis_distance_update_lr(dt_s);
+    } else if (s_ctrl_mode == CHASSIS_CTRL_LINE_FOLLOW) {
+        chassis_line_update_lr(dt_s);
     }
 
     chassis_ramp_targets(dt_s);

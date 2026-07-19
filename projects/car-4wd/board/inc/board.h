@@ -176,7 +176,7 @@ int32_t Encoder_GetCount(uint8_t index);
 void Encoder_ResetCount(uint8_t index);
 
 /* --- Line --- */
-#define LINE_SENSOR_COUNT 5U
+#define LINE_SENSOR_COUNT 6U
 bool Line_IsReady(void);
 bool Line_Sample(uint16_t *out, size_t count);
 void Line_Init(void);
