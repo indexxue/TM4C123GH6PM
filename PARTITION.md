@@ -61,19 +61,20 @@ OK 键为 PE2 ADC 分压按键（与 UP/DN 共用一路 ADC）。
 
 | 产物 | 链接脚本 | 烧录偏移 | 说明 |
 |------|----------|----------|------|
-| `build/bootloader.bin` | `ld/bootloader.ld` | `0x00000000` | Boot |
-| `build/app.bin` | `ld/app.ld` | `0x00004000` | 量产 APP_A |
-| `build/factory.bin` | `ld/factory.ld` | `0x00021000` | 厂测 APP_B |
+| `projects/<car>/build/bootloader.bin` | `ld/bootloader.ld` | `0x00000000` | Boot |
+| `projects/<car>/build/app.bin` | `ld/app.ld` | `0x00004000` | 量产 APP_A |
+| `projects/factory/build/factory.bin` | `ld/factory.ld` | `0x00021000` | 厂测 APP_B |
 | NVS | — | 运行时初始化 | 参数区首次写入 |
 
 ```powershell
 # 构建
-.\scripts\build.ps1 -Target all      # bootloader + app + factory
+.\build.cmd car-4wd -Target all   # bootloader + app
+.\build.cmd factory               # 厂测 APP_B
 
 # 烧录
 .\flash-jlink.cmd -Target bootloader
 .\flash-jlink.cmd -Target app         # 日常可只烧 app（须已有 Boot）
-.\flash-jlink.cmd -Target factory      # 产线预置厂测
+.\flash-jlink.cmd -Target factory     # projects/factory/build/
 ```
 
 ---

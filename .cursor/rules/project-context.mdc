@@ -49,10 +49,10 @@ alwaysApply: true
 bsp_driver/             # MCU 外设薄封装（bsp_<外设>.{h,c}，见 embedded-coding-standard.md）
 cbb/                    # 芯片驱动子模块（ws2812b、mpu6050…）
 projects/
-  car-4wd/              # 四轮（.syscfg、board/ 设备库、main/ 应用、build/）
-  car-2wd/              # 两轮
+  factory/              # 厂测 id=0（.syscfg、board/、main/、build/）
+  car-4wd/              # 四轮 id=1（.syscfg、board/ 设备库、main/ 应用、build/）
+  car-2wd/              # 两轮 id=2
 bootloader/             # Bootloader
-factory/                # 厂测固件
 Common/src|inc/         # 跨工程公共模块（log、start、device_profile、nvs、ota）
 include/                # 全局头文件（start.h、FreeRTOSConfig.h）
 sdk/                    # TivaWare SDK（首次构建安装，不提交）
@@ -67,13 +67,24 @@ docs/                   # 设计文档
 
 ```powershell
 .\build.cmd                              # 默认 car-4wd
-.\build.cmd -CarProject car-2wd
+.\build.cmd factory
+.\build.cmd car-2wd
 .\flash-jlink.cmd
+.\flash-jlink.cmd -Target factory
 ```
 
-- 配置源：`projects/<car>/.syscfg/`（**勿手改** `projects/<car>/board/src/{motor,encoder,line,board}.c`）
-- 生成：`projects/<car>/board/src/motor.c`、`encoder.c`、`line.c`、`board.c`
-- 初始化：`projects/<car>/main/main.c` 调用 `Start_Init()`（`Common/src/start.c`）
+WSL：
+
+```bash
+cd projects
+./build.sh factory && ./flash.sh factory
+./build.sh car-4wd && ./flash.sh car-4wd
+```
+
+- 配置源：`projects/<product>/.syscfg/`（**勿手改** `projects/<product>/board/src/{motor,encoder,line,board}.c`）
+- 生成：`projects/<product>/board/src/motor.c`、`encoder.c`、`line.c`、`board.c`
+- 量产初始化：`projects/<car>/main/main.c` 调用 `Start_Init()`（`Common/src/start.c`）
+- 厂测：`projects/factory/main/`，UART7 cmd，无蓝牙协议层
 
 ## 外设分配摘要
 
@@ -214,7 +225,7 @@ boot B
 
 ### 相关文件
 
-- 厂测入口：`factory/main.c`、`factory/factory.c`
+- 厂测入口：`projects/factory/main/main.c`、`projects/factory/main/factory.c`
 - I2C BSP：`bsp_driver/src/bsp_i2c.c`
 - 板级生成：`scripts/gen_config.py`（I2C0 跳过硬件 mux）
 - 传感器：`Common/src/imu.c`、`Common/src/magnetometer.c`

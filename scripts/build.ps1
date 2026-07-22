@@ -1,5 +1,6 @@
 param(
-    [ValidateSet("car-4wd", "car-2wd")]
+    [Parameter(Position = 0)]
+    [ValidateSet("factory", "car-4wd", "car-2wd")]
     [string]$CarProject = "car-4wd",
 
     [ValidateSet("standalone", "bootloader", "app", "factory", "all")]
@@ -18,13 +19,23 @@ param(
 $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+
+# factory is APP_B-only; car products no longer build Target=factory.
+if ($CarProject -eq "factory") {
+    if ($Target -in @("bootloader", "app", "all")) {
+        throw "product 'factory' only builds APP_B (use default / -Target factory). Got -Target $Target"
+    }
+    $Target = "factory"
+} elseif ($Target -eq "factory") {
+    throw "Target=factory removed from car products; use: .\build.cmd factory"
+}
+
 $CarDir = Join-Path $ProjectRoot "projects\$CarProject"
 $BuildDir = Join-Path $CarDir "build"
 $MainDir = Join-Path $CarDir "main"
 $BoardSrc = Join-Path $CarDir "board\src"
 $BoardInc = Join-Path $CarDir "board\inc"
 $BlDir = Join-Path $ProjectRoot "bootloader"
-$FactoryDir = Join-Path $ProjectRoot "factory"
 $IncDir = Join-Path $ProjectRoot "include"
 $CommonDir = Join-Path $ProjectRoot "Common"
 $CommonInc = Join-Path $CommonDir "inc"
@@ -193,7 +204,11 @@ $GenConfig = Join-Path $ProjectRoot "scripts\gen_config.py"
 $CheckSize = Join-Path $ProjectRoot "scripts\check-image-size.py"
 
 function Get-DeviceDefines {
-    $productId = if ($CarProject -eq "car-2wd") { 2 } else { 1 }
+    $productId = switch ($CarProject) {
+        "factory" { 0 }
+        "car-2wd" { 2 }
+        default { 1 }
+    }
     return @("-DDEVICE_PRODUCT_ID=$productId")
 }
 
@@ -305,7 +320,9 @@ function Get-FullCommonSources {
 }
 
 function Get-FactoryCommonSources {
-    return (Get-FullCommonSources) + @(
+    # Full common minus bluetooth protocol stack; cmd-only厂测.
+    $withoutProto = (Get-FullCommonSources) | Where-Object { $_ -notmatch '[\\/]proto\.c$' }
+    return $withoutProto + @(
         (Join-Path $CommonSrc "cmd.c")
     )
 }
@@ -328,10 +345,10 @@ function Get-AppSources {
 function Get-FactorySources {
     return @(
         (Join-Path $MainDir "startup_tm4c123gh6pm.c"),
+        (Join-Path $MainDir "main.c"),
+        (Join-Path $MainDir "factory.c"),
         (Join-Path $MainDir "freertos_hooks.c"),
-        (Join-Path $MainDir "syscalls.c"),
-        (Join-Path $FactoryDir "main.c"),
-        (Join-Path $FactoryDir "factory.c")
+        (Join-Path $MainDir "syscalls.c")
     ) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) + (Get-FactoryCommonSources) +
         (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
@@ -456,13 +473,13 @@ function Invoke-FirmwareBuild {
         }
         "factory" {
             Invoke-AppCodegen
-            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($FactoryDir) -CheckImageSize
+            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($MainDir) -CheckImageSize
         }
         "all" {
+            # Car products only: bootloader + app. Factory is projects/factory.
             Invoke-AppCodegen
             Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
             Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines) + (Get-CarAppDefines)) -CheckImageSize
-            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($FactoryDir) -CheckImageSize
         }
     }
 }
@@ -488,7 +505,7 @@ function Publish-ReleaseArtifacts {
 
     $names = @()
     if ($Target -eq "all") {
-        $names = @("bootloader", "app", "factory")
+        $names = @("bootloader", "app")
     } else {
         $names = @(Get-PrimaryArtifactName)
     }

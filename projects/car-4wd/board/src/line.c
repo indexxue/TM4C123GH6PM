@@ -12,6 +12,10 @@
 
 #define LINE_SENSOR_COUNT 6U
 
+#ifndef LOG_ENABLE
+#define LOG_ENABLE 1
+#endif
+
 static bool s_line_adc_ready;
 
 bool Line_IsReady(void)
@@ -45,13 +49,19 @@ void Line_Init(void) {
 
     s_line_adc_ready = bsp_adc_init(&BOARD_LINE_ADC_CFG);
     if (!s_line_adc_ready) {
+#if LOG_ENABLE
         bsp_uart_debug_puts("[line] adc init FAIL\r\n");
+#endif
         return;
     }
     if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {
+#if LOG_ENABLE
         bsp_uart_debug_puts("[line] adc boot sample FAIL\r\n");
+#endif
         s_line_adc_ready = false;
         return;
     }
+#if LOG_ENABLE
     bsp_uart_debug_puts("[line] adc boot sample OK\r\n");
+#endif
 }

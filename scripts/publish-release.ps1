@@ -82,7 +82,7 @@ if ($BuildFirst) {
     $list = if ($Products -eq "all") { @("car-4wd", "car-2wd") } else { @($Products) }
     foreach ($p in $list) {
         Write-Host "==> build release $p $ver" -ForegroundColor Cyan
-        & (Join-Path $PSScriptRoot "build.ps1") -CarProject $p -Target standalone -Action release -FwVersion $ver -LogEnable 0
+        & (Join-Path $PSScriptRoot "build.ps1") $p -Target standalone -Action release -FwVersion $ver -LogEnable 0
     }
 }
 

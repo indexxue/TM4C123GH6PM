@@ -6,10 +6,10 @@
 |----|-----|
 | MCU | TM4C123GH6PM（Cortex-M4F） |
 | 产品 | `car-4wd` / `car-2wd` |
-| 推荐入口 | WSL2：`projects/build.sh` |
-| 备选入口 | Windows：`.\build.cmd` → `scripts/build.ps1` |
+| 推荐入口 | WSL2：`projects/build.sh` / `projects/flash.sh` |
+| 备选入口 | Windows：`.\build.cmd` / `.\flash-jlink.cmd` |
 | 编译器 | `arm-none-eabi-gcc`（Windows `tools/bin/`，由 build.ps1 安装） |
-| 烧录 | J-Link / UniFlash（`flash-jlink.cmd` / `flash.cmd`） |
+| 烧录 | J-Link（`flash.sh` → `flash-jlink.ps1`）/ UniFlash（`flash.cmd`） |
 
 ---
 
@@ -40,11 +40,14 @@
 ```bash
 cd projects
 ./build.sh detect
+./build.sh factory
 ./build.sh car-4wd
 ./build.sh car-4wd rebuild
 ./build.sh car-4wd release 0.1.0
 ./build.sh all release 0.1.0
-IMAGE_TARGET=factory ./build.sh car-2wd
+IMAGE_TARGET=app ./build.sh car-4wd
+./flash.sh car-4wd
+./flash.sh factory
 ```
 
 | 动作 | 行为 | 产物 |
@@ -90,9 +93,7 @@ IMAGE_TARGET=factory ./build.sh car-2wd
 ## 5. 日常最短路径
 
 ```bash
-cd projects && ./build.sh car-4wd
-# Windows 烧录：
-#   .\flash-jlink.cmd
+cd projects && ./build.sh car-4wd && ./flash.sh car-4wd
 # 串口：UART7 115200（日志/CMD）；UART0 蓝牙协议
 ```
 

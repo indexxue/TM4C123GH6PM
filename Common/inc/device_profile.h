@@ -17,6 +17,7 @@
 /* 产品 ID（build.ps1 注入 -DDEVICE_PRODUCT_ID=...）                           */
 /* -------------------------------------------------------------------------- */
 
+#define DEVICE_PRODUCT_ID_FACTORY      (0U)
 #define DEVICE_PRODUCT_ID_CAR_4WD_FULL (1U)
 #define DEVICE_PRODUCT_ID_CAR_2WD_FULL (2U)
 

@@ -18,6 +18,7 @@ def tivaware_root() -> Path:
 
 
 CAR_PROJECTS = {
+    "factory": ROOT / "projects" / "factory",
     "car-4wd": ROOT / "projects" / "car-4wd",
     "car-2wd": ROOT / "projects" / "car-2wd",
 }
@@ -798,6 +799,10 @@ def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardH
         body = [
             f"#define LINE_SENSOR_COUNT {len(line_items)}U",
             "",
+            "#ifndef LOG_ENABLE",
+            "#define LOG_ENABLE 1",
+            "#endif",
+            "",
             "static bool s_line_adc_ready;",
             "",
             "bool Line_IsReady(void)",
@@ -832,15 +837,21 @@ def gen_line(gpio: dict, modules: dict[str, dict], src_dir: Path, header: BoardH
             "",
             "    s_line_adc_ready = bsp_adc_init(&BOARD_LINE_ADC_CFG);",
             "    if (!s_line_adc_ready) {",
+            "#if LOG_ENABLE",
             '        bsp_uart_debug_puts("[line] adc init FAIL\\r\\n");',
+            "#endif",
             "        return;",
             "    }",
             "    if (!bsp_adc_sample(&BOARD_LINE_ADC_CFG, raw, LINE_SENSOR_COUNT)) {",
+            "#if LOG_ENABLE",
             '        bsp_uart_debug_puts("[line] adc boot sample FAIL\\r\\n");',
+            "#endif",
             "        s_line_adc_ready = false;",
             "        return;",
             "    }",
+            "#if LOG_ENABLE",
             '    bsp_uart_debug_puts("[line] adc boot sample OK\\r\\n");',
+            "#endif",
             "}",
         ]
         protos = [
@@ -1258,7 +1269,12 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
         tivaware,
         tivaware / "inc",
     ]
-    product_id = 2 if car_project == "car-2wd" else 1
+    if car_project == "factory":
+        product_id = 0
+    elif car_project == "car-2wd":
+        product_id = 2
+    else:
+        product_id = 1
     profile_defines = [f"-DDEVICE_PRODUCT_ID={product_id}"]
     flags = [
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16",

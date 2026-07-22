@@ -7,6 +7,13 @@
 
 static const device_product_profile_t s_product_profiles[] = {
     {
+        .product_id = DEVICE_PRODUCT_ID_FACTORY,
+        .name = "factory",
+        .board_mask = DEVICE_BOARD_MASK_FULL,
+        .platform_mask = DEVICE_PLATFORM_MASK_LOG | DEVICE_PLATFORM_MASK_CMD | DEVICE_PLATFORM_MASK_BUTTON,
+        .clock_source = DEVICE_CLOCK_MAIN_8MHZ,
+    },
+    {
         .product_id = DEVICE_PRODUCT_ID_CAR_4WD_FULL,
         .name = "car-4wd",
         .board_mask = DEVICE_BOARD_MASK_FULL,
@@ -32,7 +39,8 @@ static const device_product_profile_t *product_profile_lookup(uint32_t product_i
         }
     }
 
-    return &s_product_profiles[0];
+    /* Unknown id → car-4wd (index 1), not factory. */
+    return &s_product_profiles[1];
 }
 
 const device_product_profile_t *device_profile_product(void)

@@ -2,7 +2,7 @@ param(
     [string]$Image = "",
     [ValidateSet("standalone", "bootloader", "app", "factory")]
     [string]$Target = "standalone",
-    [ValidateSet("car-4wd", "car-2wd")]
+    [ValidateSet("factory", "car-4wd", "car-2wd")]
     [string]$CarProject = "car-4wd",
     [switch]$EraseAll,
     [switch]$EraseApps,
@@ -10,6 +10,12 @@ param(
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
+
+# factory image always lives under projects/factory/build/
+if ($Target -eq "factory") {
+    $CarProject = "factory"
+}
+
 $BuildDir = Join-Path $ProjectRoot "projects\$CarProject\build"
 $JLinkExe = "C:\Program Files\SEGGER\JLink_V818\JLink.exe"
 

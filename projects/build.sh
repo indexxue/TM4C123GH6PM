@@ -14,10 +14,11 @@
 #   ./build.sh detect
 #   ./build.sh help
 #
-# Products: car-4wd | car-2wd
+# Products: factory | car-4wd | car-2wd
 #
 # Env:
-#   IMAGE_TARGET   standalone|bootloader|app|factory|all  (default: standalone)
+#   IMAGE_TARGET   standalone|bootloader|app|factory|all  (default: standalone;
+#                  product factory always uses factory)
 #   FW_VERSION     override version string
 #   LOG_ENABLE     1 (debug default) | 0
 #   FW_MCU_NAME    release filename MCU tag (default TM4C123GH6PM)
@@ -27,7 +28,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 source "${SCRIPT_DIR}/_common.sh"
-PRODUCTS=(car-4wd car-2wd)
+PRODUCTS=(factory car-4wd car-2wd)
 
 FW_MCU_NAME="${FW_MCU_NAME:-TM4C123GH6PM}"
 IMAGE_TARGET="${IMAGE_TARGET:-standalone}"
@@ -43,13 +44,14 @@ Usage:
   ./build.sh detect                        Check powershell / gcc / SDK
   ./build.sh help
 
-Products: car-4wd | car-2wd
-  Tab-complete / path ok: ./build.sh car-4wd/  |  ./build.sh ./car-2wd
+Products: factory | car-4wd | car-2wd
+  Tab-complete / path ok: ./build.sh factory/  |  ./build.sh ./car-4wd
 
-IMAGE_TARGET (env, default standalone):
+IMAGE_TARGET (env, default standalone; factory product forces factory):
   standalone | bootloader | app | factory | all
 
 Examples:
+  ./build.sh factory
   ./build.sh car-4wd
   ./build.sh car-2wd build
   ./build.sh car-4wd rebuild
@@ -59,7 +61,7 @@ Examples:
   ./build.sh all release 0.1.0
 
 Debug artifacts:   projects/<product>/build/<name>.{elf,hex,bin}
-  (standalone name = product, e.g. car-4wd.elf)
+  (standalone name = product, e.g. car-4wd.elf; factory → factory.elf)
 Release artifacts: release/<ver>/{MCU}_{YYYYMMDD}_{product}_{ver}_unsigned.{elf,hex,bin}
 
 Compile still runs scripts/build.ps1 via powershell.exe (Windows host toolchain).
@@ -163,6 +165,14 @@ invoke_build_ps1() {
     local log_enable="${4:-1}"
     local ps ps_file win_root
     local -a args
+    local image_target="${IMAGE_TARGET}"
+
+    # factory product always links APP_B (factory.ld).
+    if [[ "${product}" == "factory" ]]; then
+        image_target="factory"
+    elif [[ "${image_target}" == "factory" ]]; then
+        die "IMAGE_TARGET=factory removed for car products; use: ./build.sh factory"
+    fi
 
     ps="$(find_powershell)" || die "powershell.exe not found — run from WSL2 on Windows, or use .\\build.cmd"
     win_root="$(repo_win_path)"
@@ -172,8 +182,8 @@ invoke_build_ps1() {
         -NoProfile
         -ExecutionPolicy Bypass
         -File "${ps_file}"
-        -CarProject "${product}"
-        -Target "${IMAGE_TARGET}"
+        "${product}"
+        -Target "${image_target}"
         -Action "${action}"
         -LogEnable "${log_enable}"
     )
@@ -181,8 +191,8 @@ invoke_build_ps1() {
         args+=(-FwVersion "${fw_version}")
     fi
 
-    log "powershell build.ps1 -CarProject ${product} -Target ${IMAGE_TARGET} -Action ${action} -LogEnable ${log_enable}${fw_version:+ -FwVersion ${fw_version}}"
-    # Convert WSL path args: -File already Windows. CarProject etc. are plain strings.
+    log "powershell build.ps1 ${product} -Target ${image_target} -Action ${action} -LogEnable ${log_enable}${fw_version:+ -FwVersion ${fw_version}}"
+    # Convert WSL path args: -File already Windows. Product etc. are plain strings.
     "${ps}" "${args[@]}"
 }
 
@@ -214,15 +224,22 @@ artifact_stem_for_image() {
 
 build_debug() {
     local product="$1"
-    local ve
+    local ver
+    local image_target="${IMAGE_TARGET}"
+    if [[ "${product}" == "factory" ]]; then
+        image_target="factory"
+    fi
     ver="$(resolve_debug_version)"
-    log "build ${product} (debug) ver=${ver} LOG_ENABLE=${LOG_ENABLE:-1} IMAGE_TARGET=${IMAGE_TARGET}"
+    log "build ${product} (debug) ver=${ver} LOG_ENABLE=${LOG_ENABLE:-1} IMAGE_TARGET=${image_target}"
     invoke_build_ps1 "${product}" "build" "${ver}" "${LOG_ENABLE:-1}"
 
     local name out
     name="$(artifact_stem_for_image "${product}")"
+    if [[ "${product}" == "factory" ]]; then
+        name="factory"
+    fi
     out="${REPO_ROOT}/projects/${product}/build/${name}"
-    if [[ "${IMAGE_TARGET}" == "all" ]]; then
+    if [[ "${image_target}" == "all" ]]; then
         echo "OK  product=${product} version=${ver} IMAGE_TARGET=all"
         return 0
     fi

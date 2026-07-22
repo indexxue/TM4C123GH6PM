@@ -23,45 +23,50 @@ git submodule update --init --recursive
 
 ## 编译
 
-**WSL（推荐）** — 产品 = `car-4wd` | `car-2wd`：
+**WSL（推荐）** — 产品 = `factory` | `car-4wd` | `car-2wd`：
 
 ```bash
 cd projects
 ./build.sh detect
+./build.sh factory                       # → projects/factory/build/factory.{elf,hex,bin}
 ./build.sh car-4wd                       # → projects/car-4wd/build/car-4wd.{elf,hex,bin}
 ./build.sh car-4wd release 0.1.0         # → release/0.1.0/TM4C123GH6PM_*_unsigned.*
+./flash.sh car-4wd                       # J-Link 烧录 standalone
+./flash.sh factory                       # 厂测 APP_B
 ./publish.sh 0.1.0                       # → git tag v0.1.0 + GitHub Release 附件
 ```
 
-**Windows**（默认 `-CarProject car-4wd`、`-Target standalone`）：
+**Windows**（默认产品 `car-4wd`、`-Target standalone`）：
 
 ```powershell
 .\build.cmd                              # 四轮开发镜像 → projects/car-4wd/build/car-4wd.{elf,hex,bin}
-.\build.cmd -CarProject car-2wd          # 两轮开发镜像
-.\build.cmd -Target app                  # 量产分区镜像 app.bin
-.\build.cmd -Target all                  # Boot + APP_A + 厂测 三镜像
-.\build.cmd -Action release -FwVersion 0.1.0
+.\build.cmd factory                      # 厂测 APP_B
+.\build.cmd car-2wd                      # 两轮开发镜像
+.\build.cmd car-4wd -Target app          # 量产分区镜像 app.bin
+.\build.cmd car-4wd -Target all          # Boot + APP_A（厂测请另编 factory）
+.\build.cmd car-4wd -Action release -FwVersion 0.1.0
 .\publish-release.cmd 0.1.0              # tag + GitHub Release（需 gh auth login）
 ```
 
 也可在工程目录内编译：
 
 ```powershell
+.\projects\factory\build.cmd
 .\projects\car-4wd\build.cmd
 .\projects\car-2wd\build.cmd
 ```
 
 IDE：**Ctrl+Shift+B** 默认编译 `car-4wd`。流水线细节见 **[docs/build-pipeline.md](docs/build-pipeline.md)**、**[docs/build.md](docs/build.md)**。
 
-| `-Target` / `IMAGE_TARGET` | 产物（以 car-4wd 为例） | 用途 |
-|-----------|-------------------------|------|
-| `standalone`（默认） | `build/car-4wd.{elf,hex,bin}` | 日常开发，整片 @ `0x0` |
-| `bootloader` | `build/bootloader.*` | Boot @ `0x0` |
-| `app` | `build/app.*` | 量产固件 @ `0x4000` |
-| `factory` | `build/factory.*` | 厂测 @ `0x21000` |
-| `all` | 上述三个镜像 | 产线全套 |
+| 产品 / `-Target` | 产物 | 用途 |
+|-----------|------|------|
+| `.\build.cmd factory` | `projects/factory/build/factory.*` | 厂测 @ `0x21000` |
+| 车型 `standalone`（默认） | `projects/<car>/build/<car>.*` | 日常开发，整片 @ `0x0` |
+| 车型 `bootloader` | `build/bootloader.*` | Boot @ `0x0` |
+| 车型 `app` | `build/app.*` | 量产固件 @ `0x4000` |
+| 车型 `all` | boot + app | 产线 Boot + 量产 |
 
-配置源在 `projects/<car>/.syscfg/`；编译前由 `gen_config.py` 生成 `board/`，**勿手改**生成文件。
+配置源在 `projects/<product>/.syscfg/`；编译前由 `gen_config.py` 生成 `board/`，**勿手改**生成文件。
 
 ---
 
@@ -78,11 +83,24 @@ IDE：**Ctrl+Shift+B** 默认编译 `car-4wd`。流水线细节见 **[docs/build
 
 单镜像写到 Flash 起始地址，**无** Boot / 厂测切换：
 
+**WSL：**
+
+```bash
+cd projects
+./build.sh car-4wd
+./flash.sh car-4wd                 # @ 0x0
+
+./build.sh car-2wd
+./flash.sh car-2wd
+```
+
+**Windows：**
+
 ```powershell
 .\build.cmd
 .\flash-jlink.cmd                          # car-4wd.bin @ 0x0
 
-.\build.cmd -CarProject car-2wd
+.\build.cmd car-2wd
 .\flash-jlink.cmd -CarProject car-2wd      # car-2wd.bin @ 0x0
 ```
 
@@ -99,8 +117,22 @@ Flash 布局（256 KB）：
 
 产线首次（三镜像）：
 
+**WSL：**
+
+```bash
+cd projects
+IMAGE_TARGET=all ./build.sh car-4wd
+./build.sh factory
+./flash.sh car-4wd bootloader
+./flash.sh car-4wd app
+./flash.sh factory
+```
+
+**Windows：**
+
 ```powershell
-.\build.cmd -Target all -CarProject car-4wd
+.\build.cmd car-4wd -Target all
+.\build.cmd factory
 .\flash-jlink.cmd -Target bootloader
 .\flash-jlink.cmd -Target app
 .\flash-jlink.cmd -Target factory
@@ -108,21 +140,28 @@ Flash 布局（256 KB）：
 
 日常只更新量产固件（Boot 已在片上）：
 
+```bash
+# WSL
+IMAGE_TARGET=app ./build.sh car-4wd
+./flash.sh car-4wd app
+```
+
 ```powershell
-.\build.cmd -Target app
+# Windows
+.\build.cmd car-4wd -Target app
 .\flash-jlink.cmd -Target app
 ```
 
-| 命令 | 镜像 | 偏移 |
+| 命令（WSL / Windows） | 镜像 | 偏移 |
 |------|------|------|
-| `.\flash-jlink.cmd` | `car-*.bin`（standalone） | `0x0` |
-| `.\flash-jlink.cmd -Target bootloader` | `bootloader.bin` | `0x0` |
-| `.\flash-jlink.cmd -Target app` | `app.bin` | `0x4000` |
-| `.\flash-jlink.cmd -Target factory` | `factory.bin` | `0x21000` |
-| `.\flash-jlink.cmd -Target bootloader -EraseAll` | 全片擦除 + 仅 Boot | Boot 自测 |
-| `.\flash-jlink.cmd -Target app -EraseApps` | 擦 APP+NVS 后写 app | 保留 Boot |
+| `./flash.sh` / `.\flash-jlink.cmd` | `car-*.bin`（standalone） | `0x0` |
+| `./flash.sh car-4wd bootloader` | `bootloader.bin` | `0x0` |
+| `./flash.sh car-4wd app` | `app.bin` | `0x4000` |
+| `./flash.sh factory` | `factory.bin` | `0x21000` |
+| `./flash.sh car-4wd bootloader --erase-all` | 全片擦除 + 仅 Boot | Boot 自测 |
+| `./flash.sh car-4wd app --erase-apps` | 擦 APP+NVS 后写 app | 保留 Boot |
 
-可选：`-CarProject car-4wd`（默认）或 `car-2wd`。
+可选：产品 `car-4wd`（默认）或 `car-2wd`；厂测用 `./flash.sh factory`。
 
 ### UniFlash（可选）
 
@@ -165,11 +204,11 @@ cd tools\proto_client
 ```
 bsp_driver/         MCU 外设薄封装
 cbb/                芯片驱动子模块（MPU6050、QMC5883P…）
-projects/car-4wd/   .syscfg/  board/  main/  build/
-projects/car-2wd/   同上（双电机 + 万向轮地面差速）
+projects/factory/   厂测 id=0（.syscfg / board / main / build）
+projects/car-4wd/   四轮 id=1（.syscfg / board / main / build）
+projects/car-2wd/   两轮 id=2（双电机 + 万向轮地面差速）
 Common/             公共模块（log、chassis、proto、nvs…）
 bootloader/         Boot
-factory/            厂测固件
 tools/proto_client/ 蓝牙上位机
 docs/               设计与构建文档
 ```

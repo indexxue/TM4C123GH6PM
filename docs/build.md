@@ -65,18 +65,23 @@
 
 ### 3.1 WSL（推荐入口）
 
-在 `projects/` 下（产品 = `car-4wd` | `car-2wd`）：
+在 `projects/` 下（产品 = `factory` | `car-4wd` | `car-2wd`）：
 
 ```bash
 cd projects
 ./build.sh detect
+./build.sh factory                 # 厂测 APP_B
 ./build.sh car-4wd                 # debug → elf/hex/bin
 ./build.sh car-2wd rebuild
 ./build.sh car-4wd release 0.1.0   # LOG_ENABLE=0 + release/ 打包
 IMAGE_TARGET=app ./build.sh car-4wd
+
+./flash.sh car-4wd                 # J-Link standalone
+./flash.sh factory                 # 厂测 @ 0x21000
+./flash.sh car-4wd app             # 量产 APP_A
 ```
 
-`build.sh` 解析产品 / 版本后调用 Windows 侧 `scripts/build.ps1`（工具链与 TivaWare 仍在 Windows 路径）。更细的流水线说明见 [build-pipeline.md](build-pipeline.md)。
+`build.sh` / `flash.sh` 经 `powershell.exe` 调用 Windows 侧 `scripts/build.ps1`、`scripts/flash-jlink.ps1`（工具链与 J-Link 在 Windows）。更细说明见 [build-pipeline.md](build-pipeline.md)。
 
 ### 3.2 Windows
 
@@ -268,6 +273,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | 脚本 | 职责 |
 |------|------|
 | `projects/build.sh` | WSL 编译入口（产品 / 版本 / release） |
+| `projects/flash.sh` | WSL 烧录入口（调用 `flash-jlink.ps1`） |
 | `projects/_common.sh` | 版本与 apt 共用逻辑 |
 | `projects/publish.sh` | WSL：tag + GitHub Release 上传 |
 | `build.ps1` | 主编译（`-CarProject` / `-Target` / `-Action` / 宏注入） |
@@ -283,11 +289,27 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 
 ## 10. 烧录
 
-```powershell
-.\flash.cmd -Target standalone   # 默认 car-4wd 的 .bin @ 0x0
+**WSL（推荐）：**
+
+```bash
+cd projects
+./flash.sh                         # 默认 car-4wd standalone
+./flash.sh factory
+./flash.sh car-4wd app
+./flash.sh car-4wd bootloader --erase-all
+./flash.sh car-4wd app --erase-apps
+JLINK_SPEED=1000 ./flash.sh car-2wd
 ```
 
-烧录前确认 `flash-*.ps1` 中的镜像路径指向 `projects/<car>/build/`。
+**Windows：**
+
+```powershell
+.\flash-jlink.cmd
+.\flash-jlink.cmd -Target factory
+.\flash.cmd -Target standalone     # UniFlash
+```
+
+厂测镜像固定读 `projects/factory/build/`；车型镜像读 `projects/<car>/build/`。
 
 ---
 
