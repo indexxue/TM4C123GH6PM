@@ -48,7 +48,7 @@ void cmd_uart_unlock(void);
 /** 创建调试 UART7 读行任务（幂等）。须在 UART7 初始化之后调用。 */
 status_t cmd_uart_line_service_start(void);
 
-/** 校验目标槽镜像、写 NVS slot、停电机并复位；成功不返回 */
+/** 同 boot_slot_switch()；厂测 cmd 路径兼容入口 */
 status_t cmd_boot_slot_switch(uint32_t slot);
 
 #ifdef __cplusplus

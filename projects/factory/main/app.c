@@ -13,6 +13,7 @@
 #include "attitude.h"
 #include "battery.h"
 #include "board.h"
+#include "boot_slot.h"
 #include "button.h"
 #include "buzzer.h"
 #include "cfg.h"
@@ -248,7 +249,7 @@ static void app_button_notify(btn_id_e id, const char *name, btn_permission_e pe
                               btn_event_e event)
 {
     if ((event == BTN_EVENT_LONG_PRESS) && ((permission & BTN_PERMISSION_FTM) != 0U)) {
-        (void)cmd_boot_slot_switch(BOOT_SLOT_A);
+        (void)boot_slot_switch(BOOT_SLOT_A);
     }
     button_log_notify(id, name, permission, event);
     event_set(EVT_ID_BUTTON);

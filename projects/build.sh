@@ -39,7 +39,7 @@ Usage:
   ./build.sh <product> [build]              Debug build → elf/hex/bin
   ./build.sh <product> rebuild              Clean then debug build
   ./build.sh <product> clean                Remove projects/<product>/build/
-  ./build.sh <product> release [version]    Release build + package to release/
+  ./build.sh <product> release [version]    Car: Boot+APP+厂测合并 HEX；factory: 仅 APP_B
   ./build.sh all [build|clean|rebuild|release [version]]
   ./build.sh detect                        Check powershell / gcc / SDK
   ./build.sh help
@@ -50,37 +50,32 @@ Products: factory | car-4wd | car-2wd
 IMAGE_TARGET (env, default standalone; factory product forces factory):
   standalone | bootloader | app | factory | all
   car products: IMAGE_TARGET=factory builds APP_B with that car's board + shared factory main
+  car products: IMAGE_TARGET=all builds bootloader + app + factory (same board)
+  car release always builds all three and merges HEX (ignores IMAGE_TARGET); factory release stays APP_B
 
 Examples:
   ./build.sh factory
   ./build.sh car-4wd
   ./build.sh car-2wd build
   ./build.sh car-4wd rebuild
-  ./build.sh car-4wd release 0.1.0
+  ./build.sh car-4wd release 0.1.0          # merged boot+app+factory HEX
+  ./build.sh factory release 0.1.0          # APP_B only, no merge
   IMAGE_TARGET=app ./build.sh car-4wd
+  IMAGE_TARGET=all ./build.sh car-4wd
   FW_VERSION=1.2.3 ./build.sh car-4wd
   ./build.sh all release 0.1.0
 
 Debug artifacts:   projects/<product>/build/<name>.{elf,hex,bin}
   (standalone name = product, e.g. car-4wd.elf; factory → factory.elf)
-Release artifacts: release/<ver>/{MCU}_{YYYYMMDD}_{product}_{ver}_unsigned.{elf,hex,bin}
+  all / car release also: projects/<car>/build/<car>-full.{hex,bin}
+Release artifacts: release/<ver>/  (bin+hex only, no elf)
+  bootloader.{bin,hex}
+  TM4C123GH6PM_<YYYYMMDD>_<car>_<ver>_unsigned.{bin,hex}       APP_A
+  TM4C123GH6PM_<YYYYMMDD>_<car>_<ver>_unsigned_full.{bin,hex}  Boot+APP+厂测
+  TM4C123GH6PM_<YYYYMMDD>_factory.{bin,hex}                    shared APP_B
 
 Compile still runs scripts/build.ps1 via powershell.exe (Windows host toolchain).
 EOF
-}
-
-release_sign_tag() {
-    case "${FW_SIGNED:-0}" in
-        1|true|TRUE|yes|YES|on|ON) echo "sign" ;;
-        *) echo "unsigned" ;;
-    esac
-}
-
-release_artifact_stem() {
-    local product="$1"
-    local version="$2"
-    local date_ymd="$3"
-    echo "${FW_MCU_NAME}_${date_ymd}_${product}_${version}_$(release_sign_tag)"
 }
 
 find_powershell() {
@@ -115,7 +110,6 @@ cmd_detect() {
     echo "Repo: ${REPO_ROOT}"
     echo "Products: ${PRODUCTS[*]}"
     echo "IMAGE_TARGET=${IMAGE_TARGET}"
-    echo "FW_MCU_NAME=${FW_MCU_NAME}"
     echo "apt mirror: ${APT_MIRROR} -> $(resolve_apt_mirror_uri)"
 
     local ps
@@ -260,20 +254,20 @@ build_release() {
     local version="$2"
 
     log "release ${product} ${version} (LOG_ENABLE=0)"
+    if [[ "${product}" != "factory" ]]; then
+        log "release ${product}: will build boot+app+factory and merge HEX"
+    fi
     invoke_build_ps1 "${product}" "release" "${version}" "0"
 
     local out_dir="${REPO_ROOT}/release/${version}"
-    local name stem date_ymd
-    name="$(artifact_stem_for_image "${product}")"
-    date_ymd="$(date +%Y%m%d)"
-    stem="$(release_artifact_stem "${product}" "${version}" "${date_ymd}")"
 
     # build.ps1 already packages; print confirmation if present
     if [[ -d "${out_dir}" ]]; then
         echo "OK  packaged -> ${out_dir}/"
-        ls -1 "${out_dir}"/"${FW_MCU_NAME}"_*_"${product}"_"${version}"_* 2>/dev/null || \
-            ls -1 "${out_dir}" 2>/dev/null || true
-        echo "    product=${product} version=${version} sign=$(release_sign_tag) image=${name}"
+        ls -1 "${out_dir}/bootloader".* 2>/dev/null || true
+        ls -1 "${out_dir}/${FW_MCU_NAME}"_*_"${product}"_"${version}"_* 2>/dev/null || true
+        ls -1 "${out_dir}/${FW_MCU_NAME}"_*_factory.* 2>/dev/null || true
+        echo "    product=${product} version=${version}"
     else
         die "release dir missing: ${out_dir}"
     fi

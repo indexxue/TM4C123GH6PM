@@ -26,12 +26,12 @@
 
 | 方向 | 触发 | 行为 |
 |------|------|------|
-| 量产 → 厂测 | `ftmenter` 或 **OK 键长按 10 s** | 校验 APP_B → `slot=1` → 复位 |
+| 量产 → 厂测 | **OK 键长按 10 s**（量产无串口切槽命令） | 校验 APP_B → `slot=1` → 复位 |
 | 厂测 → 量产 | `ftmexit` 或 **OK 键长按 10 s** | 校验 APP_A → `slot=0` → 复位 |
 
 产线预烧：`bootloader.bin` @ 0x0、`app.bin` @ 0x4000、`factory.bin` @ 0x21000。
 
-OK 键为 PE2 ADC 分压按键（与 UP/DN 共用一路 ADC）。
+OK 键为 PE2 ADC 分压按键（与 UP/DN 共用一路 ADC）。量产不开 UART7 `cmd`；仅厂测可命令切槽。
 
 ---
 

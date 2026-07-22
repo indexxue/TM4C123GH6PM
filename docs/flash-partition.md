@@ -51,10 +51,12 @@
 
 | 命令 / 操作 | 固件 | 行为 |
 |-------------|------|------|
-| `ftmenter` | 量产 @ APP_A | APP_B 有效 → `nvs_boot_slot_set(B)` → 停电机 → 复位 |
+| OK 长按 10 s | 量产 @ APP_A | APP_B 有效 → `nvs_boot_slot_set(B)` → 停电机 → 复位 |
 | `ftmexit` | 厂测 @ APP_B | APP_A 有效 → `nvs_boot_slot_set(A)` → 停电机 → 复位 |
-| OK 长按 10 s | 两侧 | 同上（`BTN_PERMISSION_FTM`） |
-| `slot` | 两侧 | 查询当前 NVS slot |
+| OK 长按 10 s | 厂测 @ APP_B | 同上（回 APP_A） |
+| `slot` | 厂测（UART7 cmd） | 查询当前 NVS slot |
+
+量产不开 UART7 `cmd`，不能用串口进厂测；厂测可用命令 + 按键回量产。OK 键带 `BTN_PERMISSION_FTM`。
 
 产线：三镜像预烧；NVS 中 SN / 校准在切换时 **不擦**。
 
@@ -85,3 +87,4 @@
 |------|------|
 | 2026-06-12 | 四段布局 |
 | 2026-07-08 | 双槽直跳厂测切换；移除 OTA |
+| 2026-07-22 | 量产仅 OK 长按进厂测；厂测命令+按键回量产 |

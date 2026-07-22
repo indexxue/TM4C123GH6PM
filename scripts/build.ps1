@@ -31,6 +31,13 @@ if ($CarProject -eq "factory") {
     $Target = "factory"
 }
 
+# Car release: always Boot + APP_A + APP_B, then merge into one HEX/BIN (factory product excluded).
+$script:ReleaseFullImage = $false
+if (($Action -eq "release") -and ($CarProject -ne "factory")) {
+    $Target = "all"
+    $script:ReleaseFullImage = $true
+}
+
 $CarDir = Join-Path $ProjectRoot "projects\$CarProject"
 $BuildDir = Join-Path $CarDir "build"
 $MainDir = Join-Path $CarDir "main"
@@ -138,6 +145,22 @@ function Get-ReleaseSignTag {
         '^(1|true|TRUE|yes|YES|on|ON)$' { return "sign" }
         default { return "unsigned" }
     }
+}
+
+function Get-ReleaseArtifactStem {
+    param(
+        [string]$Product,
+        [string]$Version
+    )
+    $dateYmd = Get-Date -Format "yyyyMMdd"
+    $sign = Get-ReleaseSignTag
+    return "${FwMcuName}_${dateYmd}_${Product}_${Version}_${sign}"
+}
+
+function Get-ReleaseFactoryStem {
+    # Shared APP_B: TM4C123GH6PM_<date>_factory (no version / sign suffix)
+    $dateYmd = Get-Date -Format "yyyyMMdd"
+    return "${FwMcuName}_${dateYmd}_factory"
 }
 
 function Get-IdentityDefines {
@@ -310,6 +333,7 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "crc32.c"),
         (Join-Path $CommonSrc "nvs.c"),
         (Join-Path $CommonSrc "cfg.c"),
+        (Join-Path $CommonSrc "boot_slot.c"),
         (Join-Path $CommonSrc "imu.c"),
         (Join-Path $CommonSrc "magnetometer.c"),
         (Join-Path $CommonSrc "ultrasonic.c"),
@@ -490,12 +514,41 @@ function Invoke-FirmwareBuild {
                 -CheckImageSize
         }
         "all" {
-            # Car products only: bootloader + app. Factory is projects/factory.
+            # Car products: Boot @0x0 + APP_A @0x4000 + factory APP_B @0x21000 (same car board).
             Invoke-AppCodegen
             Build-FirmwareTarget -Name "bootloader" -LdScript (Join-Path $LdDir "bootloader.ld") -Sources (Get-BootloaderSources) -CheckImageSize -MaxImageSize (16 * 1024)
             Build-FirmwareTarget -Name "app" -LdScript (Join-Path $LdDir "app.ld") -Sources (Get-AppSources) -ExtraDefines (@("-DFLASH_APP_A_SLOT") + (Get-NvsAppDefines) + (Get-CarAppDefines)) -CheckImageSize
+            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") `
+                -Sources (Get-FactorySources) `
+                -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) `
+                -ExtraIncludes @((Get-FactoryMainDir)) `
+                -CheckImageSize
         }
     }
+}
+
+function Merge-CarFullImage {
+    $bootBin = Join-Path $BuildDir "bootloader.bin"
+    $appBin = Join-Path $BuildDir "app.bin"
+    $ftmBin = Join-Path $BuildDir "factory.bin"
+    $outHex = Join-Path $BuildDir "$CarProject-full.hex"
+    $outBin = Join-Path $BuildDir "$CarProject-full.bin"
+    $mergePy = Join-Path $ProjectRoot "scripts\merge_flash_images.py"
+
+    foreach ($p in @($bootBin, $appBin, $ftmBin, $mergePy)) {
+        if (-not (Test-Path $p)) { throw "merge missing: $p" }
+    }
+
+    Write-Host "=== Merge full image (boot+app+factory) ===" -ForegroundColor Cyan
+    & python $mergePy `
+        --bootloader $bootBin `
+        --app $appBin `
+        --factory $ftmBin `
+        --out-hex $outHex `
+        --out-bin $outBin
+    if ($LASTEXITCODE -ne 0) { throw "merge_flash_images.py failed" }
+    Write-Host "  $outHex" -ForegroundColor Green
+    Write-Host "  $outBin" -ForegroundColor Green
 }
 
 function Get-PrimaryArtifactName {
@@ -508,36 +561,88 @@ function Get-PrimaryArtifactName {
     }
 }
 
+function Copy-ReleaseBinHex {
+    param(
+        [string]$SrcStem,
+        [string]$DestStem,
+        [string]$OutDir,
+        [string]$Note = ""
+    )
+
+    foreach ($ext in @("bin", "hex")) {
+        $src = "$SrcStem.$ext"
+        if (-not (Test-Path $src)) { throw "missing artifact: $src" }
+        $dest = Join-Path $OutDir "$DestStem.$ext"
+        Copy-Item -Force $src $dest
+        $suffix = if ($Note) { "  ($Note)" } else { "" }
+        Write-Host "  packaged $DestStem.$ext$suffix" -ForegroundColor Green
+    }
+}
+
 function Publish-ReleaseArtifacts {
     param([string]$Version)
 
     $outDir = Join-Path $ReleaseRoot $Version
     New-Item -ItemType Directory -Force -Path $outDir | Out-Null
-    $dateYmd = Get-Date -Format "yyyyMMdd"
-    $sign = Get-ReleaseSignTag
-    $stem = "${FwMcuName}_${dateYmd}_${CarProject}_${Version}_${sign}"
 
-    $names = @()
-    if ($Target -eq "all") {
-        $names = @("bootloader", "app")
-    } else {
-        $names = @(Get-PrimaryArtifactName)
-    }
+    # Naming:
+    #   bootloader.{bin,hex}
+    #   TM4C123GH6PM_<date>_<car>_<ver>_unsigned.{bin,hex}       APP_A
+    #   TM4C123GH6PM_<date>_<car>_<ver>_unsigned_full.{bin,hex}  Boot+APP+厂测
+    #   TM4C123GH6PM_<date>_factory.{bin,hex}                    shared APP_B
+    # No .elf in release/.
 
-    foreach ($name in $names) {
-        $srcStem = Join-Path $BuildDir $name
-        foreach ($ext in @("elf", "hex", "bin")) {
-            $src = "$srcStem.$ext"
-            if (-not (Test-Path $src)) { throw "missing artifact: $src" }
-            if ($Target -eq "all") {
-                $dest = Join-Path $outDir "${stem}_${name}.$ext"
-            } else {
-                $dest = Join-Path $outDir "$stem.$ext"
-            }
-            Copy-Item -Force $src $dest
-            Write-Host "  packaged $dest" -ForegroundColor Green
+    if ($script:ReleaseFullImage) {
+        $stem = Get-ReleaseArtifactStem -Product $CarProject -Version $Version
+
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "bootloader") -DestStem "bootloader" -OutDir $outDir -Note "shared Boot"
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "app") -DestStem $stem -OutDir $outDir -Note "APP_A"
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "$CarProject-full") -DestStem "${stem}_full" -OutDir $outDir -Note "Boot+APP+厂测 merge"
+
+        if ($CarProject -eq "car-4wd") {
+            Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "factory") -DestStem (Get-ReleaseFactoryStem) -OutDir $outDir -Note "shared APP_B (car-4wd board)"
+        } else {
+            Write-Host "  skip factory package (shared from car-4wd/factory release; this car factory is inside ${stem}_full.*)" -ForegroundColor DarkGray
         }
+        return
     }
+
+    if ($CarProject -eq "factory") {
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "factory") -DestStem (Get-ReleaseFactoryStem) -OutDir $outDir -Note "APP_B"
+        return
+    }
+
+    if ($Target -eq "all") {
+        $stem = Get-ReleaseArtifactStem -Product $CarProject -Version $Version
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "bootloader") -DestStem "bootloader" -OutDir $outDir -Note "shared Boot"
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "app") -DestStem $stem -OutDir $outDir -Note "APP_A"
+        $fullSrc = Join-Path $BuildDir "$CarProject-full"
+        if ((Test-Path "$fullSrc.bin") -and (Test-Path "$fullSrc.hex")) {
+            Copy-ReleaseBinHex -SrcStem $fullSrc -DestStem "${stem}_full" -OutDir $outDir -Note "merge"
+        }
+        if ($CarProject -eq "car-4wd") {
+            Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "factory") -DestStem (Get-ReleaseFactoryStem) -OutDir $outDir -Note "shared APP_B"
+        }
+        return
+    }
+
+    if ($Target -eq "bootloader") {
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "bootloader") -DestStem "bootloader" -OutDir $outDir
+        return
+    }
+
+    $stem = Get-ReleaseArtifactStem -Product $CarProject -Version $Version
+    if ($Target -eq "app") {
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "app") -DestStem $stem -OutDir $outDir -Note "APP_A"
+        return
+    }
+    if ($Target -eq "factory") {
+        Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir "factory") -DestStem (Get-ReleaseFactoryStem) -OutDir $outDir
+        return
+    }
+
+    $primary = Get-PrimaryArtifactName
+    Copy-ReleaseBinHex -SrcStem (Join-Path $BuildDir $primary) -DestStem $stem -OutDir $outDir -Note "standalone"
 }
 
 # --- main ---
@@ -569,6 +674,11 @@ if ($Action -eq "rebuild" -or $Action -eq "release") {
 Ensure-ToolchainReady
 New-Item -ItemType Directory -Force -Path $BuildDir | Out-Null
 Invoke-FirmwareBuild
+
+# Merge Boot+APP+厂测 whenever Target=all (release already forces Target=all).
+if (($Target -eq "all") -and ($CarProject -ne "factory")) {
+    Merge-CarFullImage
+}
 
 if ($Action -eq "release") {
     Write-Host "=== Release package ver=$($script:ResolvedFwVersion) ===" -ForegroundColor Cyan

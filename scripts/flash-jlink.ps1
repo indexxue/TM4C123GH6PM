@@ -1,6 +1,6 @@
 param(
     [string]$Image = "",
-    [ValidateSet("standalone", "bootloader", "app", "factory")]
+    [ValidateSet("standalone", "bootloader", "app", "factory", "full")]
     [string]$Target = "standalone",
     [ValidateSet("factory", "car-4wd", "car-2wd")]
     [string]$CarProject = "car-4wd",
@@ -14,27 +14,66 @@ $ProjectRoot = Split-Path -Parent $PSScriptRoot
 # factory image: look under the selected car project's build/ (or projects/factory/)
 #   .\flash-jlink.cmd -Target factory
 #   .\flash-jlink.cmd -Target factory -CarProject car-2wd
+#   .\flash-jlink.cmd -Target full -CarProject car-4wd   # boot+app+factory merge
+# Missing build artifacts: auto-build that Target (LOG_ENABLE=1) then flash.
 
 $BuildDir = Join-Path $ProjectRoot "projects\$CarProject\build"
 $JLinkExe = "C:\Program Files\SEGGER\JLink_V818\JLink.exe"
+$BuildPs1 = Join-Path $PSScriptRoot "build.ps1"
 
-# Resolve image
-if ([string]::IsNullOrWhiteSpace($Image)) {
+if (($Target -eq "full") -and ($CarProject -eq "factory")) {
+    throw "Target 'full' is for car products only (boot+app+factory merge). Got CarProject=factory"
+}
+
+function Resolve-FlashImagePath {
+    param([string]$FlashTarget)
+
+    if ($FlashTarget -eq "full") {
+        $hex = Join-Path $BuildDir "$CarProject-full.hex"
+        $bin = Join-Path $BuildDir "$CarProject-full.bin"
+        if (Test-Path $hex) { return $hex }
+        if (Test-Path $bin) { return $bin }
+        return $null
+    }
+
     $presets = @{
         standalone = $CarProject
         bootloader = "bootloader"
         app        = "app"
         factory    = "factory"
     }
-    $base = $presets[$Target]
-    if (-not $base) { throw "Unknown target: $Target. Valid: standalone, bootloader, app, factory" }
+    $base = $presets[$FlashTarget]
+    if (-not $base) { throw "Unknown target: $FlashTarget" }
 
     $elf = Join-Path $BuildDir "$base.elf"
-    if (Test-Path $elf) { $Image = $elf }
-    else {
-        $bin = Join-Path $BuildDir "$base.bin"
-        if (Test-Path $bin) { $Image = $bin }
-        else { throw "No image found in $BuildDir for target $Target" }
+    if (Test-Path $elf) { return $elf }
+    $bin = Join-Path $BuildDir "$base.bin"
+    if (Test-Path $bin) { return $bin }
+    return $null
+}
+
+function Invoke-BuildForFlashTarget {
+    param([string]$FlashTarget)
+
+    $buildTarget = if ($FlashTarget -eq "full") { "all" } else { $FlashTarget }
+    $logEn = if ($env:LOG_ENABLE) { $env:LOG_ENABLE } else { "1" }
+
+    Write-Host "==> image missing for -Target $FlashTarget; building $CarProject -Target $buildTarget (LOG_ENABLE=$logEn)..." -ForegroundColor Yellow
+    & $BuildPs1 -CarProject $CarProject -Target $buildTarget -Action build -LogEnable $logEn
+    if ($LASTEXITCODE -ne 0) {
+        throw "auto-build failed for $CarProject -Target $buildTarget (exit $LASTEXITCODE)"
+    }
+}
+
+# Resolve image
+if ([string]::IsNullOrWhiteSpace($Image)) {
+    $Image = Resolve-FlashImagePath -FlashTarget $Target
+    if (-not $Image) {
+        Invoke-BuildForFlashTarget -FlashTarget $Target
+        $Image = Resolve-FlashImagePath -FlashTarget $Target
+    }
+    if (-not $Image) {
+        throw "No image found in $BuildDir for target $Target after auto-build"
     }
 }
 if (-not (Test-Path $Image)) { throw "Image not found: $Image" }
@@ -63,9 +102,11 @@ $offsets = @{
     bootloader = "0x0"
     app        = "0x4000"
     factory    = "0x21000"
+    full       = "0x0"
 }
-$isElf = $Image -like '*.elf'
-$loadCmd = if ($isElf) {
+# ELF/HEX carry VMA; BIN needs explicit offset
+$useLoadFile = ($Image -like '*.elf') -or ($Image -like '*.hex')
+$loadCmd = if ($useLoadFile) {
     "loadfile `"$Image`""
 } else {
     $off = $offsets[$Target]
@@ -109,7 +150,7 @@ Get-Content $log
 
 if ($logText -match 'Error occurred:' -or $logText -match 'Could not connect') {
     Write-Host "J-Link connect/flash failed. See $log" -ForegroundColor Red
-    Write-Host "  1. Use -Target standalone for full car firmware (not app.elf @ 0x4000 only)" -ForegroundColor Yellow
+    Write-Host "  1. Use -Target standalone or full (not app.elf @ 0x4000 only)" -ForegroundColor Yellow
     Write-Host "  2. Unplug HC-SR04 Echo (PC1) if wired" -ForegroundColor Yellow
     Write-Host "  3. Hold RESET, rerun flash, release when connecting" -ForegroundColor Yellow
     exit 1

@@ -12,8 +12,10 @@
 #include "buzzer.h"
 #include "cfg.h"
 #include "chassis.h"
+#include "boot_slot.h"
 #include "device_profile.h"
 #include "event.h"
+#include "flash_layout.h"
 #include "imu.h"
 #include "led_scene.h"
 #include "log.h"
@@ -244,7 +246,6 @@ static void app_on_timer(void)
 
 static void app_on_button(void)
 {
-    /* TODO: 按键业务 */
 }
 
 static void app_on_input(void)
@@ -253,11 +254,14 @@ static void app_on_input(void)
 }
 
 /* -------------------------------------------------------------------------- */
-/* 按键 → EVT_ID_BUTTON                                                       */
+/* 按键：长按 OK → 进厂测 APP_B（量产无串口 ftmenter）                          */
 /* -------------------------------------------------------------------------- */
 
 static void app_button_notify(btn_id_e id, const char *name, btn_permission_e permission, btn_event_e event)
 {
+    if ((event == BTN_EVENT_LONG_PRESS) && ((permission & BTN_PERMISSION_FTM) != 0U)) {
+        (void)boot_slot_switch(BOOT_SLOT_B);
+    }
     button_log_notify(id, name, permission, event);
     event_set(EVT_ID_BUTTON);
 }

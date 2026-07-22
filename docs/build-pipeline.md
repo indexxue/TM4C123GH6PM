@@ -27,8 +27,12 @@
         ▼
  projects/<product>/build/<name>.{elf,hex,bin,map}
         │
-        └─ release：复制并改名 →
-             release/<ver>/TM4C123GH6PM_<YYYYMMDD>_<product>_<ver>_unsigned.{elf,hex,bin}
+        └─ release（车型）：
+             bootloader.{bin,hex}
+             TM4C123GH6PM_<date>_<car>_<ver>_unsigned.{bin,hex}       APP_A
+             TM4C123GH6PM_<date>_<car>_<ver>_unsigned_full.{bin,hex}  三合一
+             TM4C123GH6PM_<date>_factory.{bin,hex}                    共享 APP_B（car-4wd/factory）
+           release（factory）：TM4C123GH6PM_<date>_factory.{bin,hex}
 ```
 
 `<name>`：`standalone` 时等于产品名（如 `car-4wd`）；否则为 `bootloader` / `app` / `factory`。
@@ -101,7 +105,7 @@ cd projects && ./build.sh car-4wd && ./flash.sh car-4wd
 
 ```bash
 ./build.sh car-4wd release 0.1.0
-# → release/0.1.0/TM4C123GH6PM_*_car-4wd_0.1.0_unsigned.{elf,hex,bin}
+# → bootloader.* + …_car-4wd_…_unsigned{,_full}.* + …_factory.*
 ```
 
 推送到 GitHub Tag + Release：

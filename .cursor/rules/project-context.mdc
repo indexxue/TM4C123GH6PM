@@ -133,7 +133,7 @@ TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模�
 
 | 接口 | 用途 | 模块/约定 |
 |------|------|-----------|
-| **UART7**（调试） | 开发日志、`cmd` 命令行（`ftmenter`、`motor`、`adc` 等） | `log`、`cmd`（`cmd_uart_line_service_start`） |
+| **UART7**（调试） | 开发日志；**厂测**另开 `cmd`（`ftmexit`、`motor`、`adc` 等） | `log`；厂测 `cmd`（`cmd_uart_line_service_start`） |
 | **UART0**（蓝牙） | 协议层：遥控、上位机/App 二进制或帧协议 | 独立协议栈；**禁止**将 `cmd` 读行任务绑到 UART0 |
 
 - 产线调试、厂测、固件开发：接 **UART7**（PE1 TX @ 115200）。
@@ -143,9 +143,9 @@ TM4C123 **仅有 ADC0 + ADC1**（无 ADC2）。同一 AIN 引脚可接任一模�
 
 平台层：量产 app UART7 日志；厂测 factory UART7 日志 + CMD；UART0 蓝牙协议层已接入；板级外设 init 已接通。
 
-**已接通**：IMU/磁力计（I2C0 软件 I2C）；**ADC 循迹 6 路采样与阈值检测**；**循迹外环**（`line_follow` + `SET_LINE_FOLLOW`）；**编码器计数与差分测速**（M1/M2 硬件 QEI + M3/M4 软件 QEI，`motion.c` + `chassis.c` 速度环）。
+**已接通**：IMU/磁力计（I2C0 软件 I2C）；**ADC 循迹 6 路采样与阈值检测**；**循迹外环**（`line_follow` + `SET_LINE_FOLLOW`）；**编码器计数与差分测速**（M1/M2 硬件 QEI + M3/M4 软件 QEI，`motion.c` + `chassis.c` 速度环）；**分区切换**（量产 OK 长按进厂测；厂测 `ftmexit` / OK 长按回量产）。
 
-**待实现**：按键业务逻辑（模式切换）。
+**待实现**：按键其它业务逻辑（模式切换等）。
 
 ## 开发约束
 

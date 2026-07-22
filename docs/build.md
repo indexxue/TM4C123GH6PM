@@ -76,9 +76,10 @@ cd projects
 ./build.sh car-4wd release 0.1.0   # LOG_ENABLE=0 + release/ 打包
 IMAGE_TARGET=app ./build.sh car-4wd
 
-./flash.sh car-4wd                 # J-Link standalone
+./flash.sh car-4wd app             # 量产 APP_A（缺镜像时自动编 app，默认带日志）
+./flash.sh car-4wd full            # Boot+APP+厂测合并 HEX（缺则自动编 all）
 ./flash.sh factory                 # 厂测 @ 0x21000
-./flash.sh car-4wd app             # 量产 APP_A
+./flash.sh car-4wd                 # J-Link standalone
 ```
 
 `build.sh` / `flash.sh` 经 `powershell.exe` 调用 Windows 侧 `scripts/build.ps1`、`scripts/flash-jlink.ps1`（工具链与 J-Link 在 Windows）。更细说明见 [build-pipeline.md](build-pipeline.md)。
@@ -110,7 +111,7 @@ IDE：**Ctrl+Shift+B** → 默认编译 `car-4wd`（见 `.vscode/tasks.json`）�
 | `bootloader` | `ld/bootloader.ld` | `.../bootloader.{elf,hex,bin}` | Boot @ `0x0`（≤16 KB） |
 | `app` | `ld/app.ld` | `.../app.{elf,hex,bin}` | 主固件 @ `0x4000`（≤116 KB） |
 | `factory` | `ld/factory.ld` | `.../factory.{elf,hex,bin}` | 厂测 @ `0x21000`（≤116 KB） |
-| `all` | 以上三者 | 三个镜像 | 产线全套（Boot + 量产 + 厂测） |
+| `all` | Boot + APP_A + 厂测 APP_B | 三个镜像 +（release 时）`<car>-full.{hex,bin}` 合并包 | 产线全套 |
 
 ### 编译期宏（`build.ps1` / `build.sh` 注入）
 
@@ -124,14 +125,18 @@ IDE：**Ctrl+Shift+B** → 默认编译 `car-4wd`（见 `.vscode/tasks.json`）�
 
 ### Release 打包
 
-路径：`release/<ver>/`（gitignore）。命名：
+路径：`release/<ver>/`（gitignore）。**仅 bin + hex，不打包 elf**（调试用 elf 仍留在 `projects/*/build/`）。
 
-```text
-TM4C123GH6PM_<YYYYMMDD>_<product>_<ver>_unsigned.{elf,hex,bin}
-```
+| 文件 | 说明 |
+|------|------|
+| `bootloader.{bin,hex}` | 共享 Boot（短名） |
+| `TM4C123GH6PM_<YYYYMMDD>_<car>_<ver>_unsigned.{bin,hex}` | 量产 APP_A |
+| `TM4C123GH6PM_<YYYYMMDD>_<car>_<ver>_unsigned_full.{bin,hex}` | Boot+APP+厂测三合一 |
+| `TM4C123GH6PM_<YYYYMMDD>_factory.{bin,hex}` | 共享 APP_B（无版本后缀；`factory` / `car-4wd` release） |
 
-例：`release/0.1.0/TM4C123GH6PM_20260722_car-4wd_0.1.0_unsigned.bin`  
-`FW_SIGNED=1` → 文件名 `_sign`。
+例：`TM4C123GH6PM_20260722_car-2wd_0.2.0_unsigned_full.hex`、`TM4C123GH6PM_20260722_factory.bin`。
+
+`FW_SIGNED=1` → 车型文件名 `_sign` 替代 `_unsigned`。两轮厂测在 `…_car-2wd_…_full` 内。
 
 ### 发布到 GitHub Tag / Release
 
@@ -187,7 +192,8 @@ flowchart LR
 2. 收集源文件，逐文件 `gcc -c`
 3. 链接 → `projects/<car>/build/<car>.elf`
 4. `objcopy` → `.bin` + `.hex`；`bootloader` / `app` / `factory` 做体积检查
-5. `release`：复制到 `release/<ver>/` 并按 MCU_日期_产品_版本 命名
+5. `release`（车型）：合并 Boot+APP+厂测 → `<car>-full.{hex,bin}`，再打包到 `release/<ver>/`
+6. `release`（factory 产品）：仅打包 APP_B，不合并
 
 `bootloader` 目标不跑板级代码生成。
 
@@ -276,7 +282,8 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | `projects/flash.sh` | WSL 烧录入口（调用 `flash-jlink.ps1`） |
 | `projects/_common.sh` | 版本与 apt 共用逻辑 |
 | `projects/publish.sh` | WSL：tag + GitHub Release 上传 |
-| `build.ps1` | 主编译（`-CarProject` / `-Target` / `-Action` / 宏注入） |
+| `build.ps1` | 主编译（`-CarProject` / `-Target` / `-Action`；车型 release 三合一合并） |
+| `merge_flash_images.py` | Boot+APP_A+APP_B → 合并 HEX/BIN |
 | `publish-release.ps1` | Windows：`vX.Y.Z` tag + `gh release create` |
 | `gen_config.py` | `.syscfg` → 设备库 / `gpio-allocation.md` |
 | `flash-uniflash.ps1` | UniFlash 烧录 |
@@ -294,6 +301,7 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 ```bash
 cd projects
 ./flash.sh                         # 默认 car-4wd standalone
+./flash.sh car-4wd full            # 三合一（需先 release 或 IMAGE_TARGET=all）
 ./flash.sh factory
 ./flash.sh car-4wd app
 ./flash.sh car-4wd bootloader --erase-all
@@ -305,11 +313,13 @@ JLINK_SPEED=1000 ./flash.sh car-2wd
 
 ```powershell
 .\flash-jlink.cmd
+.\flash-jlink.cmd -Target full -CarProject car-4wd
 .\flash-jlink.cmd -Target factory
 .\flash.cmd -Target standalone     # UniFlash
 ```
 
-厂测镜像固定读 `projects/factory/build/`；车型镜像读 `projects/<car>/build/`。
+厂测镜像固定读 `projects/factory/build/`；车型镜像读 `projects/<car>/build/`（`full` → `<car>-full.hex`）。
+缺对应产物时，`flash-jlink.ps1` 会先自动 `build` 该 Target（`full`→`all`，默认 `LOG_ENABLE=1`），再烧录——因此 `./build.sh car-4wd rebuild` 后再 `./flash.sh car-4wd app` 即可。
 
 ---
 

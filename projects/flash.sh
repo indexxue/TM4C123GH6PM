@@ -7,7 +7,7 @@
 # Usage:
 #   ./flash.sh                              # car-4wd standalone
 #   ./flash.sh <product>                    # product default image
-#   ./flash.sh <product> <slot>             # slot = standalone|bootloader|app|factory
+#   ./flash.sh <product> <slot>             # slot = standalone|bootloader|app|factory|full
 #   ./flash.sh <product> <slot> --erase-all
 #   ./flash.sh <product> <slot> --erase-apps
 #   ./flash.sh help
@@ -39,19 +39,26 @@ Slots:
   standalone   whole-image @ 0x0     (car default)
   bootloader   Boot @ 0x0
   app          APP_A @ 0x4000
-  factory      APP_B @ 0x21000       (factory product default; always projects/factory/build/)
+  factory      APP_B @ 0x21000       (from projects/<product>/build/factory.*)
+  full         Boot+APP+厂测合并 @ 0x0..NVS  (projects/<car>/build/<car>-full.hex)
+               car only; build via: ./build.sh <car> release  or  IMAGE_TARGET=all
 
 Examples:
   ./flash.sh
   ./flash.sh car-4wd
-  ./flash.sh factory
+  ./flash.sh car-4wd full             # 三合一产线镜像
+  ./flash.sh car-4wd factory          # 四轮板厂测
+  ./flash.sh car-2wd factory          # 两轮板厂测
+  ./flash.sh factory                  # 兼容模板板 projects/factory/build/
   ./flash.sh car-4wd app
   ./flash.sh car-4wd bootloader --erase-all
   ./flash.sh car-4wd app --erase-apps
   JLINK_SPEED=1000 ./flash.sh car-2wd
 
 Requires: WSL2 on Windows + powershell.exe + J-Link (Windows).
-Build first: ./build.sh <product>
+Build first: IMAGE_TARGET=factory ./build.sh <car>
+  full image: ./build.sh <car> release   or   IMAGE_TARGET=all ./build.sh <car>
+  If the slot image is missing, flash auto-builds it (LOG_ENABLE=1) then flashes.
 EOF
 }
 
@@ -112,14 +119,14 @@ fi
 
 if [[ $# -ge 1 ]]; then
     case "$1" in
-        standalone|bootloader|app|factory)
+        standalone|bootloader|app|factory|full)
             slot="$1"
             shift
             ;;
         --erase-all|--erase-apps)
             ;;
         *)
-            die "unknown slot '$1' (standalone|bootloader|app|factory)"
+            die "unknown slot '$1' (standalone|bootloader|app|factory|full)"
             ;;
     esac
 fi
@@ -136,9 +143,11 @@ if [[ -z "${slot}" ]]; then
     slot="$(default_slot_for_product "${product}")"
 fi
 
-# factory product / factory slot → always projects/factory
-if [[ "${product}" == "factory" || "${slot}" == "factory" ]]; then
-    product="factory"
+# 独立 factory 产品只有 APP_B 槽；车型 -Target factory 保留车型目录下的 factory.bin
+if [[ "${product}" == "factory" ]]; then
+    if [[ "${slot}" == "full" ]]; then
+        die "slot 'full' is for car-4wd/car-2wd only (merged boot+app+factory)"
+    fi
     slot="factory"
 fi
 

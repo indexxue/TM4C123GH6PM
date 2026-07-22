@@ -5,6 +5,7 @@
 
 #include "cmd.h"
 
+#include "boot_slot.h"
 #include "log.h"
 #include "nvs.h"
 #include "flash_layout.h"
@@ -622,39 +623,9 @@ static void cmd_adc(int argc, const char *argv[])
     cmd_reply_ok("adc", buf);
 }
 
-static void cmd_motors_stop(void)
-{
-    uint8_t i;
-
-    for (i = 1U; i <= BOARD_MOTOR_COUNT; i++) {
-        Motor_SetSpeed(i, 0);
-    }
-}
-
 status_t cmd_boot_slot_switch(uint32_t slot)
 {
-    uint32_t base;
-
-    if (slot > BOOT_SLOT_B) {
-        return STATUS_INVALID_ARG;
-    }
-
-    base = boot_slot_target_base(slot);
-    if (!boot_image_is_valid(base)) {
-        LOG_WARN("cmd: slot %lu image invalid @ 0x%08lX",
-                 (unsigned long)slot, (unsigned long)base);
-        return STATUS_FAIL;
-    }
-
-    if (nvs_boot_slot_set(slot) != STATUS_OK) {
-        LOG_WARN("cmd: set slot %lu failed", (unsigned long)slot);
-        return STATUS_FAIL;
-    }
-
-    LOG_INFO("cmd: boot slot=%lu reboot", (unsigned long)slot);
-    cmd_motors_stop();
-    bsp_system_reset();
-    return STATUS_OK;
+    return boot_slot_switch(slot);
 }
 
 static void cmd_ftmenter(int argc, const char *argv[])
@@ -662,7 +633,8 @@ static void cmd_ftmenter(int argc, const char *argv[])
     (void)argc;
     (void)argv;
 
-#if defined(FLASH_FACTORY_SLOT)
+    /* 量产不开串口进厂测（用 OK 长按）；厂测槽内本命令无意义 */
+#if defined(FLASH_FACTORY_SLOT) || defined(FLASH_APP_A_SLOT)
     cmd_reply_ng();
     return;
 #else
@@ -718,8 +690,8 @@ void cmd_register_defaults(void)
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1..N> <rpm>");
     (void)cmd_register("adc", cmd_adc, "adc [line] — bat/btn 或 6 路循迹 ADC");
-    (void)cmd_register("ftmenter", cmd_ftmenter, "switch to factory slot (APP_B)");
-    (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A)");
+    (void)cmd_register("ftmenter", cmd_ftmenter, "ng on app/factory (use OK long-press)");
+    (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A, factory only)");
     (void)cmd_register("slot", cmd_slot, "show boot slot (0=A 1=B)");
 #if defined(NVS_CMD_RAW_KV)
     (void)cmd_register("nvs", cmd_nvs, "nvs get <ns> <key>");
