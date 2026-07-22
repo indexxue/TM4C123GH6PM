@@ -3,6 +3,7 @@
  * @brief 产品档案：board_mask / platform_mask 驱动 init 与任务子集（对齐 ESP32-S3 common）。
  *
  * 编译期通过 -DDEVICE_PRODUCT_ID=... 选择档案；默认 car-4wd full。
+ * 厂测槽（-DFLASH_FACTORY_SLOT）在对应车型档案上叠加 CMD，板级仍跟车型 .syscfg。
  */
 
 #ifndef COMMON_DEVICE_PROFILE_H
@@ -17,6 +18,7 @@
 /* 产品 ID（build.ps1 注入 -DDEVICE_PRODUCT_ID=...）                           */
 /* -------------------------------------------------------------------------- */
 
+/** 兼容旧厂测独立工程；新构建优先 car-4wd/car-2wd -Target factory */
 #define DEVICE_PRODUCT_ID_FACTORY      (0U)
 #define DEVICE_PRODUCT_ID_CAR_4WD_FULL (1U)
 #define DEVICE_PRODUCT_ID_CAR_2WD_FULL (2U)
@@ -53,9 +55,20 @@ typedef enum {
 #define DEVICE_BOARD_MASK_ENCODER (1U << 1)
 #define DEVICE_BOARD_MASK_LINE    (1U << 2)
 #define DEVICE_BOARD_MASK_PERIPH  (1U << 3)
+/** I2C 传感器（IMU/磁力计/姿态） */
+#define DEVICE_BOARD_MASK_IMU     (1U << 4)
+#define DEVICE_BOARD_MASK_MAG     (1U << 5)
+#define DEVICE_BOARD_MASK_LED     (1U << 6)
+#define DEVICE_BOARD_MASK_BUZZER  (1U << 7)
+#define DEVICE_BOARD_MASK_ULTRA   (1U << 8)
+#define DEVICE_BOARD_MASK_BATTERY (1U << 9)
 
-#define DEVICE_BOARD_MASK_FULL                                                                                       \
-    (DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER | DEVICE_BOARD_MASK_LINE | DEVICE_BOARD_MASK_PERIPH)
+#define DEVICE_BOARD_MASK_SENSORS (DEVICE_BOARD_MASK_IMU | DEVICE_BOARD_MASK_MAG)
+
+#define DEVICE_BOARD_MASK_FULL                                                                         \
+    (DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER | DEVICE_BOARD_MASK_LINE |                   \
+     DEVICE_BOARD_MASK_PERIPH | DEVICE_BOARD_MASK_SENSORS | DEVICE_BOARD_MASK_LED |                    \
+     DEVICE_BOARD_MASK_BUZZER | DEVICE_BOARD_MASK_ULTRA | DEVICE_BOARD_MASK_BATTERY)
 
 /* -------------------------------------------------------------------------- */
 /* 平台壳层掩码（start.c / app.c：log、cmd、button）                   */
@@ -81,5 +94,8 @@ const device_product_profile_t *device_profile_product(void);
 
 bool device_profile_board_wants(uint32_t mask);
 bool device_profile_platform_wants(uint32_t mask);
+
+/** 当前镜像是否为厂测槽（APP_B / FLASH_FACTORY_SLOT） */
+bool device_profile_is_factory_slot(void);
 
 #endif /* COMMON_DEVICE_PROFILE_H */

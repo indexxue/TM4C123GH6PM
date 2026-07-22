@@ -49,6 +49,7 @@ Products: factory | car-4wd | car-2wd
 
 IMAGE_TARGET (env, default standalone; factory product forces factory):
   standalone | bootloader | app | factory | all
+  car products: IMAGE_TARGET=factory builds APP_B with that car's board + shared factory main
 
 Examples:
   ./build.sh factory
@@ -167,11 +168,9 @@ invoke_build_ps1() {
     local -a args
     local image_target="${IMAGE_TARGET}"
 
-    # factory product always links APP_B (factory.ld).
+    # factory product always links APP_B; car products may also build IMAGE_TARGET=factory.
     if [[ "${product}" == "factory" ]]; then
         image_target="factory"
-    elif [[ "${image_target}" == "factory" ]]; then
-        die "IMAGE_TARGET=factory removed for car products; use: ./build.sh factory"
     fi
 
     ps="$(find_powershell)" || die "powershell.exe not found — run from WSL2 on Windows, or use .\\build.cmd"

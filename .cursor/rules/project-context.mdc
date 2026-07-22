@@ -26,7 +26,7 @@ alwaysApply: true
 | 设计文档 | `docs/<主题>.md`（kebab-case 英文） | `build.md`、`syscfg-io-allocation.md` |
 | 脚本 | `scripts/<动词_名词>.ps1` 或 `<名词>.py` | `build.ps1`、`gen_config.py`、`flash-uniflash.ps1` |
 | 根目录快捷方式 | `<动作>.cmd` 包装对应 ps1 | `build.cmd`、`flash.cmd` |
-| C 源文件 | `snake_case.c`；模块名简短表意 | `factory.c`、`nvs.c` |
+| C 源文件 | `snake_case.c`；模块名简短表意 | `app.c`、`serial_cmd.c`、`nvs.c` |
 | BSP 驱动 | `bsp_driver/{inc,src}/bsp_<外设>.{h,c}` 成对；禁止裸名 `uart.h`/`clock.h` | `bsp_uart.c`、`bsp_timer.c`、`bsp_sysctl.c` |
 | BSP 头 guard | `BSP_DRIVER_<外设>_H` 大写 | `BSP_DRIVER_UART_H` |
 | 头文件 guard | `MODULE_<名>_H` 或功能前缀 | `MODULE_MOTOR_H` |
@@ -49,7 +49,7 @@ alwaysApply: true
 bsp_driver/             # MCU 外设薄封装（bsp_<外设>.{h,c}，见 embedded-coding-standard.md）
 cbb/                    # 芯片驱动子模块（ws2812b、mpu6050…）
 projects/
-  factory/              # 厂测 id=0（.syscfg、board/、main/、build/）
+  factory/              # 厂测共享 main/；推荐 car-X -Target factory（板级跟车）
   car-4wd/              # 四轮 id=1（.syscfg、board/ 设备库、main/ 应用、build/）
   car-2wd/              # 两轮 id=2
 bootloader/             # Bootloader
@@ -68,9 +68,10 @@ docs/                   # 设计文档
 ```powershell
 .\build.cmd                              # 默认 car-4wd
 .\build.cmd factory
-.\build.cmd car-2wd
-.\flash-jlink.cmd
+.\build.cmd car-4wd -Target factory
+.\build.cmd car-2wd -Target factory
 .\flash-jlink.cmd -Target factory
+.\flash-jlink.cmd -Target factory -CarProject car-2wd
 ```
 
 WSL：
@@ -78,13 +79,14 @@ WSL：
 ```bash
 cd projects
 ./build.sh factory && ./flash.sh factory
-./build.sh car-4wd && ./flash.sh car-4wd
+IMAGE_TARGET=factory ./build.sh car-4wd
+IMAGE_TARGET=factory ./build.sh car-2wd
 ```
 
 - 配置源：`projects/<product>/.syscfg/`（**勿手改** `projects/<product>/board/src/{motor,encoder,line,board}.c`）
 - 生成：`projects/<product>/board/src/motor.c`、`encoder.c`、`line.c`、`board.c`
 - 量产初始化：`projects/<car>/main/main.c` 调用 `Start_Init()`（`Common/src/start.c`）
-- 厂测：`projects/factory/main/`，UART7 cmd，无蓝牙协议层
+- 厂测：共享 `projects/factory/main/`；板级用构建车型 `.syscfg`；UART7 cmd，无蓝牙协议层
 
 ## 外设分配摘要
 
@@ -178,14 +180,10 @@ boot B
 
 ### 正常启动日志阶梯（UART7 @ 115200）
 
-按顺序应出现（`bsp_uart_debug_puts` 阶段）：
+按顺序应出现（`bsp_uart_debug_puts` / `Start_Init` 阶段）：
 
 ```
-boot B
-[factory] boot
-[factory] i2c sw init
-[factory] board ok
-[factory] board init done
+start: factory 80MHz
 [factory] nvs init
 [factory] tasks start
 [factory] rtos start
@@ -195,10 +193,10 @@ boot B
 
 ```
 [INFO] factory:nvs serial=...
-[INFO] factory:i2c idle scl=1 sda=1 (1=high)
 [INFO] factory:i2c scan 0x2C,0x69 (PB2/PB3 I2C0)
 [INFO] factory:imu ready ...
 [INFO] factory:mag ready ...
+[INFO] factory: serial_cmd ready (help)
 ```
 
 **卡在哪一行**，就重点查该阶段（不要先怀疑业务逻辑）。
@@ -210,7 +208,7 @@ boot B
 | **I2C0 软件路径访问硬件寄存器** | `bsp_i2c_init`/`gpio_scan_begin` 在未 `SysCtlPeripheralEnable(I2C0)` 时调用 `I2CMasterDisable` → **卡死在 periph init** | I2C0 软件 I2C **禁止**读写 `I2CMaster*`；仅 `GPIOPinTypeGPIOOutputOD` + 位操作 |
 | **软件/硬件 I2C 混用** | 扫描用 GPIO 位操作，读写却切 `GPIOPinTypeI2C` + 硬件主机 | I2C0 统一走 `bsp_i2c` 软件路径；`gen_config.py` 对 I2C0 不生成硬件引脚复用 |
 | **GPIO 扫描后总线未恢复** | SCL/SDA 停在 GPIO 输入/硬件复用异常 | `bsp_i2c_init(I2C0)` → `bsp_i2c0_gpio_scan_begin()`；读写前勿 `i2c0_restore_pin_mux` |
-| **厂测过早初始化电机/QEI** | `Motor_Init`/`Encoder_Init` 在传感器厂测前拉起 Timer/QEI，偶发阻塞启动 | 厂测 `Factory_Board_Init` 仅 `Board_Periph_Init`，电机项测再 init |
+| **厂测过早初始化电机/QEI** | 历史上曾在传感器探测前过早拉起 Timer/QEI 偶发阻塞 | 现用 `Start_Init`（与量产同路径）；I2C0 必须软件位操作 |
 | **`event_schedule` 无首事件** | `factory_evt` 进循环后 `event_schedule` 永久等信号量 | 进循环前 `event_set(EVT_ID_TIMER)`；确认 `factory_tmr` 已创建 |
 | **堆栈/堆耗尽** | 任务创建失败或栈溢出 | 看 `[rtos] malloc failed` / `stack overflow`；加大 `configTOTAL_HEAP_SIZE` 或 `FACTORY_EVT_STACK_WORDS` |
 | **调度器前误用阻塞 RTOS API** | `vTaskDelay`/`xSemaphoreTake(portMAX_DELAY)` 在 `vTaskStartScheduler` 前调用 | 调度器前仅用 `bsp_delay_us/ms`（DWT）；RTOS 同步在任务内 |
@@ -219,13 +217,13 @@ boot B
 
 1. I2C0 扫描、IMU、磁力计是否**同一条**软件 I2C 路径？
 2. 是否误调 `bsp_i2c_bus_release(..., reinit_master)` 把 I2C0 切回硬件主机？
-3. `Board_Periph_Init` 后是否仍打印 `[factory] board ok`？
-4. 重新烧录的是 `projects/car-4wd/build/factory.bin`（非旧缓存）？
+3. `Start_Init` / `Board_Periph_Init` 后是否出现 `start: factory` 与 `[factory] rtos start`？
+4. 重新烧录的是对应车型 `projects/<car>/build/factory.bin`（非旧缓存）？
 5. 传感器地址是否与扫描一致：**MPU6050=0x69**、**QMC5883P=0x2C**（暂无 OLED）？
 
 ### 相关文件
 
-- 厂测入口：`projects/factory/main/main.c`、`projects/factory/main/factory.c`
+- 厂测入口：`projects/factory/main/main.c`、`projects/factory/main/app.c`、`projects/factory/main/serial_cmd.c`
 - I2C BSP：`bsp_driver/src/bsp_i2c.c`
 - 板级生成：`scripts/gen_config.py`（I2C0 跳过硬件 mux）
 - 传感器：`Common/src/imu.c`、`Common/src/magnetometer.c`

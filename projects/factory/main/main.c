@@ -2,22 +2,22 @@
  * @file    main.c
  * @brief   厂测固件入口（FreeRTOS）
  *
- * 产物 factory.bin 烧录至 APP_B（0x00021000），Boot 按 NVS slot 直接跳转。
- * 详见 projects/factory/README.md、PARTITION.md
+ * 产物 factory.bin 烧录至 APP_B（0x00021000），Boot 按 NVS slot 跳转。
+ * 结构对齐 car-4wd：Start_Init → App_Start → scheduler。
  */
 
 #include "FreeRTOS.h"
 #include "task.h"
 
-#include "factory.h"
-
+#include "app.h"
 #include "bsp_uart.h"
+#include "start.h"
 #include "type.h"
 
 int main(void)
 {
-    Factory_Board_Init();
-    if (Factory_Start() != STATUS_OK) {
+    Start_Init();
+    if (App_Start() != STATUS_OK) {
         bsp_uart_debug_puts("[factory] start FAILED, halt\r\n");
         for (;;) {
         }

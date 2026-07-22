@@ -231,7 +231,7 @@
 | `docs/attitude-fusion.md` | 方案调研、选型与标定框架 |
 | `docs/bluetooth-protocol.md` | 遥测 roll/pitch/yaw（i16，-180~180°） |
 | `projects/car-4wd/main/app.c` | 50 Hz 采样、`app:att` 日志 |
-| `projects/factory/main/factory.c` | 厂测 `att` 命令 |
+| `projects/factory/main/serial_cmd.c` | 厂测 `att` 等外设测试命令 |
 
 ---
 

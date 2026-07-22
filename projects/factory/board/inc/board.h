@@ -158,6 +158,7 @@ extern const bsp_spi_config_t BOARD_SPI_CFG;
 #define PWM_PERIOD   (SYSCLK_HZ / PWM_FREQ_HZ)
 #define MOTOR_RPM_FULL_SCALE 300
 #define MOTOR_MIN_DUTY 120U
+#define BOARD_MOTOR_COUNT 4U
 #define M1_TIMER  TIMER0_BASE
 #define M1_PWM_CH TIMER_A
 #define M2_TIMER  TIMER0_BASE
@@ -171,6 +172,7 @@ void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille);
 void Motor_SetSpeed(uint8_t motor_id, int32_t rpm);
 
 /* --- Encoder --- */
+#define BOARD_ENCODER_COUNT 4U
 void Encoder_Init(void);
 int32_t Encoder_GetCount(uint8_t index);
 void Encoder_ResetCount(uint8_t index);

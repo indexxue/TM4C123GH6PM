@@ -11,10 +11,9 @@ param(
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
-# factory image always lives under projects/factory/build/
-if ($Target -eq "factory") {
-    $CarProject = "factory"
-}
+# factory image: look under the selected car project's build/ (or projects/factory/)
+#   .\flash-jlink.cmd -Target factory
+#   .\flash-jlink.cmd -Target factory -CarProject car-2wd
 
 $BuildDir = Join-Path $ProjectRoot "projects\$CarProject\build"
 $JLinkExe = "C:\Program Files\SEGGER\JLink_V818\JLink.exe"

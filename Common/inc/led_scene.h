@@ -95,6 +95,8 @@ void led_scene_update(void);
 void led_scene_run(led_scene_id_e id);
 void led_scene_cancel(led_scene_id_e id);
 void led_scene_led_direct_set(led_scene_led_e led, bool on);
+/** 直接写 RGB（厂测/调试；会取消当前场景输出） */
+void led_scene_rgb_set(uint8_t r, uint8_t g, uint8_t b);
 /** 是否有场景正在运行（全部结束后为 false，可停止轮询 update） */
 bool led_scene_is_active(void);
 

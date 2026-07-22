@@ -26,6 +26,10 @@
 #include <stdlib.h>
 #include <string.h>
 
+#ifndef BOARD_MOTOR_COUNT
+#define BOARD_MOTOR_COUNT 4U
+#endif
+
 static cmd_write_fn s_write_fn;
 static void *s_write_ctx;
 static cmd_entry_t s_cmd_table[CMD_MAX_COMMANDS];
@@ -559,6 +563,10 @@ static void cmd_motor(int argc, const char *argv[])
 
     motor_id = (uint8_t)strtoul(argv[1], NULL, 0);
     rpm = (int32_t)strtol(argv[2], NULL, 0);
+    if ((motor_id < 1U) || (motor_id > BOARD_MOTOR_COUNT)) {
+        cmd_reply_ng();
+        return;
+    }
     Motor_SetSpeed(motor_id, rpm);
     cmd_reply_ok("motor", "ok");
 }
@@ -614,16 +622,14 @@ static void cmd_adc(int argc, const char *argv[])
     cmd_reply_ok("adc", buf);
 }
 
-#if !defined(FLASH_FACTORY_SLOT)
 static void cmd_motors_stop(void)
 {
     uint8_t i;
 
-    for (i = 1U; i <= 4U; i++) {
+    for (i = 1U; i <= BOARD_MOTOR_COUNT; i++) {
         Motor_SetSpeed(i, 0);
     }
 }
-#endif
 
 status_t cmd_boot_slot_switch(uint32_t slot)
 {
@@ -646,10 +652,7 @@ status_t cmd_boot_slot_switch(uint32_t slot)
     }
 
     LOG_INFO("cmd: boot slot=%lu reboot", (unsigned long)slot);
-#if !defined(FLASH_FACTORY_SLOT)
-    /* 厂测固件未 Motor_Init，访问电机 GPIO/Timer 会卡死总线 */
     cmd_motors_stop();
-#endif
     bsp_system_reset();
     return STATUS_OK;
 }
@@ -713,7 +716,7 @@ void cmd_register_defaults(void)
     (void)cmd_register("log", cmd_log, "emit one log line + ok");
     (void)cmd_register("version", cmd_version, "firmware version string");
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
-    (void)cmd_register("motor", cmd_motor, "motor <id 1-4> <rpm>");
+    (void)cmd_register("motor", cmd_motor, "motor <id 1..N> <rpm>");
     (void)cmd_register("adc", cmd_adc, "adc [line] — bat/btn 或 6 路循迹 ADC");
     (void)cmd_register("ftmenter", cmd_ftmenter, "switch to factory slot (APP_B)");
     (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A)");

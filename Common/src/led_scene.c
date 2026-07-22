@@ -671,6 +671,20 @@ void led_scene_led_direct_set(led_scene_led_e led, bool on)
     led_scene_output(&rgb);
 }
 
+void led_scene_rgb_set(uint8_t r, uint8_t g, uint8_t b)
+{
+    led_rgb_value_t rgb;
+
+    if (!self.initialized) {
+        return;
+    }
+
+    rgb.r = r;
+    rgb.g = g;
+    rgb.b = b;
+    led_scene_output(&rgb);
+}
+
 void led_scene_run(led_scene_id_e id)
 {
     if (id >= LED_SCENE_ID_MAX_NUM) {

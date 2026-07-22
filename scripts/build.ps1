@@ -20,19 +20,21 @@ $ErrorActionPreference = "Stop"
 
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
-# factory is APP_B-only; car products no longer build Target=factory.
+# Factory APP_B:
+#   .\build.cmd factory                 → projects/factory board (4wd template) + factory main
+#   .\build.cmd car-4wd -Target factory → car-4wd board + factory main, PRODUCT_ID=1
+#   .\build.cmd car-2wd -Target factory → car-2wd board + factory main, PRODUCT_ID=2
 if ($CarProject -eq "factory") {
     if ($Target -in @("bootloader", "app", "all")) {
         throw "product 'factory' only builds APP_B (use default / -Target factory). Got -Target $Target"
     }
     $Target = "factory"
-} elseif ($Target -eq "factory") {
-    throw "Target=factory removed from car products; use: .\build.cmd factory"
 }
 
 $CarDir = Join-Path $ProjectRoot "projects\$CarProject"
 $BuildDir = Join-Path $CarDir "build"
 $MainDir = Join-Path $CarDir "main"
+$FactoryMainDir = Join-Path $ProjectRoot "projects\factory\main"
 $BoardSrc = Join-Path $CarDir "board\src"
 $BoardInc = Join-Path $CarDir "board\inc"
 $BlDir = Join-Path $ProjectRoot "bootloader"
@@ -204,6 +206,7 @@ $GenConfig = Join-Path $ProjectRoot "scripts\gen_config.py"
 $CheckSize = Join-Path $ProjectRoot "scripts\check-image-size.py"
 
 function Get-DeviceDefines {
+    # Factory slot on a car product keeps that car's PRODUCT_ID so NVS/board match.
     $productId = switch ($CarProject) {
         "factory" { 0 }
         "car-2wd" { 2 }
@@ -342,13 +345,20 @@ function Get-AppSources {
            (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
 
+function Get-FactoryMainDir {
+    # Shared factory application sources live under projects/factory/main.
+    return $FactoryMainDir
+}
+
 function Get-FactorySources {
+    $ftmMain = Get-FactoryMainDir
     return @(
-        (Join-Path $MainDir "startup_tm4c123gh6pm.c"),
-        (Join-Path $MainDir "main.c"),
-        (Join-Path $MainDir "factory.c"),
-        (Join-Path $MainDir "freertos_hooks.c"),
-        (Join-Path $MainDir "syscalls.c")
+        (Join-Path $ftmMain "startup_tm4c123gh6pm.c"),
+        (Join-Path $ftmMain "main.c"),
+        (Join-Path $ftmMain "app.c"),
+        (Join-Path $ftmMain "serial_cmd.c"),
+        (Join-Path $ftmMain "freertos_hooks.c"),
+        (Join-Path $ftmMain "syscalls.c")
     ) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) + (Get-FactoryCommonSources) +
         (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
@@ -473,7 +483,11 @@ function Invoke-FirmwareBuild {
         }
         "factory" {
             Invoke-AppCodegen
-            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") -Sources (Get-FactorySources) -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) -ExtraIncludes @($MainDir) -CheckImageSize
+            Build-FirmwareTarget -Name "factory" -LdScript (Join-Path $LdDir "factory.ld") `
+                -Sources (Get-FactorySources) `
+                -ExtraDefines (@("-DFLASH_FACTORY_SLOT") + (Get-NvsAppDefines)) `
+                -ExtraIncludes @((Get-FactoryMainDir)) `
+                -CheckImageSize
         }
         "all" {
             # Car products only: bootloader + app. Factory is projects/factory.

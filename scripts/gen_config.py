@@ -665,6 +665,7 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
         "}",
     ]
 
+    motor_count = len(mod["pwm"])
     protos = [
         "#include <stdint.h>",
         f"#define SYSCLK_HZ    {clock}",
@@ -672,6 +673,7 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
         "#define PWM_PERIOD   (SYSCLK_HZ / PWM_FREQ_HZ)",
         "#define MOTOR_RPM_FULL_SCALE 300",
         "#define MOTOR_MIN_DUTY 120U",
+        f"#define BOARD_MOTOR_COUNT {motor_count}U",
         "",
     ]
     for ch in mod["pwm"]:
@@ -738,7 +740,11 @@ def gen_encoder(gpio: dict, mod: dict, src_dir: Path, header: BoardHeader) -> No
         body += emit_timer_capture_init(timer_encoders)
     body.append("}")
 
-    protos = ["#include <stdint.h>", "void Encoder_Init(void);"]
+    protos = [
+        "#include <stdint.h>",
+        f"#define BOARD_ENCODER_COUNT {len(all_encoders)}U",
+        "void Encoder_Init(void);",
+    ]
     if all_encoders:
         body += [
             "",
