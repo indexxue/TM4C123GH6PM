@@ -63,18 +63,29 @@
 
 ## 3. 日常命令
 
+### 3.1 WSL（推荐入口）
+
+在 `projects/` 下（产品 = `car-4wd` | `car-2wd`）：
+
+```bash
+cd projects
+./build.sh detect
+./build.sh car-4wd                 # debug → elf/hex/bin
+./build.sh car-2wd rebuild
+./build.sh car-4wd release 0.1.0   # LOG_ENABLE=0 + release/ 打包
+IMAGE_TARGET=app ./build.sh car-4wd
+```
+
+`build.sh` 解析产品 / 版本后调用 Windows 侧 `scripts/build.ps1`（工具链与 TivaWare 仍在 Windows 路径）。更细的流水线说明见 [build-pipeline.md](build-pipeline.md)。
+
+### 3.2 Windows
+
 ```powershell
 # 根目录（默认 car-4wd）
 .\build.cmd
 .\build.cmd -CarProject car-2wd
-
-# 进入工程目录
-.\projects\car-4wd\build.cmd
-.\projects\car-2wd\build.cmd
-
-# 多目标
 .\build.cmd -CarProject car-4wd -Target app
-.\build.cmd -CarProject car-4wd -Target all
+.\build.cmd -CarProject car-4wd -Action release -FwVersion 0.1.0
 
 # 烧录（J-Link）
 .\flash-jlink.cmd
@@ -86,15 +97,65 @@ IDE：**Ctrl+Shift+B** → 默认编译 `car-4wd`（见 `.vscode/tasks.json`）�
 
 ---
 
-## 4. 构建目标
+## 4. 构建目标与产物
 
-| `-Target` | 链接脚本 | 产物（示例 car-4wd） | Flash 用途 |
+| `-Target` / `IMAGE_TARGET` | 链接脚本 | 产物（示例 car-4wd） | Flash 用途 |
 |-----------|----------|----------------------|------------|
-| `standalone`（默认） | `ld/tm4c123gh6pm.ld` | `projects/car-4wd/build/car-4wd.elf/.bin` | 开发单镜像 @ `0x0` |
-| `bootloader` | `ld/bootloader.ld` | `projects/car-4wd/build/bootloader.bin` | Boot @ `0x0`（≤16 KB） |
-| `app` | `ld/app.ld` | `projects/car-4wd/build/app.bin` | 主固件 @ `0x4000`（≤116 KB） |
-| `factory` | `ld/factory.ld` | `projects/car-4wd/build/factory.bin` | 厂测 @ `0x21000`（≤116 KB） |
-| `all` | 以上三者 | 三个 `.bin` | 产线全套（Boot + 量产 + 厂测） |
+| `standalone`（默认） | `ld/tm4c123gh6pm.ld` | `projects/car-4wd/build/car-4wd.{elf,hex,bin}` | 开发单镜像 @ `0x0` |
+| `bootloader` | `ld/bootloader.ld` | `.../bootloader.{elf,hex,bin}` | Boot @ `0x0`（≤16 KB） |
+| `app` | `ld/app.ld` | `.../app.{elf,hex,bin}` | 主固件 @ `0x4000`（≤116 KB） |
+| `factory` | `ld/factory.ld` | `.../factory.{elf,hex,bin}` | 厂测 @ `0x21000`（≤116 KB） |
+| `all` | 以上三者 | 三个镜像 | 产线全套（Boot + 量产 + 厂测） |
+
+### 编译期宏（`build.ps1` / `build.sh` 注入）
+
+| 宏 | 含义 |
+|----|------|
+| `FW_VERSION_STR` | 版本字符串（debug：git tag / `0.0.0-dev`；release：指定或 git） |
+| `FW_PRODUCT_NAME` | 产品目录名（`car-4wd` / `car-2wd`） |
+| `FW_BUILD_DATE` / `FW_BUILD_TIME` | 构建时间戳 |
+| `LOG_ENABLE` | `1` 开串口 `LOG_*`；`release` 强制 `0`（编译剔除） |
+| `DEVICE_PRODUCT_ID` | `1`=四轮，`2`=两轮 |
+
+### Release 打包
+
+路径：`release/<ver>/`（gitignore）。命名：
+
+```text
+TM4C123GH6PM_<YYYYMMDD>_<product>_<ver>_unsigned.{elf,hex,bin}
+```
+
+例：`release/0.1.0/TM4C123GH6PM_20260722_car-4wd_0.1.0_unsigned.bin`  
+`FW_SIGNED=1` → 文件名 `_sign`。
+
+### 发布到 GitHub Tag / Release
+
+版本与 **semver tag**（`vX.Y.Z`）对齐；本地打包后再推送 tag 并创建 GitHub Release（附件为 `release/<ver>/` 下的 elf/hex/bin）。
+
+```bash
+# WSL
+cd projects
+./build.sh all release 0.1.0
+./publish.sh 0.1.0              # git tag v0.1.0 → push → gh release create
+./publish.sh 0.1.0 --dry-run
+./publish.sh 0.1.0 --build-first --draft
+```
+
+```powershell
+.\build.cmd -CarProject car-4wd -Action release -FwVersion 0.1.0
+.\build.cmd -CarProject car-2wd -Action release -FwVersion 0.1.0
+.\publish-release.cmd 0.1.0
+.\publish-release.cmd 0.1.0 -BuildFirst
+.\publish-release.cmd 0.1.0 -DryRun
+```
+
+前置：
+
+1. 待发布代码已提交（默认拒绝脏工作区；可用 `-AllowDirty` / `--allow-dirty`）
+2. 已安装并登录 GitHub CLI：`gh auth login`（本机常见路径 `C:\Program Files\GitHub CLI\gh.exe`）
+3. 有仓库 `contents:write` / release 权限（SSH remote `origin` 指向 `indexxue/TM4C123GH6PM`）
+
+脚本：`scripts/publish-release.ps1`、`projects/publish.sh`。详见 [build-pipeline.md](build-pipeline.md)。
 
 分区地址见 [PARTITION.md](../PARTITION.md)、[flash-partition.md](flash-partition.md)。
 
@@ -120,7 +181,8 @@ flowchart LR
 1. 应用/厂测目标：运行 `gen_config.py --car-project <car>`
 2. 收集源文件，逐文件 `gcc -c`
 3. 链接 → `projects/<car>/build/<car>.elf`
-4. `objcopy` → `.bin`；`bootloader` / `app` / `factory` 做体积检查
+4. `objcopy` → `.bin` + `.hex`；`bootloader` / `app` / `factory` 做体积检查
+5. `release`：复制到 `release/<ver>/` 并按 MCU_日期_产品_版本 命名
 
 `bootloader` 目标不跑板级代码生成。
 
@@ -205,13 +267,17 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 
 | 脚本 | 职责 |
 |------|------|
-| `build.ps1` | 主编译（`-CarProject car-4wd\|car-2wd`） |
+| `projects/build.sh` | WSL 编译入口（产品 / 版本 / release） |
+| `projects/_common.sh` | 版本与 apt 共用逻辑 |
+| `projects/publish.sh` | WSL：tag + GitHub Release 上传 |
+| `build.ps1` | 主编译（`-CarProject` / `-Target` / `-Action` / 宏注入） |
+| `publish-release.ps1` | Windows：`vX.Y.Z` tag + `gh release create` |
 | `gen_config.py` | `.syscfg` → 设备库 / `gpio-allocation.md` |
 | `flash-uniflash.ps1` | UniFlash 烧录 |
 | `flash-jlink.ps1` | J-Link 烧录 |
 | `check-image-size.py` | 分区体积检查 |
 
-根目录：`build.cmd`、`flash.cmd`。
+根目录：`build.cmd`、`flash.cmd`、`publish-release.cmd`。
 
 ---
 
@@ -237,8 +303,9 @@ python scripts/gen_config.py --car-project car-2wd --ide-db
 | 路径 | 提交 |
 |------|------|
 | `projects/*/build/` | 否 |
+| `release/` | 否 |
 | `tools/`、`downloads/`、`sdk/` | 否 |
-| `projects/*/source/src/{motor,encoder,line,board}.c` | 是（与 gen 保持一致） |
+| `projects/*/board/src/{motor,encoder,line,board}.c` | 是（与 gen 保持一致） |
 | `projects/*/gpio-allocation.md` | 是（自动生成） |
 
 ---

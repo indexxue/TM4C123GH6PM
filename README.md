@@ -23,14 +23,25 @@ git submodule update --init --recursive
 
 ## 编译
 
-根目录执行（默认 `-CarProject car-4wd`、`-Target standalone`）：
+**WSL（推荐）** — 产品 = `car-4wd` | `car-2wd`：
+
+```bash
+cd projects
+./build.sh detect
+./build.sh car-4wd                       # → projects/car-4wd/build/car-4wd.{elf,hex,bin}
+./build.sh car-4wd release 0.1.0         # → release/0.1.0/TM4C123GH6PM_*_unsigned.*
+./publish.sh 0.1.0                       # → git tag v0.1.0 + GitHub Release 附件
+```
+
+**Windows**（默认 `-CarProject car-4wd`、`-Target standalone`）：
 
 ```powershell
-.\build.cmd                              # 四轮开发镜像 → projects/car-4wd/build/car-4wd.{elf,bin}
-.\build.cmd -CarProject car-2wd          # 两轮开发镜像 → projects/car-2wd/build/car-2wd.{elf,bin}
-
+.\build.cmd                              # 四轮开发镜像 → projects/car-4wd/build/car-4wd.{elf,hex,bin}
+.\build.cmd -CarProject car-2wd          # 两轮开发镜像
 .\build.cmd -Target app                  # 量产分区镜像 app.bin
 .\build.cmd -Target all                  # Boot + APP_A + 厂测 三镜像
+.\build.cmd -Action release -FwVersion 0.1.0
+.\publish-release.cmd 0.1.0              # tag + GitHub Release（需 gh auth login）
 ```
 
 也可在工程目录内编译：
@@ -40,15 +51,15 @@ git submodule update --init --recursive
 .\projects\car-2wd\build.cmd
 ```
 
-IDE：**Ctrl+Shift+B** 默认编译 `car-4wd`。
+IDE：**Ctrl+Shift+B** 默认编译 `car-4wd`。流水线细节见 **[docs/build-pipeline.md](docs/build-pipeline.md)**、**[docs/build.md](docs/build.md)**。
 
-| `-Target` | 产物（以 car-4wd 为例） | 用途 |
+| `-Target` / `IMAGE_TARGET` | 产物（以 car-4wd 为例） | 用途 |
 |-----------|-------------------------|------|
-| `standalone`（默认） | `build/car-4wd.bin` | 日常开发，整片 @ `0x0` |
-| `bootloader` | `build/bootloader.bin` | Boot @ `0x0` |
-| `app` | `build/app.bin` | 量产固件 @ `0x4000` |
-| `factory` | `build/factory.bin` | 厂测 @ `0x21000` |
-| `all` | 上述三个 `.bin` | 产线全套 |
+| `standalone`（默认） | `build/car-4wd.{elf,hex,bin}` | 日常开发，整片 @ `0x0` |
+| `bootloader` | `build/bootloader.*` | Boot @ `0x0` |
+| `app` | `build/app.*` | 量产固件 @ `0x4000` |
+| `factory` | `build/factory.*` | 厂测 @ `0x21000` |
+| `all` | 上述三个镜像 | 产线全套 |
 
 配置源在 `projects/<car>/.syscfg/`；编译前由 `gen_config.py` 生成 `board/`，**勿手改**生成文件。
 

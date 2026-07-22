@@ -24,6 +24,17 @@
 #define DEVICE_PRODUCT_ID DEVICE_PRODUCT_ID_CAR_4WD_FULL
 #endif
 
+/* 构建脚本注入：产品名 / 构建时间戳（未注入时用占位） */
+#ifndef FW_PRODUCT_NAME
+#define FW_PRODUCT_NAME "unknown"
+#endif
+#ifndef FW_BUILD_DATE
+#define FW_BUILD_DATE "0000-00-00"
+#endif
+#ifndef FW_BUILD_TIME
+#define FW_BUILD_TIME "00:00:00"
+#endif
+
 /* -------------------------------------------------------------------------- */
 /* 时钟源（bsp_driver/bsp_sysctl）                                                  */
 /* -------------------------------------------------------------------------- */

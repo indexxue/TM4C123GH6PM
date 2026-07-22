@@ -58,12 +58,26 @@ void log_output(log_level_t level, const char *file, uint16_t line, const char *
 #define LOG_CALLSITE_LINE ((uint16_t)__LINE__)
 #endif
 
+/* LOG_ENABLE=0 (release) compiles out all LOG_* calls; default 1 for debug. */
+#ifndef LOG_ENABLE
+#define LOG_ENABLE 1
+#endif
+
+#if LOG_ENABLE
 #define LOG_FATAL(...)   log_output(LOG_LEVEL_FATAL, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
 #define LOG_ERROR(...)   log_output(LOG_LEVEL_ERROR, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
 #define LOG_WARN(...)    log_output(LOG_LEVEL_WARN, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
 #define LOG_INFO(...)    log_output(LOG_LEVEL_INFO, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
 #define LOG_DEBUG(...)   log_output(LOG_LEVEL_DEBUG, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
 #define LOG_VERBOSE(...) log_output(LOG_LEVEL_VERBOSE, __FILE__, LOG_CALLSITE_LINE, __VA_ARGS__)
+#else
+#define LOG_FATAL(...)   ((void)0)
+#define LOG_ERROR(...)   ((void)0)
+#define LOG_WARN(...)    ((void)0)
+#define LOG_INFO(...)    ((void)0)
+#define LOG_DEBUG(...)   ((void)0)
+#define LOG_VERBOSE(...) ((void)0)
+#endif
 
 #ifdef LOG_DISABLE_DEBUG
 #undef LOG_DEBUG

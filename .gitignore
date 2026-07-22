@@ -1,6 +1,7 @@
 # Build output
 build/
 projects/*/build/
+release/
 *.o *.elf *.bin *.map *.hex
 
 # ARM toolchain (downloaded on demand)
