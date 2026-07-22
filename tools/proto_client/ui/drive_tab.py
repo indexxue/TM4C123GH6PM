@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Optional
+from typing import Optional
 
 import tm_proto as proto
 # removed MapOdometry,MapPose
@@ -11,7 +11,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QFocusEvent
 from PySide6.QtWidgets import (
     QApplication,
-    QComboBox,
     QFormLayout,
     QGridLayout,
     QGroupBox,
@@ -65,7 +64,6 @@ class DriveTab(QWidget):
         self._worker = worker
         self._caps = 0
         self._motor_count = proto.MOTOR_COUNT_DEFAULT
-        self.on_motor_count_changed: Callable[[int], None] = lambda count: None
         self._active_key: Optional[str] = None
         self._direction_buttons: dict[str, QPushButton] = {}
         self._navigating = False
@@ -109,13 +107,6 @@ class DriveTab(QWidget):
 
     def _build_toolbar(self) -> QHBoxLayout:
         row = QHBoxLayout()
-        row.addWidget(QLabel("车型"))
-        self._motor_combo = QComboBox()
-        self._motor_combo.addItem("两轮 (M1~M2)", proto.MOTOR_COUNT_DEFAULT)
-        self._motor_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
-        self._motor_combo.currentIndexChanged.connect(self._on_motor_combo)
-        row.addWidget(self._motor_combo)
-
         row.addWidget(QLabel("力度"))
         self._magnitude = QSpinBox()
         self._magnitude.setRange(100, proto.DRIVE_MAGNITUDE_MAX)
@@ -215,9 +206,8 @@ class DriveTab(QWidget):
 
     # def _on_map_scale removed for joystick
 
-    def _on_motor_combo(self) -> None:
-        self._motor_count = int(self._motor_combo.currentData())
-        self.on_motor_count_changed(self._motor_count)
+    def set_motor_count(self, count: int) -> None:
+        self._motor_count = max(proto.MOTOR_COUNT_DEFAULT, min(proto.MOTOR_COUNT_MAX, int(count)))
         self._refresh_status()
 
     def _vector_for_key(self, key: str) -> DriveVector:
@@ -397,14 +387,8 @@ class DriveTab(QWidget):
             self._update_controls()
             self._refresh_status()
 
-    def on_hello(self, caps: int, hw_rev: int) -> None:
+    def on_hello(self, caps: int) -> None:
         self._caps = caps
-        if hw_rev == proto.HW_REV_CAR_2WD_V1:
-            self._motor_combo.setCurrentIndex(0)
-        elif hw_rev == proto.HW_REV_CAR_4WD_V1:
-            self._motor_combo.setCurrentIndex(1)
-        self._motor_count = int(self._motor_combo.currentData())
-        self.on_motor_count_changed(self._motor_count)
         self._update_controls()
         self._refresh_status()
 

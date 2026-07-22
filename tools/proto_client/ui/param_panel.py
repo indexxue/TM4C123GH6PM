@@ -20,6 +20,14 @@ from PySide6.QtWidgets import (
 from serial_worker import SerialWorker
 
 
+LAST_MODE_NAMES = {
+    0: "IDLE",
+    1: "MANUAL",
+    2: "LINE_FOLLOW",
+    3: "REMOTE",
+}
+
+
 def decode_c_string(raw: bytes) -> str:
     return raw.split(b"\x00", 1)[0].decode("ascii", errors="replace")
 
@@ -27,6 +35,11 @@ def decode_c_string(raw: bytes) -> str:
 def encode_c_string(text: str, size: int) -> bytes:
     data = text.encode("ascii", errors="replace")[: size - 1]
     return data + b"\x00" * (size - len(data))
+
+
+def format_last_mode(value: int) -> str:
+    name = LAST_MODE_NAMES.get(int(value), "?")
+    return f"{int(value)} ({name})"
 
 
 def expand_struct_field_types(struct_fmt: str) -> list[str]:
@@ -184,10 +197,18 @@ class ParamPanel(QScrollArea):
         if entry is None or editor is None:
             return
         size = struct.calcsize(entry["struct"])
-        if len(payload) < size:
-            return
-        values = struct.unpack(entry["struct"], payload[:size])
+        raw = payload
+        if len(raw) < size:
+            # 兼容旧固件 last_mode 按 1 字节 enum 回传
+            if entry["name"] == "last_mode" and len(raw) >= 1:
+                raw = raw[:1].ljust(size, b"\x00")
+            else:
+                editor.set_values(tuple("?" for _ in entry["fields"]))
+                return
+        values = struct.unpack(entry["struct"], raw[:size])
         if entry["struct"].endswith("s"):
             editor.set_values((values[0],))
+        elif entry["name"] == "last_mode":
+            editor.set_values((format_last_mode(values[0]),))
         else:
             editor.set_values(values)

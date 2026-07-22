@@ -50,7 +50,7 @@ tools/proto_client/
 
 「循迹 / 调试」：开启/停止循迹（`SET_LINE_FOLLOW` / `LINE_FOLLOW_STOP`），编辑 `pid_line` 与 `line_base_rpm`，曲线为 6 路 ADC + error/L/R/turn。
 
-「姿态 / 循迹 / 速度」→「转速 / 调试」页：M1~M4 独立曲线（可勾选显示/隐藏），支持 **两轮 / 四轮** 车型切换（HELLO `hw_rev` 自动识别）。
+「姿态 / 循迹 / 速度」→「转速 / 调试」页：M1~M4 独立曲线（可勾选显示/隐藏）。顶部连接栏 **车型** 全局切换两轮/四轮（曲线 / PID / 遥控共用；HELLO `hw_rev` 自动识别）。
 
 ## CLI
 

@@ -834,6 +834,17 @@ status_t nvs_init(void)
         nvs_dev_fill_serial(s_cfg.serial, sizeof(s_cfg.serial));
     }
 
+    if (s_cfg.fw_version[0] == '\0') {
+        static const char s_fw_default[] = FW_VERSION_STR;
+        size_t n = sizeof(s_fw_default) - 1U;
+
+        if (n >= NVS_CFG_FW_VER_MAX) {
+            n = NVS_CFG_FW_VER_MAX - 1U;
+        }
+        (void)memcpy(s_cfg.fw_version, s_fw_default, n);
+        s_cfg.fw_version[n] = '\0';
+    }
+
     if (s_cfg.boot_count < UINT32_MAX) {
         s_cfg.boot_count++;
     }
@@ -858,6 +869,19 @@ status_t nvs_startup_finalize(void)
     }
 
     nvs_cfg_ensure_serial();
+
+    /* 旧片上无 fw_ver 键时，把 RAM 默认版本落到 NVS，便于 HELLO / PARAM_READ */
+    {
+        char fw_probe[NVS_CFG_FW_VER_MAX];
+        u32_t fw_probe_len = sizeof(fw_probe);
+
+        if ((s_cfg.fw_version[0] != '\0') &&
+            (nvs_get_blob_impl(NVS_CFG_NS_DEV, NVS_CFG_KEY_FW_VER, fw_probe, &fw_probe_len) !=
+             STATUS_OK)) {
+            (void)nvs_param_set_fw_version(s_cfg.fw_version, NVS_WRITE_SRC_INTERNAL);
+        }
+    }
+
     return nvs_param_persist_u32(NVS_PARAM_BOOT_COUNT, NVS_CFG_NS_DEV, NVS_CFG_KEY_BOOT_CNT,
                                  s_cfg.boot_count);
 }
@@ -934,23 +958,27 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     cfg->line_base_rpm = 80.0f;
 
     cfg->last_mode = NVS_RUN_MODE_IDLE;
+    {
+        static const char s_fw_default[] = FW_VERSION_STR;
+        size_t n = sizeof(s_fw_default) - 1U;
+
+        if (n >= NVS_CFG_FW_VER_MAX) {
+            n = NVS_CFG_FW_VER_MAX - 1U;
+        }
+        (void)memcpy(cfg->fw_version, s_fw_default, n);
+        cfg->fw_version[n] = '\0';
+    }
 
     /* 出厂 encoder_dir_mask / motor_dir_mask 由 encoder_polarity_board.h / encoder_polarity.h 决定 */
-    if (profile->product_id != DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
-        cfg->encoder_dir_mask = encoder_polarity_default_mask();
-        cfg->motor_dir_mask = motor_polarity_default_mask();
-    }
+    cfg->encoder_dir_mask = encoder_polarity_default_mask();
+    cfg->motor_dir_mask = motor_polarity_default_mask();
 }
 
 static void nvs_cfg_reconcile_encoder_dir(nvs_cfg_t *cfg)
 {
-    const device_product_profile_t *profile = device_profile_product();
     u32_t expected;
 
     if (cfg == NULL) {
-        return;
-    }
-    if (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
         return;
     }
 
@@ -961,13 +989,9 @@ static void nvs_cfg_reconcile_encoder_dir(nvs_cfg_t *cfg)
 
 static void nvs_cfg_reconcile_motor_dir(nvs_cfg_t *cfg)
 {
-    const device_product_profile_t *profile = device_profile_product();
     u32_t expected;
 
     if (cfg == NULL) {
-        return;
-    }
-    if (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
         return;
     }
 
@@ -1033,6 +1057,13 @@ static status_t nvs_cfg_persist_defaults(void)
     NVS_APPEND_U32(NVS_CFG_NS_DEV, NVS_CFG_KEY_BOOT_CNT, s_cfg.boot_count);
     if (serial_len > 0U) {
         NVS_APPEND_BLOB(NVS_CFG_NS_DEV, NVS_CFG_KEY_SERIAL, s_cfg.serial, serial_len);
+    }
+    {
+        size_t fw_len = strlen(s_cfg.fw_version);
+
+        if (fw_len > 0U) {
+            NVS_APPEND_BLOB(NVS_CFG_NS_DEV, NVS_CFG_KEY_FW_VER, s_cfg.fw_version, fw_len + 1U);
+        }
     }
     NVS_APPEND_BLOB(NVS_CFG_NS_CTRL, NVS_CFG_KEY_SPD_LIM, &s_cfg.spd_limit,
                     sizeof(s_cfg.spd_limit));
@@ -1165,9 +1196,14 @@ static void nvs_cfg_load_from_flash(nvs_cfg_t *cfg)
         u32_t fw_ver_len = sizeof(fw_ver);
 
         if (nvs_get_blob_impl(NVS_CFG_NS_DEV, NVS_CFG_KEY_FW_VER, fw_ver, &fw_ver_len) == STATUS_OK) {
-            if ((fw_ver_len > 0U) && (fw_ver_len < NVS_CFG_FW_VER_MAX)) {
-                (void)memcpy(cfg->fw_version, fw_ver, fw_ver_len);
-                cfg->fw_version[fw_ver_len] = '\0';
+            if (fw_ver_len > 0U) {
+                u32_t copy = fw_ver_len;
+
+                if (copy >= NVS_CFG_FW_VER_MAX) {
+                    copy = NVS_CFG_FW_VER_MAX - 1U;
+                }
+                (void)memcpy(cfg->fw_version, fw_ver, copy);
+                cfg->fw_version[copy] = '\0';
             }
         }
     }
@@ -1361,8 +1397,9 @@ status_t nvs_param_set_fw_version(const char *version, nvs_write_src_t src)
                                       0U);
     }
 
+    /* 含结尾 '\0'，便于上位机/工具按 C 字符串读取 */
     return nvs_param_persist_blob(NVS_PARAM_FW_VERSION, NVS_CFG_NS_DEV, NVS_CFG_KEY_FW_VER, version,
-                                  (u32_t)len);
+                                  (u32_t)(len + 1U));
 }
 
 status_t nvs_param_inc_boot_count(void)

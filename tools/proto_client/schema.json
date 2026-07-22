@@ -39,7 +39,7 @@
       "struct": "16s",
       "fields": ["fw_version"],
       "writable": true,
-      "description": "固件版本字符串"
+      "description": "固件版本字符串（默认 0.1.0；HELLO 同步显示）"
     },
     {
       "id": 5,
@@ -119,7 +119,7 @@
       "struct": "<I",
       "fields": ["last_mode"],
       "writable": false,
-      "description": "上次运行模式"
+      "description": "上次运行模式：0=IDLE 1=MANUAL 2=LINE_FOLLOW 3=REMOTE"
     },
     {
       "id": 15,

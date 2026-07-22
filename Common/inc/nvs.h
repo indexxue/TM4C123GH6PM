@@ -73,12 +73,20 @@ typedef enum {
 #define NVS_HW_REV_CAR_4WD_V1       0U
 #define NVS_HW_REV_CAR_2WD_V1       1U
 
-typedef enum {
+/** 固件版本字符串默认值（可 -DFW_VERSION_STR=... 覆盖；≤15 字符） */
+#ifndef FW_VERSION_STR
+#define FW_VERSION_STR              "0.1.0"
+#endif
+
+/** 线协议 / NVS 固定为 u32，避免 enum 宽度随编译器变化 */
+typedef u32_t nvs_run_mode_t;
+
+enum {
     NVS_RUN_MODE_IDLE = 0,
-    NVS_RUN_MODE_MANUAL,
-    NVS_RUN_MODE_LINE_FOLLOW,
-    NVS_RUN_MODE_REMOTE,
-} nvs_run_mode_t;
+    NVS_RUN_MODE_MANUAL = 1,
+    NVS_RUN_MODE_LINE_FOLLOW = 2,
+    NVS_RUN_MODE_REMOTE = 3,
+};
 
 typedef struct {
     f32_t kp;

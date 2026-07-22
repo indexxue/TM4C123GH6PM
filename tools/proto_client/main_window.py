@@ -109,6 +109,12 @@ class MainWindow(QMainWindow):
             self._baud_combo.addItem(str(rate), rate)
         self._baud_combo.setCurrentText("115200")
 
+        self._chassis_combo = QComboBox()
+        self._chassis_combo.addItem("两轮 (M1~M2)", proto.MOTOR_COUNT_DEFAULT)
+        self._chassis_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
+        self._chassis_combo.setToolTip("全局车型：曲线、PID、遥控共用；HELLO 按 hw_rev 自动识别")
+        self._chassis_combo.currentIndexChanged.connect(self._on_chassis_combo)
+
         self._connect_btn = QPushButton("连接")
         self._disconnect_btn = QPushButton("断开")
         self._disconnect_btn.setEnabled(False)
@@ -123,6 +129,8 @@ class MainWindow(QMainWindow):
         layout.addWidget(self._port_combo, stretch=1)
         layout.addWidget(QLabel("波特率"))
         layout.addWidget(self._baud_combo)
+        layout.addWidget(QLabel("车型"))
+        layout.addWidget(self._chassis_combo)
         layout.addWidget(self._connect_btn)
         layout.addWidget(self._disconnect_btn)
         layout.addWidget(self._link_label)
@@ -143,7 +151,6 @@ class MainWindow(QMainWindow):
             self._param_panel.editor(20),
         )
         self._drive = DriveTab(self._worker)
-        self._drive.on_motor_count_changed = self._on_drive_motor_count_changed
         self._pid_tuning = PidTuningTab(self._worker)
 
         self._dashboard.subscribe_panel.changed.connect(self._on_subscribe_apply)
@@ -152,6 +159,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._plot, "姿态 / 循迹 / 速度")
         tabs.addTab(self._pid_tuning, "PID 整定")
         tabs.addTab(self._drive, "遥控")
+        self._apply_motor_count(int(self._chassis_combo.currentData()))
         return tabs
 
     def _on_subscribe_apply(self, optional_mask: int) -> None:
@@ -203,9 +211,22 @@ class MainWindow(QMainWindow):
             self._pid_tuning.reset()
             self._drive.reset()
 
-    def _on_drive_motor_count_changed(self, count: int) -> None:
+    def _on_chassis_combo(self) -> None:
+        count = self._chassis_combo.currentData()
+        if count is None:
+            return
+        self._apply_motor_count(int(count))
+
+    def _apply_motor_count(self, count: int) -> None:
+        count = max(proto.MOTOR_COUNT_DEFAULT, min(proto.MOTOR_COUNT_MAX, int(count)))
+        idx = self._chassis_combo.findData(count)
+        if idx >= 0 and self._chassis_combo.currentIndex() != idx:
+            self._chassis_combo.blockSignals(True)
+            self._chassis_combo.setCurrentIndex(idx)
+            self._chassis_combo.blockSignals(False)
         self._plot.set_motor_count(count)
         self._pid_tuning.set_motor_count(count)
+        self._drive.set_motor_count(count)
 
     def _on_hello(self, info: proto.HelloInfo) -> None:
         self._proto_ver = info.proto_ver
@@ -222,7 +243,8 @@ class MainWindow(QMainWindow):
         self._dashboard.subscribe_panel.set_distance_available(has_distance)
         self._dashboard.subscribe_panel.set_line_follow_available(has_line)
         self._pid_tuning.on_hello(info.caps)
-        self._drive.on_hello(info.caps, info.hw_rev)
+        self._drive.on_hello(info.caps)
+        self._apply_motor_count(proto.motor_count_for_hw_rev(info.hw_rev))
         if info.proto_ver < proto.PROTO_VER:
             self._append_log(f"提示: 固件 proto_ver={info.proto_ver}，姿态按 v1 f32 解析")
 

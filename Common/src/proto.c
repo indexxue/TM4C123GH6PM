@@ -1,6 +1,6 @@
 /**
  * @file    proto.c
- * @brief   UART0 蓝牙协议：帧解析、HELLO/PING、遥测、参数读写、遥控
+ * @brief   蓝牙协议（BOARD_UART_BT）：帧解析、HELLO/PING、遥测、参数读写、遥控
  */
 
 #include "proto.h"
@@ -309,7 +309,7 @@ static int32_t proto_get_i32(const uint8_t *p)
 }
 
 /* -------------------------------------------------------------------------- */
-/* UART0 发送                                                                 */
+/* 蓝牙 UART 发送（car-4wd=UART0，car-2wd=UART1，经 UART_Putc）              */
 /* -------------------------------------------------------------------------- */
 
 static void proto_uart_write_locked(const uint8_t *data, uint16_t len)
@@ -363,7 +363,7 @@ static void proto_tx_task(void *arg)
 
 static bool_t proto_uart_rx_pending(void)
 {
-    return UARTCharsAvail(UART0_BASE) ? TRUE : FALSE;
+    return UARTCharsAvail(BOARD_UART_BT_CFG.base) ? TRUE : FALSE;
 }
 
 static void proto_rx_gate_hold(void)
@@ -827,8 +827,12 @@ static uint16_t proto_param_read_blob(nvs_param_id_t id, uint8_t *out, uint16_t 
         (void)memcpy(out, &cfg->mag_heading_offset_deg, sizeof(cfg->mag_heading_offset_deg));
         return (uint16_t)sizeof(cfg->mag_heading_offset_deg);
     case NVS_PARAM_LAST_MODE:
-        (void)memcpy(out, &cfg->last_mode, sizeof(cfg->last_mode));
-        return (uint16_t)sizeof(cfg->last_mode);
+    {
+        u32_t mode = (u32_t)cfg->last_mode;
+
+        (void)memcpy(out, &mode, sizeof(mode));
+        return (uint16_t)sizeof(mode);
+    }
     default:
         return 0U;
     }

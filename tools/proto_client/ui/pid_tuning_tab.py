@@ -233,13 +233,6 @@ class PidTuningTab(QWidget):
         self._scenario_combo = QComboBox()
         self._scenario_combo.currentIndexChanged.connect(self._on_scenario_changed)
         row.addWidget(self._scenario_combo, stretch=1)
-
-        row.addWidget(QLabel("车型"))
-        self._motor_combo = QComboBox()
-        self._motor_combo.addItem("两轮 (M1~M2)", proto.MOTOR_COUNT_DEFAULT)
-        self._motor_combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
-        self._motor_combo.currentIndexChanged.connect(self._on_motor_combo)
-        row.addWidget(self._motor_combo)
         return row
 
     def _build_left_panel(self) -> QWidget:
@@ -392,11 +385,6 @@ class PidTuningTab(QWidget):
         self._lbl_step_hint.setText(sc.hint)
         self._update_step_labels()
 
-    def _on_motor_combo(self) -> None:
-        data = self._motor_combo.currentData()
-        if data is not None:
-            self._motor_count = int(data)
-
     def _update_step_labels(self) -> None:
         key = self._loop_combo.currentData()
         if key == "speed":
@@ -444,13 +432,7 @@ class PidTuningTab(QWidget):
         self._caps = caps
 
     def set_motor_count(self, count: int) -> None:
-        count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
-        self._motor_count = count
-        idx = self._motor_combo.findData(count)
-        if idx >= 0:
-            self._motor_combo.blockSignals(True)
-            self._motor_combo.setCurrentIndex(idx)
-            self._motor_combo.blockSignals(False)
+        self._motor_count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
 
     def apply_param_read(self, param_id: int, payload: bytes) -> None:
         loop = self._current_loop()

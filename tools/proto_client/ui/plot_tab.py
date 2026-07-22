@@ -10,7 +10,6 @@ import tm_proto as proto
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QCheckBox,
-    QComboBox,
     QFrame,
     QHBoxLayout,
     QLabel,
@@ -239,15 +238,6 @@ class PlotTab(QWidget):
         self._lbl_distance_hint.setStyleSheet("color: #c8860a;")
         chart_col.addWidget(self._lbl_distance_hint)
 
-        motor_bar = QHBoxLayout()
-        motor_bar.addWidget(QLabel("车型"))
-        self._distance_motor_count_combo = QComboBox()
-        self._fill_motor_count_combo(self._distance_motor_count_combo)
-        self._distance_motor_count_combo.currentIndexChanged.connect(self._on_distance_motor_count_combo)
-        motor_bar.addWidget(self._distance_motor_count_combo)
-        motor_bar.addStretch()
-        chart_col.addLayout(motor_bar)
-
         self._plot_distance = pg.PlotWidget(title="本次相对位移 (mm)")
         dist_legend = self._plot_distance.addLegend(offset=(10, 10))
         self._plot_distance.setLabel("left", "mm")
@@ -280,18 +270,6 @@ class PlotTab(QWidget):
         self._distance_meas: list[float] = []
         self._distance_target_series: list[float] = []
         self._views.addTab(page, "距离 / 调试")
-
-    @staticmethod
-    def _fill_motor_count_combo(combo: QComboBox) -> None:
-        combo.clear()
-        combo.addItem("两轮 (M1~M2)", proto.MOTOR_COUNT_DEFAULT)
-        combo.addItem("四轮 (M1~M4)", proto.MOTOR_COUNT_MAX)
-
-    def _on_distance_motor_count_combo(self) -> None:
-        count = self._distance_motor_count_combo.currentData()
-        if count is None:
-            return
-        self.set_motor_count(int(count))
 
     def set_distance_subscribed(self, subscribed: bool) -> None:
         self._distance_subscribed = subscribed
@@ -373,15 +351,6 @@ class PlotTab(QWidget):
         self._lbl_angle_hint.setStyleSheet("color: #c8860a;")
         chart_col.addWidget(self._lbl_angle_hint)
 
-        motor_bar = QHBoxLayout()
-        motor_bar.addWidget(QLabel("车型"))
-        self._angle_motor_count_combo = QComboBox()
-        self._fill_motor_count_combo(self._angle_motor_count_combo)
-        self._angle_motor_count_combo.currentIndexChanged.connect(self._on_angle_motor_count_combo)
-        motor_bar.addWidget(self._angle_motor_count_combo)
-        motor_bar.addStretch()
-        chart_col.addLayout(motor_bar)
-
         self._plot_angle = pg.PlotWidget(title="本次相对转角 (°)")
         angle_legend = self._plot_angle.addLegend(offset=(10, 10))
         self._plot_angle.setLabel("left", "deg")
@@ -420,16 +389,7 @@ class PlotTab(QWidget):
         self._angle_meas: list[float] = []
         self._angle_target_series: list[float] = []
         self._views.addTab(page, "角度 / 调试")
-        idx = self._angle_motor_count_combo.findData(self._motor_count)
-        if idx >= 0:
-            self._angle_motor_count_combo.setCurrentIndex(idx)
         self._angle_panel.set_motor_count(self._motor_count)
-
-    def _on_angle_motor_count_combo(self) -> None:
-        count = self._angle_motor_count_combo.currentData()
-        if count is None:
-            return
-        self.set_motor_count(int(count))
 
     def set_angle_subscribed(self, subscribed: bool) -> None:
         self._angle_subscribed = subscribed
@@ -757,12 +717,6 @@ class PlotTab(QWidget):
         chart_col.addWidget(self._lbl_rpm_hint)
 
         motor_bar = QHBoxLayout()
-        motor_bar.addWidget(QLabel("车型"))
-        self._motor_count_combo = QComboBox()
-        self._fill_motor_count_combo(self._motor_count_combo)
-        self._motor_count_combo.currentIndexChanged.connect(self._on_motor_count_combo)
-        motor_bar.addWidget(self._motor_count_combo)
-        motor_bar.addSpacing(12)
         motor_bar.addWidget(QLabel("显示曲线"))
         self._motor_checks: list[QCheckBox] = []
         for i, name in enumerate(self.MOTOR_NAMES):
@@ -811,30 +765,13 @@ class PlotTab(QWidget):
         self._rpm_time: list[float] = []
         self._rpm_data: list[list[float]] = [[] for _ in range(proto.MOTOR_COUNT_MAX)]
         self._views.addTab(page, "转速 / 调试")
-        self.set_motor_count(proto.MOTOR_COUNT_DEFAULT)
+        self._apply_motor_count_ui()
 
     def set_motor_count(self, count: int) -> None:
         count = max(2, min(proto.MOTOR_COUNT_MAX, int(count)))
         if count == self._motor_count:
             return
         self._motor_count = count
-        idx = self._motor_count_combo.findData(count)
-        if idx >= 0:
-            self._motor_count_combo.blockSignals(True)
-            self._motor_count_combo.setCurrentIndex(idx)
-            self._motor_count_combo.blockSignals(False)
-        if hasattr(self, "_angle_motor_count_combo"):
-            idx_a = self._angle_motor_count_combo.findData(count)
-            if idx_a >= 0:
-                self._angle_motor_count_combo.blockSignals(True)
-                self._angle_motor_count_combo.setCurrentIndex(idx_a)
-                self._angle_motor_count_combo.blockSignals(False)
-        if hasattr(self, "_distance_motor_count_combo"):
-            idx_d = self._distance_motor_count_combo.findData(count)
-            if idx_d >= 0:
-                self._distance_motor_count_combo.blockSignals(True)
-                self._distance_motor_count_combo.setCurrentIndex(idx_d)
-                self._distance_motor_count_combo.blockSignals(False)
         self._apply_motor_count_ui()
 
     def set_rpm_subscribed(self, subscribed: bool) -> None:
@@ -849,13 +786,6 @@ class PlotTab(QWidget):
                 "未订阅电机 RPM：在仪表盘勾选「电机 RPM」并点「应用订阅」"
             )
             self._lbl_rpm_hint.setStyleSheet("color: #c8860a; font-weight: bold;")
-
-    def _on_motor_count_combo(self) -> None:
-        count = self._motor_count_combo.currentData()
-        if count is None:
-            return
-        self._motor_count = int(count)
-        self._apply_motor_count_ui()
 
     def _on_motor_visibility(self, motor_index: int, visible: bool) -> None:
         if 0 <= motor_index < len(self._motor_visible):
