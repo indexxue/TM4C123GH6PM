@@ -342,7 +342,8 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "line_follow.c"),
         (Join-Path $CommonSrc "chassis.c"),
         (Join-Path $CommonSrc "proto.c"),
-        (Join-Path $CommonSrc "led_scene.c")
+        (Join-Path $CommonSrc "led_scene.c"),
+        (Join-Path $CommonSrc "camera_spi.c")
     )
 }
 

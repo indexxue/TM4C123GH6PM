@@ -13,6 +13,7 @@
 #include "bsp_systick.h"
 
 #include "driverlib/gpio.h"
+#include "driverlib/interrupt.h"
 
 #include "FreeRTOS.h"
 #include "task.h"
@@ -75,6 +76,7 @@ typedef struct
 
 static led_scene_self_t self;
 static ws2812b_t s_ws2812;
+static uint8_t s_ws2812_pixels[LED_SCENE_PIXEL_COUNT * 3U];
 static TimerHandle_t s_onoff_timer;
 static volatile uint32_t *const s_ws2812_data =
     (volatile uint32_t *)(GPIO_RGB_LED_PORT + (GPIO_RGB_LED_PIN << 2));
@@ -235,6 +237,8 @@ static void ws2812_send_byte(uint8_t byte)
 
 static int ws2812_pc3_transmit(const uint8_t *grb, size_t len, void *ctx)
 {
+    bool ints_were_disabled;
+
     (void)ctx;
 
     if ((grb == NULL) || (len == 0U)) {
@@ -245,11 +249,18 @@ static int ws2812_pc3_transmit(const uint8_t *grb, size_t len, void *ctx)
         return -1;
     }
 
-    taskENTER_CRITICAL();
+    /*
+     * Camera SSI ISR 优先级 0x40，高于 configMAX_SYSCALL(0xA0)。
+     * taskENTER_CRITICAL 挡不住该 ISR，会打断 ~µs 级位时序 → 灯效失效。
+     * 整帧约数十 µs，关总中断即可；SSI 下一拍仍会补 FIFO。
+     */
+    ints_were_disabled = IntMasterDisable();
     for (size_t i = 0U; i < len; i++) {
         ws2812_send_byte(grb[i]);
     }
-    taskEXIT_CRITICAL();
+    if (!ints_were_disabled) {
+        IntMasterEnable();
+    }
 
     return 0;
 }
@@ -634,7 +645,12 @@ void led_scene_init(void)
                      GPIO_STRENGTH_8MA, GPIO_PIN_TYPE_STD);
     *s_ws2812_data = 0U;
 
-    if (ws2812b_init_user(&s_ws2812, LED_SCENE_PIXEL_COUNT, ws2812_pc3_transmit, NULL) != WS2812B_OK) {
+    if (ws2812b_init_user_buf(&s_ws2812,
+                              LED_SCENE_PIXEL_COUNT,
+                              s_ws2812_pixels,
+                              sizeof(s_ws2812_pixels),
+                              ws2812_pc3_transmit,
+                              NULL) != WS2812B_OK) {
         LOG_WARN("led_scene: ws2812 init failed");
         return;
     }

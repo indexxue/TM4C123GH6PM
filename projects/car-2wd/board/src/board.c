@@ -80,9 +80,10 @@ const bsp_adc_config_t BOARD_BATTERY_ADC_CFG = {
 
 const bsp_spi_config_t BOARD_SPI_CFG = {
     .base = SSI0_BASE,
-    .clock_hz = 1000000,
-    .mode = BSP_SPI_MODE_0,
+    .clock_hz = 5000000,
+    .mode = BSP_SPI_MODE_1,
     .data_bits = 8,
+    .role = BSP_SPI_ROLE_SLAVE,
 };
 
 bool Board_UartDebug_Init(void) {

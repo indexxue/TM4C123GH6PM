@@ -44,10 +44,10 @@
 | PB3 | I2C_SDA | 输入 | I2C0 SDA |
 | PE0 | DBG_RX | 输入 | UART7 RX |
 | PE1 | DBG_TX | 输出 | UART7 TX |
-| PA2 | SSI_CLK | 输出 | SSI0 CLK |
-| PA3 | SSI_FSS | 输出 | SSI0 FSS |
-| PA4 | SSI_RX | 输入 | SSI0 RX |
-| PA5 | SSI_TX | 输出 | SSI0 TX |
+| PA2 | SSI_CLK | 输入 | SSI0 CLK (Camera SPI Slave) |
+| PA3 | SSI_FSS | 输入 | SSI0 FSS/CS (Camera SPI Slave) |
+| PA4 | SSI_RX | 输入 | SSI0 RX/MOSI (Camera SPI Slave) |
+| PA5 | SSI_TX | 输出 | SSI0 TX/MISO (Camera SPI Slave) |
 
 ### 电机 PWM (4 路)
 

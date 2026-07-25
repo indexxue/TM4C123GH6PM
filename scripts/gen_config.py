@@ -1004,12 +1004,20 @@ def emit_board_config_defs(modules: dict[str, dict], board: dict) -> list[str]:
 
     ssi_items = modules.get("ssi", {}).get("ssi", [])
     for item in ssi_items:
+        role = str(item.get("mode", "master")).lower()
+        role_enum = "BSP_SPI_ROLE_SLAVE" if role == "slave" else "BSP_SPI_ROLE_MASTER"
+        # TM4C SSI slave：Mode0(SPH=0) 要求每字节拉高 FSS，否则 MISO 只出首字节。
+        # 连续 32B 帧须 Mode1(CPOL=0,CPHA=1)；见 spi_mode 字段。
+        spi_mode = int(item.get("spi_mode", 1 if role == "slave" else 0))
+        if spi_mode not in (0, 1, 2, 3):
+            spi_mode = 1 if role == "slave" else 0
         lines += [
             "const bsp_spi_config_t BOARD_SPI_CFG = {",
             f"    .base = {item['module']}_BASE,",
             f"    .clock_hz = {item['speed']},",
-            "    .mode = BSP_SPI_MODE_0,",
+            f"    .mode = BSP_SPI_MODE_{spi_mode},",
             "    .data_bits = 8,",
+            f"    .role = {role_enum},",
             "};",
             "",
         ]

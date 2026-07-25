@@ -38,10 +38,10 @@
     { "port": "B", "pin": 3, "label": "I2C_SDA", "direction": "input", "_usage": "I2C0 SDA" },
     { "port": "E", "pin": 0, "label": "DBG_RX", "direction": "input", "_usage": "UART7 RX" },
     { "port": "E", "pin": 1, "label": "DBG_TX", "direction": "output", "_usage": "UART7 TX" },
-    { "port": "A", "pin": 2, "label": "SSI_CLK", "direction": "output", "_usage": "SSI0 CLK" },
-    { "port": "A", "pin": 3, "label": "SSI_FSS", "direction": "output", "_usage": "SSI0 FSS" },
-    { "port": "A", "pin": 4, "label": "SSI_RX", "direction": "input", "_usage": "SSI0 RX" },
-    { "port": "A", "pin": 5, "label": "SSI_TX", "direction": "output", "_usage": "SSI0 TX" }
+    { "port": "A", "pin": 2, "label": "SSI_CLK", "direction": "input", "_usage": "SSI0 CLK (Camera SPI Slave)" },
+    { "port": "A", "pin": 3, "label": "SSI_FSS", "direction": "input", "_usage": "SSI0 FSS/CS (Camera SPI Slave)" },
+    { "port": "A", "pin": 4, "label": "SSI_RX", "direction": "input", "_usage": "SSI0 RX/MOSI (Camera SPI Slave)" },
+    { "port": "A", "pin": 5, "label": "SSI_TX", "direction": "output", "_usage": "SSI0 TX/MISO (Camera SPI Slave)" }
   ],
   "pinout_groups": {
     "motor": ["M1_IN1", "M1_IN2", "M2_IN1", "M2_IN2", "M3_IN1", "M3_IN2", "M4_IN1", "M4_IN2", "M1_PWM", "M2_PWM", "M3_PWM", "M4_PWM"],

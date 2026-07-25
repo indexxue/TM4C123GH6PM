@@ -16,6 +16,7 @@
 #include "boot_slot.h"
 #include "button.h"
 #include "buzzer.h"
+#include "camera_spi.h"
 #include "cfg.h"
 #include "cmd.h"
 #include "device_profile.h"
@@ -295,6 +296,13 @@ static void app_user_init(void)
         }
     }
 
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        st = camera_spi_init();
+        if (st != STATUS_OK) {
+            LOG_WARN("factory: camera_spi init failed (%d)", (int)st);
+        }
+    }
+
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         LOG_INFO("factory: heap free=%u min_ever=%u",
                  (unsigned)xPortGetFreeHeapSize(),
@@ -330,6 +338,7 @@ static void app_evt_dispatch_task(void *arg)
                 button_schedule();
             }
             app_attitude_periodic();
+            camera_spi_poll();
         }
 
         if (event_is_set(EVT_ID_BUTTON)) {

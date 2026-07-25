@@ -10,6 +10,7 @@
 #include "battery.h"
 #include "button.h"
 #include "buzzer.h"
+#include "camera_spi.h"
 #include "cfg.h"
 #include "chassis.h"
 #include "boot_slot.h"
@@ -218,6 +219,13 @@ static void app_user_init(void)
         LOG_WARN("app: proto service start failed (%d)", (int)st);
     }
 
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        st = camera_spi_init();
+        if (st != STATUS_OK) {
+            LOG_WARN("app: camera_spi init failed (%d)", (int)st);
+        }
+    }
+
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         LOG_INFO("app: heap free=%u min_ever=%u",
                  (unsigned)xPortGetFreeHeapSize(),
@@ -240,6 +248,7 @@ static void app_on_timer(void)
     app_attitude_periodic();
 
     proto_telemetry_tick(APP_CTRL_PERIOD_MS);
+    camera_spi_poll();
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER)) {
         chassis_tick(APP_CTRL_PERIOD_MS);

@@ -2,14 +2,15 @@
   "module": "ssi",
   "ssi": [
     {
-      "name": "Magnetometer",
+      "name": "Camera",
       "module": "SSI0",
       "clk": "PA2",
       "fss": "PA3",
       "rx": "PA4",
       "tx": "PA5",
-      "mode": "master",
-      "speed": 1000000
+      "mode": "slave",
+      "spi_mode": 1,
+      "speed": 5000000
     }
   ]
 }
