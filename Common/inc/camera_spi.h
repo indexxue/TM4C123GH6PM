@@ -3,8 +3,9 @@
  * @brief ESP32 Camera 模组 SPI 链路（MCU = Slave，固定 32B 全双工）
  *
  * 物理层：Mode1（CPOL=0,CPHA=1）、MSB、1 MHz、32B/拍。
- * 协议见 docs/camera_spi_host_protocol_plan.md 与
- * docs/camera-spi-host-protocol-review.md。
+ * 协议见 docs/camera_spi_host_protocol_plan.md。
+ *
+ * L0 通路测试：默认关闭；需要时 -DCAMERA_SPI_WIRE_TEST=1。
  */
 
 #ifndef MODULE_CAMERA_SPI_H
@@ -23,6 +24,8 @@ extern "C" {
 #define CAMERA_SPI_MAGIC               (0xA55AU)
 #define CAMERA_SPI_PROTO_VER           (0x01U)
 #define CAMERA_SPI_PAYLOAD_MAX         (22U)
+/** L0：MCU→ESP（MISO）填充字节 */
+#define CAMERA_SPI_WIRE_TX_BYTE        (0xA5U)
 
 #define CAMERA_SPI_MSG_HEARTBEAT       (0x01U)
 #define CAMERA_SPI_MSG_STATUS          (0x02U)
