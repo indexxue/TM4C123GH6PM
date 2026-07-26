@@ -78,6 +78,9 @@ class SerialWorker(QThread):
     line_loop_received = Signal(object)
     encoder_counts_received = Signal(object)
     battery_received = Signal(int, int)
+    cam_detect_received = Signal(object)
+    cam_servo_received = Signal(object)
+    cam_net_received = Signal(object)
     optional_subscription_changed = Signal(int)
     param_read_result = Signal(int, bytes)
     param_write_result = Signal(int, bool, str)
@@ -193,6 +196,36 @@ class SerialWorker(QThread):
     def request_calib_yaw(self, ref_yaw: int = 0) -> None:
         self._cmd_queue.put(("calib_yaw", proto.build_calib_yaw(ref_yaw), None))
 
+    @Slot()
+    def request_cam_servo_center(self) -> None:
+        self._cmd_queue.put(("cam_servo_center", b"", None))
+
+    @Slot(int, int)
+    def request_cam_servo_set_angle(self, ch: int, deg_x100: int) -> None:
+        self._cmd_queue.put(
+            ("cam_servo_set_angle", proto.build_cam_servo_set_angle(ch, deg_x100), None)
+        )
+
+    @Slot(int, int)
+    def request_cam_servo_nudge(self, ch: int, delta_x100: int) -> None:
+        self._cmd_queue.put(
+            ("cam_servo_nudge", proto.build_cam_servo_nudge(ch, delta_x100), None)
+        )
+
+    @Slot(bool)
+    def request_cam_detect_enable(self, on: bool) -> None:
+        self._cmd_queue.put(
+            ("cam_detect_enable", proto.build_cam_detect_enable(1 if on else 0), None)
+        )
+
+    @Slot()
+    def request_cam_snapshot(self) -> None:
+        self._cmd_queue.put(("cam_snapshot", b"", None))
+
+    @Slot()
+    def request_cam_net(self) -> None:
+        self._cmd_queue.put(("cam_net", b"", None))
+
     @Slot(int, int)
     def request_drive(self, throttle: int, steer: int) -> None:
         self._cmd_queue.put(("drive", proto.build_drive(throttle, steer), None))
@@ -255,8 +288,8 @@ class SerialWorker(QThread):
             self._next_ping = now
             self._next_telemetry = now
 
-    def _subscribe_plan(self, optional_mask: int) -> tuple[int, int, int, int, int, int, int, int, int]:
-        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop)。"""
+    def _subscribe_plan(self, optional_mask: int) -> tuple:
+        """返回 (mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop, hz_cam_det, hz_cam_servo)。"""
         mask = proto.BASE_CHANNEL_MASK | (optional_mask & proto.OPTIONAL_CHANNEL_MASK)
         hz_line = proto.DEFAULT_SUB_LINE_HZ if optional_mask & int(proto.TelChannel.LINE_ADC) else 0
         hz_ultra = proto.DEFAULT_SUB_ULTRA_HZ if optional_mask & int(proto.TelChannel.ULTRASONIC) else 0
@@ -276,6 +309,14 @@ class SerialWorker(QThread):
         if optional_mask & int(proto.TelChannel.LINE_LOOP):
             if self._hello_info and (self._hello_info.caps & int(proto.Cap.LINE_FOLLOW)):
                 hz_line_loop = proto.DEFAULT_SUB_LINE_LOOP_HZ
+        hz_cam_det = 0
+        if optional_mask & int(proto.TelChannel.CAM_DETECT):
+            if self._hello_info and (self._hello_info.caps & int(proto.Cap.CAMERA)):
+                hz_cam_det = proto.DEFAULT_SUB_CAM_DETECT_HZ
+        hz_cam_servo = 0
+        if optional_mask & int(proto.TelChannel.CAM_SERVO):
+            if self._hello_info and (self._hello_info.caps & int(proto.Cap.CAMERA)):
+                hz_cam_servo = proto.DEFAULT_SUB_CAM_SERVO_HZ
         return (
             mask,
             proto.DEFAULT_SUB_ATT_HZ,
@@ -286,6 +327,8 @@ class SerialWorker(QThread):
             hz_angle,
             hz_distance,
             hz_line_loop,
+            hz_cam_det,
+            hz_cam_servo,
         )
 
     def _unsubscribe_optional(self) -> bool:
@@ -318,7 +361,7 @@ class SerialWorker(QThread):
             return
         if self._hello_info is None or not (self._hello_info.caps & int(proto.Cap.SUBSCRIBE)):
             return
-        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop = (
+        mask, hz_att, hz_enc, hz_line, hz_ultra, hz_motor, hz_angle, hz_distance, hz_line_loop, hz_cam_det, hz_cam_servo = (
             self._subscribe_plan(self._optional_mask)
         )
         self._wait_rx_quiet()
@@ -334,6 +377,8 @@ class SerialWorker(QThread):
                 hz_angle_loop=hz_angle,
                 hz_distance_loop=hz_distance,
                 hz_line_loop=hz_line_loop,
+                hz_cam_detect=hz_cam_det,
+                hz_cam_servo=hz_cam_servo,
             ),
             timeout=3.0,
             retries=2,
@@ -356,6 +401,10 @@ class SerialWorker(QThread):
             parts.append(f"距离@{hz_distance}Hz")
         if self._optional_mask & int(proto.TelChannel.LINE_LOOP) and hz_line_loop:
             parts.append(f"循迹环@{hz_line_loop}Hz")
+        if self._optional_mask & int(proto.TelChannel.CAM_DETECT) and hz_cam_det:
+            parts.append(f"检测@{hz_cam_det}Hz")
+        if self._optional_mask & int(proto.TelChannel.CAM_SERVO) and hz_cam_servo:
+            parts.append(f"云台@{hz_cam_servo}Hz")
         self.log.emit(f"SUBSCRIBE ok ({' + '.join(parts)})")
         self.optional_subscription_changed.emit(self._optional_mask)
 
@@ -525,6 +574,79 @@ class SerialWorker(QThread):
             elif kind == "calib_yaw":
                 if self.is_connected():
                     self._run_calib_yaw(payload)
+            elif kind == "cam_servo_center":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.CAM_SERVO_CENTER), b"", timeout=2.0, retries=2
+                    )
+                    self.log.emit(
+                        "CAM_SERVO_CENTER ok"
+                        if frame and not frame.is_nak
+                        else "CAM_SERVO_CENTER 失败"
+                    )
+            elif kind == "cam_servo_set_angle":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.CAM_SERVO_SET_ANGLE), payload, timeout=2.0, retries=2
+                    )
+                    self.log.emit(
+                        "CAM_SERVO_SET_ANGLE ok"
+                        if frame and not frame.is_nak
+                        else "CAM_SERVO_SET_ANGLE 失败"
+                    )
+            elif kind == "cam_servo_nudge":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.CAM_SERVO_NUDGE), payload, timeout=2.0, retries=2
+                    )
+                    self.log.emit(
+                        "CAM_SERVO_NUDGE ok"
+                        if frame and not frame.is_nak
+                        else "CAM_SERVO_NUDGE 失败"
+                    )
+            elif kind == "cam_detect_enable":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.CAM_DETECT_ENABLE), payload, timeout=2.0, retries=2
+                    )
+                    self.log.emit(
+                        "CAM_DETECT_ENABLE ok"
+                        if frame and not frame.is_nak
+                        else "CAM_DETECT_ENABLE 失败"
+                    )
+            elif kind == "cam_snapshot":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.GET_CAM_SNAPSHOT), b"", timeout=2.0, retries=2
+                    )
+                    if frame and not frame.is_nak:
+                        try:
+                            snap = proto.parse_cam_snapshot(frame.payload)
+                            self.cam_detect_received.emit(snap.detect)
+                            self.cam_servo_received.emit(snap.servo)
+                            self.log.emit(
+                                f"CAM_SNAPSHOT link={snap.link} "
+                                f"det={snap.detect.count} "
+                                f"pan={snap.servo.pan_deg_x100}"
+                            )
+                        except proto.ProtoError as exc:
+                            self.log.emit(f"CAM_SNAPSHOT 解析失败: {exc}")
+                    else:
+                        self.log.emit("CAM_SNAPSHOT 失败")
+            elif kind == "cam_net":
+                if self.is_connected():
+                    frame = self._send_request_retry(
+                        int(proto.Cmd.GET_CAM_NET), b"", timeout=3.0, retries=2
+                    )
+                    if frame and not frame.is_nak:
+                        try:
+                            net = proto.parse_cam_net(frame.payload)
+                            self.cam_net_received.emit(net)
+                            self.log.emit(f"CAM_NET {net.stream_url()}")
+                        except proto.ProtoError as exc:
+                            self.log.emit(f"CAM_NET 解析失败: {exc}")
+                    else:
+                        self.log.emit("CAM_NET 失败")
             elif kind == "drive":
                 if self.is_connected():
                     frame = self._send_request_retry(
@@ -966,6 +1088,10 @@ class SerialWorker(QThread):
                     self.line_loop_received.emit(proto.parse_line_loop_push(push.payload))
                 elif push.channel_id == proto.CHANNEL_ID_ENCODER:
                     self.encoder_counts_received.emit(proto.parse_encoder_push(push.payload))
+                elif push.channel_id == proto.CHANNEL_ID_CAM_DETECT:
+                    self.cam_detect_received.emit(proto.parse_cam_detect_push(push.payload))
+                elif push.channel_id == proto.CHANNEL_ID_CAM_SERVO:
+                    self.cam_servo_received.emit(proto.parse_cam_servo_push(push.payload))
                 self.push_received.emit(push)
             except proto.ProtoError as exc:
                 self.log.emit(f"推送解析失败: {exc}")

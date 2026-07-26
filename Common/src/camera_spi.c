@@ -1,6 +1,10 @@
 /**
  * @file camera_spi.c
  * @brief ESP32 Camera SPI 链路层（MCU = Slave，固定 32B）
+ *
+ * L1：HEARTBEAT role=2
+ * L2：解析/缓存 DETECT_RESULT、SERVO_TELEMETRY
+ * L3：SLAVE_HAS_CMD → CTRL_CMD → 对账 CTRL_ACK（超时重发）
  */
 
 #include "camera_spi.h"
@@ -31,6 +35,16 @@
 #define CAMERA_SPI_LOG_PERIOD_MS      (10000U)
 #endif
 #define CAMERA_SPI_HB_PAYLOAD_LEN     (8U)
+#define CAMERA_SPI_CTRL_ACK_TIMEOUT_MS (100U)
+#define CAMERA_SPI_CTRL_MAX_RETRY     (5U)
+#define CAMERA_SPI_L2_LOG_PERIOD_MS   (1000U)
+
+typedef enum {
+    CTRL_PHASE_IDLE = 0,
+    CTRL_PHASE_ADVERTISE,
+    CTRL_PHASE_EMIT,
+    CTRL_PHASE_WAIT_ACK,
+} ctrl_phase_t;
 
 typedef struct {
     bool_t ready;
@@ -41,10 +55,27 @@ typedef struct {
     camera_spi_stats_t stats;
     uint32_t bad_streak;
     uint32_t log_elapsed_ms;
+    uint32_t l2_log_elapsed_ms;
     uint16_t err_flags;
     uint8_t peer_role;
     camera_spi_link_t last_logged_link;
     bool_t wire_hint_logged;
+
+    camera_spi_detect_t detect;
+    camera_spi_servo_t servo;
+    camera_spi_net_info_t net;
+
+    ctrl_phase_t ctrl_phase;
+    camera_spi_ctrl_state_t ctrl_state;
+    uint8_t ctrl_sub_cmd;
+    uint8_t ctrl_req_id;
+    uint8_t ctrl_argc;
+    uint8_t ctrl_args[CAMERA_SPI_CTRL_ARGC_MAX];
+    uint8_t ctrl_result;
+    uint32_t ctrl_detail;
+    uint8_t ctrl_next_req_id;
+    uint8_t ctrl_retry;
+    uint32_t ctrl_deadline_ms;
 } camera_spi_ctx_t;
 
 static camera_spi_ctx_t s_cam;
@@ -179,6 +210,11 @@ static uint16_t rd_u16_le(const uint8_t *p)
     return (uint16_t)p[0] | ((uint16_t)p[1] << 8);
 }
 
+static int16_t rd_i16_le(const uint8_t *p)
+{
+    return (int16_t)rd_u16_le(p);
+}
+
 static uint32_t rd_u32_le(const uint8_t *p)
 {
     return (uint32_t)p[0] | ((uint32_t)p[1] << 8) |
@@ -199,25 +235,48 @@ static void wr_u32_le(uint8_t *p, uint32_t v)
     p[3] = (uint8_t)((v >> 24) & 0xFFU);
 }
 
-static void camera_spi_build_heartbeat(uint8_t *frame)
+static void camera_spi_frame_hdr(uint8_t *frame, uint8_t msg_id, uint8_t flags, uint8_t len)
 {
-    uint16_t crc;
-
     (void)memset(frame, 0, CAMERA_SPI_FRAME_LEN);
     wr_u16_le(&frame[0], CAMERA_SPI_MAGIC);
     frame[2] = CAMERA_SPI_PROTO_VER;
     frame[3] = s_cam.tx_seq;
-    frame[4] = CAMERA_SPI_MSG_HEARTBEAT;
-    frame[5] = 0U;
-    frame[6] = CAMERA_SPI_HB_PAYLOAD_LEN;
+    frame[4] = msg_id;
+    frame[5] = flags;
+    frame[6] = len;
     frame[7] = 0U;
+}
+
+static void camera_spi_frame_seal(uint8_t *frame)
+{
+    uint16_t crc = camera_spi_crc16(frame, CAMERA_SPI_CRC_OFF);
+    wr_u16_le(&frame[CAMERA_SPI_CRC_OFF], crc);
+    s_cam.tx_seq++;
+}
+
+static void camera_spi_build_heartbeat(uint8_t *frame, uint8_t flags)
+{
+    camera_spi_frame_hdr(frame, CAMERA_SPI_MSG_HEARTBEAT, flags, CAMERA_SPI_HB_PAYLOAD_LEN);
     wr_u32_le(&frame[8], camera_spi_now_ms());
     frame[12] = CAMERA_SPI_ROLE_MCU_SLAVE;
     frame[13] = CAMERA_SPI_PROTO_VER;
     wr_u16_le(&frame[14], s_cam.err_flags);
-    crc = camera_spi_crc16(frame, CAMERA_SPI_CRC_OFF);
-    wr_u16_le(&frame[CAMERA_SPI_CRC_OFF], crc);
-    s_cam.tx_seq++;
+    camera_spi_frame_seal(frame);
+}
+
+static void camera_spi_build_ctrl_cmd(uint8_t *frame)
+{
+    uint8_t len = (uint8_t)(4U + s_cam.ctrl_argc);
+
+    camera_spi_frame_hdr(frame, CAMERA_SPI_MSG_CTRL_CMD, 0U, len);
+    frame[8] = s_cam.ctrl_sub_cmd;
+    frame[9] = s_cam.ctrl_req_id;
+    frame[10] = s_cam.ctrl_argc;
+    frame[11] = 0U;
+    if (s_cam.ctrl_argc > 0U) {
+        (void)memcpy(&frame[12], s_cam.ctrl_args, s_cam.ctrl_argc);
+    }
+    camera_spi_frame_seal(frame);
 }
 
 static bool_t frame_is_all_val(const uint8_t *frame, uint8_t val)
@@ -236,6 +295,189 @@ static bool_t frame_is_all_zero(const uint8_t *frame)
 {
     return frame_is_all_val(frame, 0U);
 }
+
+static void camera_spi_handle_detect(const uint8_t *payload, uint8_t len)
+{
+    uint8_t count;
+    uint8_t i;
+    uint8_t need;
+
+    if (len < 6U) {
+        return;
+    }
+
+    count = payload[4];
+    if (count > CAMERA_SPI_DETECT_BOX_MAX) {
+        count = CAMERA_SPI_DETECT_BOX_MAX;
+    }
+    need = (uint8_t)(6U + (uint8_t)(count * 8U));
+    if (len < need) {
+        return;
+    }
+
+    s_cam.detect.valid = TRUE;
+    s_cam.detect.frame_w = rd_u16_le(&payload[0]);
+    s_cam.detect.frame_h = rd_u16_le(&payload[2]);
+    s_cam.detect.count = count;
+    s_cam.detect.best_index = payload[5];
+    s_cam.detect.rx_ms = camera_spi_now_ms();
+    (void)memset(s_cam.detect.box, 0, sizeof(s_cam.detect.box));
+
+    for (i = 0U; i < count; i++) {
+        const uint8_t *b = &payload[6U + (uint8_t)(i * 8U)];
+        s_cam.detect.box[i].x = rd_u16_le(&b[0]);
+        s_cam.detect.box[i].y = rd_u16_le(&b[2]);
+        s_cam.detect.box[i].w = rd_u16_le(&b[4]);
+        s_cam.detect.box[i].score_u8 = b[6];
+        s_cam.detect.box[i].class_id = b[7];
+    }
+
+    s_cam.stats.detect_rx++;
+}
+
+static void camera_spi_handle_servo(const uint8_t *payload, uint8_t len)
+{
+    if (len < 16U) {
+        return;
+    }
+
+    s_cam.servo.valid = TRUE;
+    s_cam.servo.pan_deg_x100 = rd_i16_le(&payload[0]);
+    s_cam.servo.tilt_deg_x100 = rd_i16_le(&payload[2]);
+    s_cam.servo.pan_pulse_us = rd_u16_le(&payload[4]);
+    s_cam.servo.tilt_pulse_us = rd_u16_le(&payload[6]);
+    s_cam.servo.pan_min_x100 = rd_i16_le(&payload[8]);
+    s_cam.servo.pan_max_x100 = rd_i16_le(&payload[10]);
+    s_cam.servo.tilt_min_x100 = rd_i16_le(&payload[12]);
+    s_cam.servo.tilt_max_x100 = rd_i16_le(&payload[14]);
+    s_cam.servo.rx_ms = camera_spi_now_ms();
+    s_cam.stats.servo_rx++;
+}
+
+static void camera_spi_handle_net_info(const uint8_t *payload, uint8_t len)
+{
+    if (len < 10U) {
+        return;
+    }
+
+    s_cam.net.valid = TRUE;
+    s_cam.net.ipv4 = rd_u32_le(&payload[0]);
+    s_cam.net.http_port = rd_u16_le(&payload[4]);
+    s_cam.net.wifi_mode = payload[6];
+    s_cam.net.flags = payload[7];
+    s_cam.net.stream_path_id = payload[8];
+    s_cam.net.rx_ms = camera_spi_now_ms();
+    s_cam.stats.net_rx++;
+}
+
+static void camera_spi_handle_ctrl_ack(const uint8_t *payload, uint8_t len)
+{
+    uint8_t sub_cmd;
+    uint8_t req_id;
+    uint8_t result;
+
+    if (len < 4U) {
+        return;
+    }
+    if (s_cam.ctrl_phase != CTRL_PHASE_WAIT_ACK) {
+        return;
+    }
+
+    sub_cmd = payload[0];
+    req_id = payload[1];
+    result = payload[2];
+    if ((sub_cmd != s_cam.ctrl_sub_cmd) || (req_id != s_cam.ctrl_req_id)) {
+        return;
+    }
+
+    s_cam.ctrl_result = result;
+    s_cam.ctrl_detail = (len >= 8U) ? rd_u32_le(&payload[4]) : 0U;
+    s_cam.ctrl_phase = CTRL_PHASE_IDLE;
+    s_cam.ctrl_state = CAMERA_SPI_CTRL_DONE;
+
+    if (result == CAMERA_SPI_CTRL_RESULT_OK) {
+        s_cam.stats.ctrl_ack_ok++;
+        s_cam.err_flags &= (uint16_t)~CAMERA_SPI_ERR_CTRL_REJECTED_RECENT;
+        LOG_INFO("cam_spi CTRL_ACK ok sub=0x%02X req=%u",
+                 (unsigned)sub_cmd, (unsigned)req_id);
+    } else {
+        s_cam.stats.ctrl_ack_fail++;
+        s_cam.err_flags |= CAMERA_SPI_ERR_CTRL_REJECTED_RECENT;
+        LOG_WARN("cam_spi CTRL_ACK fail sub=0x%02X req=%u result=%u detail=%lu",
+                 (unsigned)sub_cmd, (unsigned)req_id, (unsigned)result,
+                 (unsigned long)s_cam.ctrl_detail);
+    }
+}
+
+static void camera_spi_ctrl_on_exchange_done(void)
+{
+    if (s_cam.ctrl_phase == CTRL_PHASE_ADVERTISE) {
+        /* 上一拍 MISO 已带 SLAVE_HAS_CMD，本拍装 CTRL_CMD */
+        s_cam.ctrl_phase = CTRL_PHASE_EMIT;
+    } else if (s_cam.ctrl_phase == CTRL_PHASE_EMIT) {
+        s_cam.ctrl_phase = CTRL_PHASE_WAIT_ACK;
+        s_cam.ctrl_deadline_ms = camera_spi_now_ms() + CAMERA_SPI_CTRL_ACK_TIMEOUT_MS;
+    }
+}
+
+static void camera_spi_ctrl_tick(void)
+{
+    uint32_t now;
+
+    if (s_cam.ctrl_phase != CTRL_PHASE_WAIT_ACK) {
+        return;
+    }
+
+    now = camera_spi_now_ms();
+    if ((int32_t)(now - s_cam.ctrl_deadline_ms) < 0) {
+        return;
+    }
+
+    if (s_cam.ctrl_retry < CAMERA_SPI_CTRL_MAX_RETRY) {
+        s_cam.ctrl_retry++;
+        s_cam.ctrl_phase = CTRL_PHASE_ADVERTISE;
+        LOG_WARN("cam_spi CTRL retry %u/%u sub=0x%02X req=%u",
+                 (unsigned)s_cam.ctrl_retry, (unsigned)CAMERA_SPI_CTRL_MAX_RETRY,
+                 (unsigned)s_cam.ctrl_sub_cmd, (unsigned)s_cam.ctrl_req_id);
+        return;
+    }
+
+    s_cam.ctrl_phase = CTRL_PHASE_IDLE;
+    s_cam.ctrl_state = CAMERA_SPI_CTRL_TIMEOUT;
+    s_cam.stats.ctrl_timeout++;
+    s_cam.err_flags |= CAMERA_SPI_ERR_CTRL_REJECTED_RECENT;
+    LOG_WARN("cam_spi CTRL timeout sub=0x%02X req=%u",
+             (unsigned)s_cam.ctrl_sub_cmd, (unsigned)s_cam.ctrl_req_id);
+}
+
+static void camera_spi_dispatch_msg(uint8_t msg_id, const uint8_t *payload, uint8_t len)
+{
+    switch (msg_id) {
+    case CAMERA_SPI_MSG_HEARTBEAT:
+        if (len >= 8U) {
+            (void)rd_u32_le(&payload[0]);
+            s_cam.peer_role = payload[4];
+        }
+        break;
+    case CAMERA_SPI_MSG_STATUS:
+        /* 计数由本端维护；STATUS 仅确认对端在线 */
+        break;
+    case CAMERA_SPI_MSG_NET_INFO:
+        camera_spi_handle_net_info(payload, len);
+        break;
+    case CAMERA_SPI_MSG_DETECT:
+        camera_spi_handle_detect(payload, len);
+        break;
+    case CAMERA_SPI_MSG_SERVO:
+        camera_spi_handle_servo(payload, len);
+        break;
+    case CAMERA_SPI_MSG_CTRL_ACK:
+        camera_spi_handle_ctrl_ack(payload, len);
+        break;
+    default:
+        break;
+    }
+}
 #endif
 
 static void camera_spi_refresh_tx(void)
@@ -243,7 +485,13 @@ static void camera_spi_refresh_tx(void)
 #if CAMERA_SPI_WIRE_TEST
     camera_spi_build_wire_tx(s_cam.tx_frame);
 #else
-    camera_spi_build_heartbeat(s_cam.tx_frame);
+    if (s_cam.ctrl_phase == CTRL_PHASE_EMIT) {
+        camera_spi_build_ctrl_cmd(s_cam.tx_frame);
+    } else if (s_cam.ctrl_phase == CTRL_PHASE_ADVERTISE) {
+        camera_spi_build_heartbeat(s_cam.tx_frame, CAMERA_SPI_FLAG_SLAVE_HAS_CMD);
+    } else {
+        camera_spi_build_heartbeat(s_cam.tx_frame, 0U);
+    }
 #endif
     (void)bsp_spi_slave_load_tx(BOARD_SPI_CFG.base, s_cam.tx_frame);
 }
@@ -292,7 +540,7 @@ static bool_t camera_spi_handle_rx(const uint8_t *frame)
         if (s_cam.wire_hint_logged == FALSE) {
             if (frame_is_all_zero(frame) != FALSE) {
                 s_cam.wire_hint_logged = TRUE;
-                LOG_WARN("cam_spi: RX=00 MOSI open? ESP47(MOSI)<->PA4");
+                LOG_WARN("cam_spi: RX=00 MOSI open? ESP45(MOSI)<->PA4");
             } else if (frame_is_all_val(frame, 0x5AU) != FALSE) {
                 s_cam.wire_hint_logged = TRUE;
                 LOG_WARN("cam_spi: RX=5A*32 (L0 leftover?). want 5A A5 HEARTBEAT Mode1");
@@ -322,14 +570,7 @@ static bool_t camera_spi_handle_rx(const uint8_t *frame)
     s_cam.stats.last_msg_id = msg_id;
     s_cam.stats.last_flags = frame[5];
     camera_spi_update_link(TRUE);
-
-    if (msg_id == CAMERA_SPI_MSG_HEARTBEAT) {
-        if (len >= 8U) {
-            (void)rd_u32_le(&frame[8]);
-            s_cam.peer_role = frame[12];
-        }
-    }
-
+    camera_spi_dispatch_msg(msg_id, &frame[8], len);
     return TRUE;
 #endif
 }
@@ -346,6 +587,39 @@ static const char *camera_spi_link_str(camera_spi_link_t link)
         return "DOWN";
     }
 }
+
+#if !CAMERA_SPI_WIRE_TEST
+static void camera_spi_log_l2(uint32_t dt_ms)
+{
+    s_cam.l2_log_elapsed_ms += dt_ms;
+    if (s_cam.l2_log_elapsed_ms < CAMERA_SPI_L2_LOG_PERIOD_MS) {
+        return;
+    }
+    s_cam.l2_log_elapsed_ms = 0U;
+
+    if (s_cam.stats.link != CAMERA_SPI_LINK_OK) {
+        return;
+    }
+
+    if (s_cam.detect.valid != FALSE) {
+        const camera_spi_box_t *b0 = &s_cam.detect.box[0];
+        LOG_INFO("cam_spi DETECT n=%u best=%u %ux%u box0=(%u,%u,w=%u sc=%u cls=%u)",
+                 (unsigned)s_cam.detect.count,
+                 (unsigned)s_cam.detect.best_index,
+                 (unsigned)s_cam.detect.frame_w,
+                 (unsigned)s_cam.detect.frame_h,
+                 (unsigned)b0->x, (unsigned)b0->y, (unsigned)b0->w,
+                 (unsigned)b0->score_u8, (unsigned)b0->class_id);
+    }
+
+    if (s_cam.servo.valid != FALSE) {
+        LOG_INFO("cam_spi SERVO pan=%d tilt=%d pulse=%u/%u",
+                 (int)s_cam.servo.pan_deg_x100, (int)s_cam.servo.tilt_deg_x100,
+                 (unsigned)s_cam.servo.pan_pulse_us,
+                 (unsigned)s_cam.servo.tilt_pulse_us);
+    }
+}
+#endif
 
 static void camera_spi_log_periodic(uint32_t dt_ms)
 {
@@ -399,7 +673,10 @@ static void camera_spi_log_periodic(uint32_t dt_ms)
         if (changed != FALSE) {
             s_cam.last_logged_link = link;
             if (link == CAMERA_SPI_LINK_OK) {
-                LOG_INFO("cam_spi link=OK peer_role=%u", (unsigned)s_cam.peer_role);
+                LOG_INFO("cam_spi link=OK peer_role=%u det=%u servo=%u",
+                         (unsigned)s_cam.peer_role,
+                         (unsigned)s_cam.stats.detect_rx,
+                         (unsigned)s_cam.stats.servo_rx);
             } else {
                 LOG_WARN("cam_spi link=%s ok=%lu mag=%lu crc=%lu peer_role=%u",
                          camera_spi_link_str(link),
@@ -460,11 +737,14 @@ status_t camera_spi_init(void)
     (void)memset(&s_cam, 0, sizeof(s_cam));
     s_cam.stats.link = CAMERA_SPI_LINK_DOWN;
     s_cam.last_logged_link = CAMERA_SPI_LINK_DOWN;
+    s_cam.ctrl_next_req_id = 1U;
+    s_cam.ctrl_state = CAMERA_SPI_CTRL_IDLE;
+    s_cam.ctrl_phase = CTRL_PHASE_IDLE;
 
 #if CAMERA_SPI_WIRE_TEST
     camera_spi_build_wire_tx(s_cam.tx_frame);
 #else
-    camera_spi_build_heartbeat(s_cam.tx_frame);
+    camera_spi_build_heartbeat(s_cam.tx_frame, 0U);
 #endif
     if (!bsp_spi_slave_start(BOARD_SPI_CFG.base, s_cam.tx_frame, NULL, NULL)) {
         LOG_ERROR("cam_spi: slave_start fail");
@@ -475,7 +755,7 @@ status_t camera_spi_init(void)
 #if CAMERA_SPI_WIRE_TEST
     LOG_INFO("cam_spi L0 WIRE_TEST Mode1 TX=A5x32");
 #else
-    LOG_INFO("cam_spi ready Mode1 HB role=2");
+    LOG_INFO("cam_spi ready Mode1 HB role=2 L2/L3");
 #endif
     return STATUS_OK;
 }
@@ -492,12 +772,23 @@ void camera_spi_poll(void)
     }
 
     if (bsp_spi_slave_take_rx(BOARD_SPI_CFG.base, s_cam.rx_frame)) {
-        (void)camera_spi_handle_rx(s_cam.rx_frame);
+        if (camera_spi_handle_rx(s_cam.rx_frame) != FALSE) {
+#if !CAMERA_SPI_WIRE_TEST
+            camera_spi_ctrl_on_exchange_done();
+#endif
+        }
         camera_spi_refresh_tx();
     }
 
+#if !CAMERA_SPI_WIRE_TEST
+    camera_spi_ctrl_tick();
+#endif
+
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         camera_spi_log_periodic(20U);
+#if !CAMERA_SPI_WIRE_TEST
+        camera_spi_log_l2(20U);
+#endif
     }
 }
 
@@ -510,5 +801,144 @@ status_t camera_spi_get_stats(camera_spi_stats_t *out)
         return STATUS_INVALID_STATE;
     }
     *out = s_cam.stats;
+    out->peer_role = s_cam.peer_role;
     return STATUS_OK;
+}
+
+status_t camera_spi_get_detect(camera_spi_detect_t *out)
+{
+    if (out == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+    if (s_cam.ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    *out = s_cam.detect;
+    return STATUS_OK;
+}
+
+status_t camera_spi_get_servo(camera_spi_servo_t *out)
+{
+    if (out == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+    if (s_cam.ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    *out = s_cam.servo;
+    return STATUS_OK;
+}
+
+status_t camera_spi_get_net_info(camera_spi_net_info_t *out)
+{
+    if (out == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+    if (s_cam.ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    *out = s_cam.net;
+    return STATUS_OK;
+}
+
+status_t camera_spi_get_ctrl_status(camera_spi_ctrl_status_t *out)
+{
+    if (out == NULL) {
+        return STATUS_INVALID_ARG;
+    }
+    if (s_cam.ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+    out->state = s_cam.ctrl_state;
+    out->sub_cmd = s_cam.ctrl_sub_cmd;
+    out->req_id = s_cam.ctrl_req_id;
+    out->result = s_cam.ctrl_result;
+    out->detail = s_cam.ctrl_detail;
+    return STATUS_OK;
+}
+
+status_t camera_spi_ctrl_send(uint8_t sub_cmd, const uint8_t *args, uint8_t argc)
+{
+    if (s_cam.ready == FALSE) {
+        return STATUS_INVALID_STATE;
+    }
+#if CAMERA_SPI_WIRE_TEST
+    (void)sub_cmd;
+    (void)args;
+    (void)argc;
+    return STATUS_NOT_SUPPORTED;
+#else
+    if (argc > CAMERA_SPI_CTRL_ARGC_MAX) {
+        return STATUS_INVALID_ARG;
+    }
+    if ((argc > 0U) && (args == NULL)) {
+        return STATUS_INVALID_ARG;
+    }
+    if (s_cam.stats.link != CAMERA_SPI_LINK_OK) {
+        return STATUS_INVALID_STATE;
+    }
+    if (s_cam.ctrl_phase != CTRL_PHASE_IDLE) {
+        return STATUS_INVALID_STATE;
+    }
+
+    s_cam.ctrl_sub_cmd = sub_cmd;
+    s_cam.ctrl_req_id = s_cam.ctrl_next_req_id;
+    if (s_cam.ctrl_next_req_id == 0xFFU) {
+        s_cam.ctrl_next_req_id = 1U;
+    } else {
+        s_cam.ctrl_next_req_id++;
+    }
+    s_cam.ctrl_argc = argc;
+    if (argc > 0U) {
+        (void)memcpy(s_cam.ctrl_args, args, argc);
+    }
+    s_cam.ctrl_result = 0U;
+    s_cam.ctrl_detail = 0U;
+    s_cam.ctrl_retry = 0U;
+    s_cam.ctrl_state = CAMERA_SPI_CTRL_PENDING;
+    s_cam.ctrl_phase = CTRL_PHASE_ADVERTISE;
+
+    /* 立即预装带 SLAVE_HAS_CMD 的心跳，供下一拍 CS 前发出 */
+    camera_spi_refresh_tx();
+
+    LOG_INFO("cam_spi CTRL_CMD queue sub=0x%02X req=%u argc=%u",
+             (unsigned)sub_cmd, (unsigned)s_cam.ctrl_req_id, (unsigned)argc);
+    return STATUS_OK;
+#endif
+}
+
+status_t camera_spi_ctrl_detect_enable(uint8_t on)
+{
+    uint8_t arg = (on != 0U) ? 1U : 0U;
+    return camera_spi_ctrl_send(CAMERA_SPI_CTRL_DETECT_ENABLE, &arg, 1U);
+}
+
+status_t camera_spi_ctrl_servo_center(void)
+{
+    return camera_spi_ctrl_send(CAMERA_SPI_CTRL_SERVO_CENTER, NULL, 0U);
+}
+
+status_t camera_spi_ctrl_servo_set_angle(uint8_t ch, int16_t deg_x100)
+{
+    uint8_t args[3];
+
+    args[0] = ch;
+    args[1] = (uint8_t)((uint16_t)deg_x100 & 0xFFU);
+    args[2] = (uint8_t)(((uint16_t)deg_x100 >> 8) & 0xFFU);
+    return camera_spi_ctrl_send(CAMERA_SPI_CTRL_SERVO_SET_ANGLE, args, 3U);
+}
+
+status_t camera_spi_ctrl_servo_nudge(uint8_t ch, int16_t delta_x100)
+{
+    uint8_t args[3];
+
+    args[0] = ch;
+    args[1] = (uint8_t)((uint16_t)delta_x100 & 0xFFU);
+    args[2] = (uint8_t)(((uint16_t)delta_x100 >> 8) & 0xFFU);
+    return camera_spi_ctrl_send(CAMERA_SPI_CTRL_SERVO_NUDGE, args, 3U);
+}
+
+status_t camera_spi_request_net_info(void)
+{
+    return camera_spi_ctrl_send(CAMERA_SPI_CTRL_GET_NET_INFO, NULL, 0U);
 }

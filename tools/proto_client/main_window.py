@@ -32,6 +32,7 @@ from PySide6.QtWidgets import (
 from serial_worker import SerialWorker, list_serial_ports, load_schema
 from ui.dashboard_tab import DashboardTab
 from ui.drive_tab import DriveTab
+from ui.camera_tab import CameraTab
 from ui.param_panel import ParamPanel
 from ui.pid_tuning_tab import PidTuningTab
 from ui.plot_tab import PlotTab, deg_to_180
@@ -152,6 +153,7 @@ class MainWindow(QMainWindow):
         )
         self._drive = DriveTab(self._worker)
         self._pid_tuning = PidTuningTab(self._worker)
+        self._camera = CameraTab(self._worker)
 
         self._dashboard.subscribe_panel.changed.connect(self._on_subscribe_apply)
 
@@ -159,6 +161,7 @@ class MainWindow(QMainWindow):
         tabs.addTab(self._plot, "姿态 / 循迹 / 速度")
         tabs.addTab(self._pid_tuning, "PID 整定")
         tabs.addTab(self._drive, "遥控")
+        tabs.addTab(self._camera, "相机 / 云台")
         self._apply_motor_count(int(self._chassis_combo.currentData()))
         return tabs
 

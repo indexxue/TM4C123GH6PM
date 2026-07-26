@@ -61,6 +61,12 @@
 | DISTANCE_STOP | `0x0038` | 主机→设备 | 停止距离环 |
 | **SET_LINE_FOLLOW** | **`0x0039`** | 主机→设备 | **启动循迹环** |
 | **LINE_FOLLOW_STOP** | **`0x003A`** | 主机→设备 | **停止循迹环** |
+| **CAM_SERVO_CENTER** | **`0x0040`** | 主机→设备 | 云台回中（SPI CTRL） |
+| **CAM_SERVO_SET_ANGLE** | **`0x0041`** | 主机→设备 | `[ch u8][deg_x100 i16]` |
+| **CAM_SERVO_NUDGE** | **`0x0042`** | 主机→设备 | `[ch u8][delta_x100 i16]` |
+| **CAM_DETECT_ENABLE** | **`0x0043`** | 主机→设备 | `[on u8]` |
+| **GET_CAM_SNAPSHOT** | **`0x0044`** | 主机→设备 | link+detect+servo 快照 |
+| **GET_CAM_NET** | **`0x0045`** | 主机→设备 | 图传入口 IP/端口/path_id |
 | TELEMETRY_PUSH | `0x8011` | 设备→主机 | 订阅推送载体 |
 
 ### 3.1 HELLO 应答 Payload
@@ -85,6 +91,7 @@
 | 6 | YAW_CALIB | 支持航向标定 |
 | 7 | DISTANCE_LOOP | 支持距离环 |
 | 8 | **LINE_FOLLOW** | **支持循迹环 SET_LINE_FOLLOW** |
+| 9 | **CAMERA** | **支持相机 SPI（舵机/检测/图传入口）** |
 
 ---
 
@@ -159,6 +166,8 @@ format=1: 01 50 00 00 00 78 00 00 00
 | 9 | u8 | **可选** 角度环 Hz |
 | 10 | u8 | **可选** 距离环 Hz |
 | 11 | u8 | **可选** 循迹环 Hz（默认 10） |
+| 12 | u8 | **可选** 相机检测 Hz（默认 10） |
+| 13 | u8 | **可选** 云台遥测 Hz（默认 10） |
 
 **常驻推送（固件启动后自动，无需订阅）**：
 
@@ -178,6 +187,8 @@ format=1: 01 50 00 00 00 78 00 00 00
 | 6 | 角度环 | 6 |
 | 7 | 距离环 | 7 |
 | **8** | **循迹环** | **8** |
+| **9** | **相机检测** | **9** |
+| **10** | **云台遥测** | **10** |
 
 `SUBSCRIBE` 中 **bit1/bit2** 仅用于调整常驻通道 Hz；`UNSUBSCRIBE 0xFFFFFFFF` 只清除可选通道，不停姿态/编码器。
 
@@ -326,6 +337,54 @@ cd tools\proto_client
 | 姿态 / 循迹 | 实时曲线 |
 | **速度调试** | SET_SPEED、RPM 曲线、pid_speed / spd_limit 联动 |
 | 遥控 | DRIVE |
+| **相机 / 云台** | CAM_SERVO_*、检测推送、GET_CAM_NET + HTTP JPEG 预览 |
+
+CLI 示例：
+
+```text
+python cli.py COM7 cam-center
+python cli.py COM7 cam-snapshot
+python cli.py COM7 cam-net
+```
+
+---
+
+## 10. 相机命令载荷
+
+### 10.1 GET_CAM_SNAPSHOT 应答（34 B）
+
+| 偏移 | 字段 |
+|------|------|
+| 0 | link u8 |
+| 1 | peer_role u8 |
+| 2 | detect_valid u8 |
+| 3 | count u8 |
+| 4 | best_index u8 |
+| 5..6 | frame_w u16 |
+| 7..8 | frame_h u16 |
+| 9..24 | box0+box1（各 8B） |
+| 25 | servo_valid u8 |
+| 26..27 | pan_deg_x100 i16 |
+| 28..29 | tilt_deg_x100 i16 |
+| 30..31 | pan_pulse_us u16 |
+| 32..33 | tilt_pulse_us u16 |
+
+### 10.2 GET_CAM_NET 应答（10 B）
+
+| 偏移 | 字段 |
+|------|------|
+| 0..3 | ipv4 u32 LE |
+| 4..5 | http_port u16 |
+| 6 | wifi_mode u8 |
+| 7 | flags u8 |
+| 8 | stream_path_id u8 |
+| 9 | valid u8 |
+
+上位机组 URL：`http://a.b.c.d:port/api/camera/stream.mjpg`（path_id=0）。图像走 WiFi，不经蓝牙。
+
+### 10.3 推送 ch=9 / ch=10
+
+与固件 `proto_push_cam_detect` / `proto_push_cam_servo` 一致：`[ch][uptime u32][body…]`。
 | 参数面板 | schema.json 全部 NVS 参数 |
 
 分层架构见 [`tools/proto_client/README.md`](../tools/proto_client/README.md)。

@@ -8,6 +8,7 @@
 #include "attitude.h"
 #include "battery.h"
 #include "board.h"
+#include "camera_spi.h"
 #include "chassis.h"
 #include "cfg.h"
 #include "device_profile.h"
@@ -62,6 +63,12 @@
 #define PROTO_CMD_DISTANCE_STOP     0x0038U
 #define PROTO_CMD_SET_LINE_FOLLOW   0x0039U
 #define PROTO_CMD_LINE_FOLLOW_STOP  0x003AU
+#define PROTO_CMD_CAM_SERVO_CENTER  0x0040U
+#define PROTO_CMD_CAM_SERVO_SET_ANGLE 0x0041U
+#define PROTO_CMD_CAM_SERVO_NUDGE   0x0042U
+#define PROTO_CMD_CAM_DETECT_ENABLE 0x0043U
+#define PROTO_CMD_GET_CAM_SNAPSHOT  0x0044U
+#define PROTO_CMD_GET_CAM_NET       0x0045U
 
 #define PROTO_ERR_UNKNOWN_CMD       0x02U
 #define PROTO_ERR_BAD_LEN           0x03U
@@ -81,6 +88,7 @@
 #define PROTO_CAP_YAW_CALIB         (1U << 6)
 #define PROTO_CAP_DISTANCE_LOOP     (1U << 7)
 #define PROTO_CAP_LINE_FOLLOW       (1U << 8)
+#define PROTO_CAP_CAMERA            (1U << 9)
 
 #define PROTO_CH_BATTERY            (1U << 0)
 #define PROTO_CH_ATTITUDE           (1U << 1)
@@ -91,11 +99,13 @@
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
 #define PROTO_CH_DISTANCE_LOOP      (1U << 7)
 #define PROTO_CH_LINE_LOOP          (1U << 8)
+#define PROTO_CH_CAM_DETECT         (1U << 9)
+#define PROTO_CH_CAM_SERVO          (1U << 10)
 
 #define PROTO_BASE_MASK             (PROTO_CH_ATTITUDE | PROTO_CH_ENCODER)
 #define PROTO_OPTIONAL_MASK         (PROTO_CH_BATTERY | PROTO_CH_LINE_ADC | PROTO_CH_ULTRASONIC | \
                                      PROTO_CH_MOTOR_RPM | PROTO_CH_ANGLE_LOOP | PROTO_CH_DISTANCE_LOOP | \
-                                     PROTO_CH_LINE_LOOP)
+                                     PROTO_CH_LINE_LOOP | PROTO_CH_CAM_DETECT | PROTO_CH_CAM_SERVO)
 
 #define PROTO_PUSH_CH_BATTERY       0U
 #define PROTO_PUSH_CH_ATTITUDE      1U
@@ -106,6 +116,8 @@
 #define PROTO_PUSH_CH_ANGLE_LOOP    6U
 #define PROTO_PUSH_CH_DISTANCE_LOOP 7U
 #define PROTO_PUSH_CH_LINE_LOOP     8U
+#define PROTO_PUSH_CH_CAM_DETECT    9U
+#define PROTO_PUSH_CH_CAM_SERVO     10U
 
 #define PROTO_DEFAULT_HZ_ATT        10U
 #define PROTO_DEFAULT_HZ_ENC        5U
@@ -116,6 +128,8 @@
 #define PROTO_DEFAULT_HZ_ANGLE_LOOP 10U
 #define PROTO_DEFAULT_HZ_DISTANCE_LOOP 10U
 #define PROTO_DEFAULT_HZ_LINE_LOOP  10U
+#define PROTO_DEFAULT_HZ_CAM_DETECT 10U
+#define PROTO_DEFAULT_HZ_CAM_SERVO  10U
 #define PROTO_PUSH_SUPPRESS_MS      280U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT0_MS  350U
 #define PROTO_PUSH_SUPPRESS_SET_SPEED_FMT_LR_MS 350U
@@ -193,6 +207,8 @@ static struct {
     uint8_t hz_angle_loop;
     uint8_t hz_distance_loop;
     uint8_t hz_line_loop;
+    uint8_t hz_cam_detect;
+    uint8_t hz_cam_servo;
     uint32_t acc_batt_ms;
     uint32_t acc_line_ms;
     uint32_t acc_ultra_ms;
@@ -200,6 +216,8 @@ static struct {
     uint32_t acc_angle_loop_ms;
     uint32_t acc_distance_loop_ms;
     uint32_t acc_line_loop_ms;
+    uint32_t acc_cam_detect_ms;
+    uint32_t acc_cam_servo_ms;
 } s_sub;
 
 static bool_t s_ultra_ready;
@@ -1126,6 +1144,55 @@ static void proto_push_ultrasonic(void)
     proto_push_frame(payload, (uint16_t)sizeof(payload));
 }
 
+static void proto_push_cam_detect(void)
+{
+    camera_spi_detect_t det;
+    uint8_t payload[5U + 1U + 1U + 1U + 2U + 2U + 16U];
+    uint8_t i;
+
+    (void)memset(&det, 0, sizeof(det));
+    (void)camera_spi_get_detect(&det);
+
+    payload[0] = PROTO_PUSH_CH_CAM_DETECT;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    payload[5] = (det.valid != FALSE) ? 1U : 0U;
+    payload[6] = det.count;
+    payload[7] = det.best_index;
+    proto_put_u16(&payload[8], det.frame_w);
+    proto_put_u16(&payload[10], det.frame_h);
+    for (i = 0U; i < 2U; i++) {
+        uint8_t *b = &payload[12U + (i * 8U)];
+        proto_put_u16(&b[0], det.box[i].x);
+        proto_put_u16(&b[2], det.box[i].y);
+        proto_put_u16(&b[4], det.box[i].w);
+        b[6] = det.box[i].score_u8;
+        b[7] = det.box[i].class_id;
+    }
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
+static void proto_push_cam_servo(void)
+{
+    camera_spi_servo_t servo;
+    uint8_t payload[5U + 1U + 16U];
+
+    (void)memset(&servo, 0, sizeof(servo));
+    (void)camera_spi_get_servo(&servo);
+
+    payload[0] = PROTO_PUSH_CH_CAM_SERVO;
+    proto_put_u32(&payload[1], proto_uptime_ms());
+    payload[5] = (servo.valid != FALSE) ? 1U : 0U;
+    proto_put_i16(&payload[6], servo.pan_deg_x100);
+    proto_put_i16(&payload[8], servo.tilt_deg_x100);
+    proto_put_u16(&payload[10], servo.pan_pulse_us);
+    proto_put_u16(&payload[12], servo.tilt_pulse_us);
+    proto_put_i16(&payload[14], servo.pan_min_x100);
+    proto_put_i16(&payload[16], servo.pan_max_x100);
+    proto_put_i16(&payload[18], servo.tilt_min_x100);
+    proto_put_i16(&payload[20], servo.tilt_max_x100);
+    proto_push_frame(payload, (uint16_t)sizeof(payload));
+}
+
 /* -------------------------------------------------------------------------- */
 /* 遥控                                                                       */
 /* -------------------------------------------------------------------------- */
@@ -1178,6 +1245,10 @@ static uint32_t proto_caps(void)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
         caps |= PROTO_CAP_YAW_CALIB;
     }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH) &&
+        (camera_spi_is_ready() != FALSE)) {
+        caps |= PROTO_CAP_CAMERA;
+    }
     return caps;
 }
 
@@ -1228,6 +1299,8 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     uint8_t hz_angle_loop;
     uint8_t hz_distance_loop;
     uint8_t hz_line_loop;
+    uint8_t hz_cam_detect;
+    uint8_t hz_cam_servo;
 
     if (len < 4U) {
         proto_reply_nak(PROTO_CMD_SUBSCRIBE, seq, PROTO_ERR_BAD_LEN);
@@ -1276,6 +1349,20 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     } else {
         hz_line_loop = 0U;
     }
+    if (len >= 13U) {
+        hz_cam_detect = payload[12];
+    } else if ((mask & PROTO_CH_CAM_DETECT) != 0U) {
+        hz_cam_detect = PROTO_DEFAULT_HZ_CAM_DETECT;
+    } else {
+        hz_cam_detect = 0U;
+    }
+    if (len >= 14U) {
+        hz_cam_servo = payload[13];
+    } else if ((mask & PROTO_CH_CAM_SERVO) != 0U) {
+        hz_cam_servo = PROTO_DEFAULT_HZ_CAM_SERVO;
+    } else {
+        hz_cam_servo = 0U;
+    }
 
     /* 先 ACK 再开推送，避免与应答争用 TX 互斥/共享缓冲 */
     proto_reply_ack(PROTO_CMD_SUBSCRIBE, seq, NULL, 0U);
@@ -1301,6 +1388,8 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     s_sub.hz_angle_loop = hz_angle_loop;
     s_sub.hz_distance_loop = hz_distance_loop;
     s_sub.hz_line_loop = hz_line_loop;
+    s_sub.hz_cam_detect = hz_cam_detect;
+    s_sub.hz_cam_servo = hz_cam_servo;
     s_sub.acc_batt_ms = 0U;
     s_sub.acc_line_ms = 0U;
     s_sub.acc_ultra_ms = 0U;
@@ -1308,6 +1397,8 @@ static void proto_handle_subscribe(uint8_t seq, const uint8_t *payload, uint16_t
     s_sub.acc_angle_loop_ms = 0U;
     s_sub.acc_distance_loop_ms = 0U;
     s_sub.acc_line_loop_ms = 0U;
+    s_sub.acc_cam_detect_ms = 0U;
+    s_sub.acc_cam_servo_ms = 0U;
 }
 
 static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16_t len)
@@ -1330,6 +1421,8 @@ static void proto_handle_unsubscribe(uint8_t seq, const uint8_t *payload, uint16
     s_sub.acc_motor_rpm_ms = 0U;
     s_sub.acc_angle_loop_ms = 0U;
     s_sub.acc_distance_loop_ms = 0U;
+    s_sub.acc_cam_detect_ms = 0U;
+    s_sub.acc_cam_servo_ms = 0U;
     proto_reply_ack(PROTO_CMD_UNSUBSCRIBE, seq, NULL, 0U);
 }
 
@@ -1756,6 +1849,193 @@ static void proto_handle_calib_yaw(uint8_t seq, const uint8_t *payload, uint16_t
     proto_reply_ack(PROTO_CMD_CALIB_YAW, seq, ack, (uint16_t)sizeof(ack));
 }
 
+static uint8_t proto_cam_st_to_err(status_t st)
+{
+    if (st == STATUS_OK) {
+        return 0U;
+    }
+    if (st == STATUS_INVALID_ARG) {
+        return PROTO_ERR_PARAM_VALUE_INVALID;
+    }
+    if (st == STATUS_NOT_SUPPORTED) {
+        return PROTO_ERR_UNSUPPORTED;
+    }
+    if ((st == STATUS_INVALID_STATE) || (st == STATUS_TIMEOUT)) {
+        return PROTO_ERR_BUSY;
+    }
+    return PROTO_ERR_UNSUPPORTED;
+}
+
+static void proto_handle_cam_servo_center(uint8_t seq)
+{
+    status_t st;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_CENTER, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    st = camera_spi_ctrl_servo_center();
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_CENTER, seq, proto_cam_st_to_err(st));
+        return;
+    }
+    proto_reply_ack(PROTO_CMD_CAM_SERVO_CENTER, seq, NULL, 0U);
+}
+
+static void proto_handle_cam_servo_set_angle(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    status_t st;
+    uint8_t ch;
+    int16_t deg;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_SET_ANGLE, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 3U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_SET_ANGLE, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+    ch = payload[0];
+    deg = proto_get_i16(&payload[1]);
+    if (ch > 1U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_SET_ANGLE, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+    st = camera_spi_ctrl_servo_set_angle(ch, deg);
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_SET_ANGLE, seq, proto_cam_st_to_err(st));
+        return;
+    }
+    proto_reply_ack(PROTO_CMD_CAM_SERVO_SET_ANGLE, seq, NULL, 0U);
+}
+
+static void proto_handle_cam_servo_nudge(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    status_t st;
+    uint8_t ch;
+    int16_t delta;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_NUDGE, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 3U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_NUDGE, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+    ch = payload[0];
+    delta = proto_get_i16(&payload[1]);
+    if (ch > 1U) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_NUDGE, seq, PROTO_ERR_PARAM_VALUE_INVALID);
+        return;
+    }
+    st = camera_spi_ctrl_servo_nudge(ch, delta);
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_CAM_SERVO_NUDGE, seq, proto_cam_st_to_err(st));
+        return;
+    }
+    proto_reply_ack(PROTO_CMD_CAM_SERVO_NUDGE, seq, NULL, 0U);
+}
+
+static void proto_handle_cam_detect_enable(uint8_t seq, const uint8_t *payload, uint16_t len)
+{
+    status_t st;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_CAM_DETECT_ENABLE, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+    if (len < 1U) {
+        proto_reply_nak(PROTO_CMD_CAM_DETECT_ENABLE, seq, PROTO_ERR_BAD_LEN);
+        return;
+    }
+    st = camera_spi_ctrl_detect_enable(payload[0]);
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_CAM_DETECT_ENABLE, seq, proto_cam_st_to_err(st));
+        return;
+    }
+    proto_reply_ack(PROTO_CMD_CAM_DETECT_ENABLE, seq, NULL, 0U);
+}
+
+static void proto_handle_get_cam_snapshot(uint8_t seq)
+{
+    camera_spi_stats_t stats;
+    camera_spi_detect_t det;
+    camera_spi_servo_t servo;
+    uint8_t payload[48];
+    uint8_t i;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_GET_CAM_SNAPSHOT, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+
+    (void)memset(&stats, 0, sizeof(stats));
+    (void)memset(&det, 0, sizeof(det));
+    (void)memset(&servo, 0, sizeof(servo));
+    (void)camera_spi_get_stats(&stats);
+    (void)camera_spi_get_detect(&det);
+    (void)camera_spi_get_servo(&servo);
+
+    (void)memset(payload, 0, sizeof(payload));
+    payload[0] = (uint8_t)stats.link;
+    payload[1] = stats.peer_role;
+    payload[2] = (det.valid != FALSE) ? 1U : 0U;
+    payload[3] = det.count;
+    payload[4] = det.best_index;
+    proto_put_u16(&payload[5], det.frame_w);
+    proto_put_u16(&payload[7], det.frame_h);
+    for (i = 0U; i < 2U; i++) {
+        uint8_t *b = &payload[9U + (i * 8U)];
+        proto_put_u16(&b[0], det.box[i].x);
+        proto_put_u16(&b[2], det.box[i].y);
+        proto_put_u16(&b[4], det.box[i].w);
+        b[6] = det.box[i].score_u8;
+        b[7] = det.box[i].class_id;
+    }
+    payload[25] = (servo.valid != FALSE) ? 1U : 0U;
+    proto_put_i16(&payload[26], servo.pan_deg_x100);
+    proto_put_i16(&payload[28], servo.tilt_deg_x100);
+    proto_put_u16(&payload[30], servo.pan_pulse_us);
+    proto_put_u16(&payload[32], servo.tilt_pulse_us);
+    proto_reply_ack(PROTO_CMD_GET_CAM_SNAPSHOT, seq, payload, 34U);
+}
+
+static void proto_handle_get_cam_net(uint8_t seq)
+{
+    camera_spi_net_info_t net;
+    uint8_t payload[12];
+    status_t st;
+
+    if ((proto_caps() & PROTO_CAP_CAMERA) == 0U) {
+        proto_reply_nak(PROTO_CMD_GET_CAM_NET, seq, PROTO_ERR_UNSUPPORTED);
+        return;
+    }
+
+    (void)memset(&net, 0, sizeof(net));
+    st = camera_spi_get_net_info(&net);
+    if (st != STATUS_OK) {
+        proto_reply_nak(PROTO_CMD_GET_CAM_NET, seq, proto_cam_st_to_err(st));
+        return;
+    }
+
+    /* 缓存无效或无 IP 时请求一次；首版仍返回当前缓存（可能 HAS_IP=0） */
+    if ((net.valid == FALSE) || ((net.flags & CAMERA_SPI_NET_FLAG_HAS_IP) == 0U)) {
+        (void)camera_spi_request_net_info();
+        (void)camera_spi_get_net_info(&net);
+    }
+
+    (void)memset(payload, 0, sizeof(payload));
+    proto_put_u32(&payload[0], net.ipv4);
+    proto_put_u16(&payload[4], net.http_port);
+    payload[6] = net.wifi_mode;
+    payload[7] = net.flags;
+    payload[8] = net.stream_path_id;
+    payload[9] = (net.valid != FALSE) ? 1U : 0U;
+    proto_reply_ack(PROTO_CMD_GET_CAM_NET, seq, payload, 10U);
+}
+
 static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len)
 {
     if ((cmd == PROTO_CMD_SUBSCRIBE) || (cmd == PROTO_CMD_UNSUBSCRIBE) ||
@@ -1764,7 +2044,10 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         (cmd == PROTO_CMD_SET_DISTANCE) || (cmd == PROTO_CMD_DISTANCE_STOP) ||
         (cmd == PROTO_CMD_SET_LINE_FOLLOW) || (cmd == PROTO_CMD_LINE_FOLLOW_STOP) ||
         (cmd == PROTO_CMD_CALIB_YAW) ||
-        (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP)) {
+        (cmd == PROTO_CMD_DRIVE) || (cmd == PROTO_CMD_DRIVE_STOP) ||
+        (cmd == PROTO_CMD_CAM_SERVO_CENTER) || (cmd == PROTO_CMD_CAM_SERVO_SET_ANGLE) ||
+        (cmd == PROTO_CMD_CAM_SERVO_NUDGE) || (cmd == PROTO_CMD_CAM_DETECT_ENABLE) ||
+        (cmd == PROTO_CMD_GET_CAM_NET)) {
         proto_rx_gate_hold_cmd();
         proto_suppress_pushes(PROTO_PUSH_SUPPRESS_MS);
     }
@@ -1831,6 +2114,24 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
         break;
     case PROTO_CMD_CALIB_YAW:
         proto_handle_calib_yaw(seq, payload, len);
+        break;
+    case PROTO_CMD_CAM_SERVO_CENTER:
+        proto_handle_cam_servo_center(seq);
+        break;
+    case PROTO_CMD_CAM_SERVO_SET_ANGLE:
+        proto_handle_cam_servo_set_angle(seq, payload, len);
+        break;
+    case PROTO_CMD_CAM_SERVO_NUDGE:
+        proto_handle_cam_servo_nudge(seq, payload, len);
+        break;
+    case PROTO_CMD_CAM_DETECT_ENABLE:
+        proto_handle_cam_detect_enable(seq, payload, len);
+        break;
+    case PROTO_CMD_GET_CAM_SNAPSHOT:
+        proto_handle_get_cam_snapshot(seq);
+        break;
+    case PROTO_CMD_GET_CAM_NET:
+        proto_handle_get_cam_net(seq);
         break;
     default:
         proto_reply_nak(cmd, seq, PROTO_ERR_UNKNOWN_CMD);
@@ -2190,6 +2491,22 @@ void proto_telemetry_tick(uint32_t period_ms)
             proto_push_line_loop();
         }
     }
+    if ((s_sub.mask & PROTO_CH_CAM_DETECT) != 0U) {
+        s_sub.acc_cam_detect_ms += period_ms;
+        if (s_sub.acc_cam_detect_ms >=
+            proto_period_ms_for(s_sub.hz_cam_detect, PROTO_DEFAULT_HZ_CAM_DETECT)) {
+            s_sub.acc_cam_detect_ms = 0U;
+            proto_push_cam_detect();
+        }
+    }
+    if ((s_sub.mask & PROTO_CH_CAM_SERVO) != 0U) {
+        s_sub.acc_cam_servo_ms += period_ms;
+        if (s_sub.acc_cam_servo_ms >=
+            proto_period_ms_for(s_sub.hz_cam_servo, PROTO_DEFAULT_HZ_CAM_SERVO)) {
+            s_sub.acc_cam_servo_ms = 0U;
+            proto_push_cam_servo();
+        }
+    }
 }
 
 status_t proto_uart_service_start(void)
@@ -2236,6 +2553,8 @@ status_t proto_uart_service_start(void)
     s_sub.hz_angle_loop = PROTO_DEFAULT_HZ_ANGLE_LOOP;
     s_sub.hz_distance_loop = PROTO_DEFAULT_HZ_DISTANCE_LOOP;
     s_sub.hz_line_loop = PROTO_DEFAULT_HZ_LINE_LOOP;
+    s_sub.hz_cam_detect = PROTO_DEFAULT_HZ_CAM_DETECT;
+    s_sub.hz_cam_servo = PROTO_DEFAULT_HZ_CAM_SERVO;
     s_sub.hz_batt = PROTO_DEFAULT_HZ_BATT;
     s_ultra_ready = FALSE;
     s_ultra_init_attempted = FALSE;

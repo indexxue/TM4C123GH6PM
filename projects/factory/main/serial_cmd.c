@@ -11,6 +11,7 @@
 #include "battery.h"
 #include "board.h"
 #include "buzzer.h"
+#include "camera_spi.h"
 #include "cmd.h"
 #include "device_profile.h"
 #include "flash_layout.h"
@@ -366,6 +367,197 @@ static void cmd_att(int argc, const char *argv[])
 }
 
 /* -------------------------------------------------------------------------- */
+/* cam — Camera SPI L2/L3 联调                                              */
+/* -------------------------------------------------------------------------- */
+
+static const char *cam_link_str(camera_spi_link_t link)
+{
+    switch (link) {
+    case CAMERA_SPI_LINK_OK:
+        return "OK";
+    case CAMERA_SPI_LINK_DEGRADED:
+        return "DEG";
+    case CAMERA_SPI_LINK_DOWN:
+    default:
+        return "DOWN";
+    }
+}
+
+static const char *cam_ctrl_str(camera_spi_ctrl_state_t st)
+{
+    switch (st) {
+    case CAMERA_SPI_CTRL_PENDING:
+        return "PENDING";
+    case CAMERA_SPI_CTRL_DONE:
+        return "DONE";
+    case CAMERA_SPI_CTRL_TIMEOUT:
+        return "TIMEOUT";
+    case CAMERA_SPI_CTRL_IDLE:
+    default:
+        return "IDLE";
+    }
+}
+
+static void cmd_cam(int argc, const char *argv[])
+{
+    char buf[128];
+    status_t st;
+    camera_spi_stats_t stats;
+    camera_spi_detect_t det;
+    camera_spi_servo_t servo;
+    camera_spi_ctrl_status_t ctrl;
+
+    if (camera_spi_is_ready() == FALSE) {
+        cmd_reply_ok("cam", "ng:not_ready");
+        return;
+    }
+
+    if ((argc < 2) || (strcmp(argv[1], "status") == 0)) {
+        if (camera_spi_get_stats(&stats) != STATUS_OK) {
+            cmd_reply_ng();
+            return;
+        }
+        (void)camera_spi_get_ctrl_status(&ctrl);
+        (void)snprintf(buf, sizeof(buf),
+                       "link=%s peer=%u ok=%lu mag=%lu crc=%lu det=%u servo=%u "
+                       "ack_ok=%u ack_fail=%u to=%u ctrl=%s",
+                       cam_link_str(stats.link),
+                       (unsigned)stats.peer_role,
+                       (unsigned long)stats.rx_ok,
+                       (unsigned long)stats.magic_err,
+                       (unsigned long)stats.crc_err,
+                       (unsigned)stats.detect_rx,
+                       (unsigned)stats.servo_rx,
+                       (unsigned)stats.ctrl_ack_ok,
+                       (unsigned)stats.ctrl_ack_fail,
+                       (unsigned)stats.ctrl_timeout,
+                       cam_ctrl_str(ctrl.state));
+        cmd_reply_ok("cam", buf);
+        return;
+    }
+
+    if (strcmp(argv[1], "detect") == 0) {
+        if (camera_spi_get_detect(&det) != STATUS_OK) {
+            cmd_reply_ng();
+            return;
+        }
+        if (det.valid == FALSE) {
+            cmd_reply_ok("cam", "detect=none");
+            return;
+        }
+        (void)snprintf(buf, sizeof(buf),
+                       "n=%u best=%u %ux%u box0=(%u,%u,w=%u sc=%u)",
+                       (unsigned)det.count, (unsigned)det.best_index,
+                       (unsigned)det.frame_w, (unsigned)det.frame_h,
+                       (unsigned)det.box[0].x, (unsigned)det.box[0].y,
+                       (unsigned)det.box[0].w, (unsigned)det.box[0].score_u8);
+        cmd_reply_ok("cam", buf);
+        return;
+    }
+
+    if (strcmp(argv[1], "servo") == 0) {
+        if (camera_spi_get_servo(&servo) != STATUS_OK) {
+            cmd_reply_ng();
+            return;
+        }
+        if (servo.valid == FALSE) {
+            cmd_reply_ok("cam", "servo=none");
+            return;
+        }
+        (void)snprintf(buf, sizeof(buf), "pan=%d tilt=%d us=%u/%u",
+                       (int)servo.pan_deg_x100, (int)servo.tilt_deg_x100,
+                       (unsigned)servo.pan_pulse_us, (unsigned)servo.tilt_pulse_us);
+        cmd_reply_ok("cam", buf);
+        return;
+    }
+
+    if (strcmp(argv[1], "center") == 0) {
+        st = camera_spi_ctrl_servo_center();
+        if (st != STATUS_OK) {
+            cmd_reply_ok("cam", "ng:ctrl");
+            return;
+        }
+        cmd_reply_ok("cam", "center queued");
+        return;
+    }
+
+    if (strcmp(argv[1], "detect_on") == 0) {
+        st = camera_spi_ctrl_detect_enable(1U);
+        if (st != STATUS_OK) {
+            cmd_reply_ok("cam", "ng:ctrl");
+            return;
+        }
+        cmd_reply_ok("cam", "detect_on queued");
+        return;
+    }
+
+    if (strcmp(argv[1], "detect_off") == 0) {
+        st = camera_spi_ctrl_detect_enable(0U);
+        if (st != STATUS_OK) {
+            cmd_reply_ok("cam", "ng:ctrl");
+            return;
+        }
+        cmd_reply_ok("cam", "detect_off queued");
+        return;
+    }
+
+    if ((strcmp(argv[1], "angle") == 0) && (argc >= 4)) {
+        st = camera_spi_ctrl_servo_set_angle((uint8_t)atoi(argv[2]),
+                                            (int16_t)atoi(argv[3]));
+        if (st != STATUS_OK) {
+            cmd_reply_ok("cam", "ng:ctrl");
+            return;
+        }
+        cmd_reply_ok("cam", "angle queued");
+        return;
+    }
+
+    if ((strcmp(argv[1], "nudge") == 0) && (argc >= 4)) {
+        st = camera_spi_ctrl_servo_nudge((uint8_t)atoi(argv[2]),
+                                        (int16_t)atoi(argv[3]));
+        if (st != STATUS_OK) {
+            cmd_reply_ok("cam", "ng:ctrl");
+            return;
+        }
+        cmd_reply_ok("cam", "nudge queued");
+        return;
+    }
+
+    if (strcmp(argv[1], "net") == 0) {
+        camera_spi_net_info_t net;
+        uint32_t ip;
+
+        if (camera_spi_get_net_info(&net) != STATUS_OK) {
+            cmd_reply_ng();
+            return;
+        }
+        if ((net.valid == FALSE) || ((net.flags & CAMERA_SPI_NET_FLAG_HAS_IP) == 0U)) {
+            (void)camera_spi_request_net_info();
+            (void)camera_spi_get_net_info(&net);
+        }
+        if (net.valid == FALSE) {
+            cmd_reply_ok("cam", "net=none");
+            return;
+        }
+        ip = net.ipv4;
+        (void)snprintf(buf, sizeof(buf),
+                       "ip=%u.%u.%u.%u port=%u mode=%u flags=0x%02X path=%u",
+                       (unsigned)(ip & 0xFFU),
+                       (unsigned)((ip >> 8) & 0xFFU),
+                       (unsigned)((ip >> 16) & 0xFFU),
+                       (unsigned)((ip >> 24) & 0xFFU),
+                       (unsigned)net.http_port,
+                       (unsigned)net.wifi_mode,
+                       (unsigned)net.flags,
+                       (unsigned)net.stream_path_id);
+        cmd_reply_ok("cam", buf);
+        return;
+    }
+
+    cmd_reply_ng();
+}
+
+/* -------------------------------------------------------------------------- */
 
 void serial_cmd_register_defaults(void)
 {
@@ -396,5 +588,9 @@ void serial_cmd_register_defaults(void)
     }
     if (device_profile_board_wants(DEVICE_BOARD_MASK_SENSORS)) {
         (void)cmd_register("att", cmd_att, "att euler angles deg");
+    }
+    if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
+        (void)cmd_register("cam", cmd_cam,
+                           "cam [status|detect|servo|center|detect_on|detect_off|angle|nudge|net]");
     }
 }

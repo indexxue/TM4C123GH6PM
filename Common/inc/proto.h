@@ -23,7 +23,14 @@
  *   0: 无附加（用 NVS line_base_rpm）；
  *   1: [base_rpm i32]
  * - PROTO_CMD_LINE_FOLLOW_STOP (0x003A)：停止循迹环
- * 订阅 PROTO_CH_ANGLE_LOOP (bit6) / PROTO_CH_DISTANCE_LOOP (bit7) 可推送对应环状态
+ * 相机 / 云台（经 SPI camera_spi，小端）：
+ * - PROTO_CMD_CAM_SERVO_CENTER (0x0040)：无 payload
+ * - PROTO_CMD_CAM_SERVO_SET_ANGLE (0x0041)：[ch u8][deg_x100 i16]
+ * - PROTO_CMD_CAM_SERVO_NUDGE (0x0042)：[ch u8][delta_x100 i16]
+ * - PROTO_CMD_CAM_DETECT_ENABLE (0x0043)：[on u8]
+ * - PROTO_CMD_GET_CAM_SNAPSHOT (0x0044)：一次打包 link+detect+servo
+ * - PROTO_CMD_GET_CAM_NET (0x0045)：图传入口（IP/端口/path_id）
+ * 订阅 PROTO_CH_CAM_DETECT (bit9) / PROTO_CH_CAM_SERVO (bit10)
  */
 
 #ifndef PROTO_H
@@ -44,15 +51,24 @@ extern "C" {
 #define PROTO_CMD_DISTANCE_STOP     0x0038U
 #define PROTO_CMD_SET_LINE_FOLLOW   0x0039U
 #define PROTO_CMD_LINE_FOLLOW_STOP  0x003AU
+#define PROTO_CMD_CAM_SERVO_CENTER  0x0040U
+#define PROTO_CMD_CAM_SERVO_SET_ANGLE 0x0041U
+#define PROTO_CMD_CAM_SERVO_NUDGE   0x0042U
+#define PROTO_CMD_CAM_DETECT_ENABLE 0x0043U
+#define PROTO_CMD_GET_CAM_SNAPSHOT  0x0044U
+#define PROTO_CMD_GET_CAM_NET       0x0045U
 
 #define PROTO_CAP_SPEED_LOOP        (1U << 4)
 #define PROTO_CAP_ANGLE_LOOP        (1U << 5)
 #define PROTO_CAP_YAW_CALIB         (1U << 6)
 #define PROTO_CAP_DISTANCE_LOOP     (1U << 7)
 #define PROTO_CAP_LINE_FOLLOW       (1U << 8)
+#define PROTO_CAP_CAMERA            (1U << 9)
 #define PROTO_CH_MOTOR_RPM          (1U << 5)
 #define PROTO_CH_ANGLE_LOOP         (1U << 6)
 #define PROTO_CH_DISTANCE_LOOP      (1U << 7)
+#define PROTO_CH_CAM_DETECT         (1U << 9)
+#define PROTO_CH_CAM_SERVO          (1U << 10)
 
 status_t proto_uart_service_start(void);
 void proto_telemetry_tick(uint32_t period_ms);

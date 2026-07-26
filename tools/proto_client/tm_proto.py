@@ -64,6 +64,12 @@ DEFAULT_SUB_MOTOR_RPM_HZ = 10
 DEFAULT_SUB_ANGLE_LOOP_HZ = 10
 DEFAULT_SUB_DISTANCE_LOOP_HZ = 10
 DEFAULT_SUB_LINE_LOOP_HZ = 10
+DEFAULT_SUB_CAM_DETECT_HZ = 10
+DEFAULT_SUB_CAM_SERVO_HZ = 10
+
+STREAM_PATH_BY_ID = {
+    0: "/api/camera/stream.mjpg",
+}
 
 # 与固件 NVS_CFG_LINE_SENSOR_COUNT / 协议位掩码一致（两车型均为 6 路）
 LINE_SENSOR_COUNT = 6
@@ -108,6 +114,12 @@ class Cmd(IntEnum):
     DISTANCE_STOP = 0x0038
     SET_LINE_FOLLOW = 0x0039
     LINE_FOLLOW_STOP = 0x003A
+    CAM_SERVO_CENTER = 0x0040
+    CAM_SERVO_SET_ANGLE = 0x0041
+    CAM_SERVO_NUDGE = 0x0042
+    CAM_DETECT_ENABLE = 0x0043
+    GET_CAM_SNAPSHOT = 0x0044
+    GET_CAM_NET = 0x0045
 
 
 class Cap(IntFlag):
@@ -120,6 +132,7 @@ class Cap(IntFlag):
     YAW_CALIB = 1 << 6
     DISTANCE_LOOP = 1 << 7
     LINE_FOLLOW = 1 << 8
+    CAMERA = 1 << 9
 
 
 class TelChannel(IntFlag):
@@ -132,12 +145,15 @@ class TelChannel(IntFlag):
     ANGLE_LOOP = 1 << 6
     DISTANCE_LOOP = 1 << 7
     LINE_LOOP = 1 << 8
+    CAM_DETECT = 1 << 9
+    CAM_SERVO = 1 << 10
 
 
 BASE_CHANNEL_MASK = int(TelChannel.ATTITUDE | TelChannel.ENCODER)
 OPTIONAL_CHANNEL_MASK = int(
     TelChannel.BATT | TelChannel.LINE_ADC | TelChannel.ULTRASONIC | TelChannel.MOTOR_RPM |
-    TelChannel.ANGLE_LOOP | TelChannel.DISTANCE_LOOP | TelChannel.LINE_LOOP
+    TelChannel.ANGLE_LOOP | TelChannel.DISTANCE_LOOP | TelChannel.LINE_LOOP |
+    TelChannel.CAM_DETECT | TelChannel.CAM_SERVO
 )
 
 CHANNEL_ID_BATTERY = 0
@@ -149,6 +165,8 @@ CHANNEL_ID_MOTOR_RPM = 5
 CHANNEL_ID_ANGLE_LOOP = 6
 CHANNEL_ID_DISTANCE_LOOP = 7
 CHANNEL_ID_LINE_LOOP = 8
+CHANNEL_ID_CAM_DETECT = 9
+CHANNEL_ID_CAM_SERVO = 10
 
 HW_REV_CAR_4WD_V1 = 0
 HW_REV_CAR_2WD_V1 = 1
@@ -625,10 +643,12 @@ def build_subscribe(
     hz_angle_loop: int = 0,
     hz_distance_loop: int = 0,
     hz_line_loop: int = 0,
+    hz_cam_detect: int = 0,
+    hz_cam_servo: int = 0,
 ) -> bytes:
-    # mask u32 + 8×u8（末字节为 line_loop Hz）
+    # mask u32 + 10×u8（cam_detect / cam_servo Hz）
     return struct.pack(
-        "<IBBBBBBBB",
+        "<IBBBBBBBBBB",
         mask,
         hz_att & 0xFF,
         hz_enc & 0xFF,
@@ -638,6 +658,8 @@ def build_subscribe(
         hz_angle_loop & 0xFF,
         hz_distance_loop & 0xFF,
         hz_line_loop & 0xFF,
+        hz_cam_detect & 0xFF,
+        hz_cam_servo & 0xFF,
     )
 
 
@@ -706,6 +728,164 @@ def build_calib_yaw(ref_yaw: int) -> bytes:
     return struct.pack("<h", ref)
 
 
+def build_cam_servo_set_angle(ch: int, deg_x100: int) -> bytes:
+    return struct.pack("<Bh", ch & 0xFF, int(deg_x100))
+
+
+def build_cam_servo_nudge(ch: int, delta_x100: int) -> bytes:
+    return struct.pack("<Bh", ch & 0xFF, int(delta_x100))
+
+
+def build_cam_detect_enable(on: int) -> bytes:
+    return struct.pack("<B", 1 if on else 0)
+
+
+@dataclass
+class CamBox:
+    x: int = 0
+    y: int = 0
+    w: int = 0
+    score_u8: int = 0
+    class_id: int = 0
+
+
+@dataclass
+class CamDetectPush:
+    valid: bool
+    count: int
+    best_index: int
+    frame_w: int
+    frame_h: int
+    boxes: list = field(default_factory=list)
+
+
+@dataclass
+class CamServoPush:
+    valid: bool
+    pan_deg_x100: int
+    tilt_deg_x100: int
+    pan_pulse_us: int
+    tilt_pulse_us: int
+    pan_min_x100: int = 0
+    pan_max_x100: int = 0
+    tilt_min_x100: int = 0
+    tilt_max_x100: int = 0
+
+
+@dataclass
+class CamSnapshot:
+    link: int
+    peer_role: int
+    detect: CamDetectPush
+    servo: CamServoPush
+
+
+@dataclass
+class CamNetInfo:
+    ipv4: int
+    http_port: int
+    wifi_mode: int
+    flags: int
+    stream_path_id: int
+    valid: bool
+
+    def ip_text(self) -> str:
+        a = self.ipv4 & 0xFF
+        b = (self.ipv4 >> 8) & 0xFF
+        c = (self.ipv4 >> 16) & 0xFF
+        d = (self.ipv4 >> 24) & 0xFF
+        return f"{a}.{b}.{c}.{d}"
+
+    def stream_path(self) -> str:
+        return STREAM_PATH_BY_ID.get(self.stream_path_id, STREAM_PATH_BY_ID[0])
+
+    def stream_url(self) -> str:
+        return f"http://{self.ip_text()}:{self.http_port}{self.stream_path()}"
+
+    def snapshot_url(self) -> str:
+        return f"http://{self.ip_text()}:{self.http_port}/api/camera/camera.jpg"
+
+
+def _parse_cam_box(payload: bytes, off: int) -> CamBox:
+    x, y, w, score, cls_id = struct.unpack_from("<HHHBB", payload, off)
+    return CamBox(x=x, y=y, w=w, score_u8=score, class_id=cls_id)
+
+
+def parse_cam_detect_push(payload: bytes) -> CamDetectPush:
+    if len(payload) < 23:
+        raise ProtoError("cam detect 推送过短")
+    valid, count, best, fw, fh = struct.unpack_from("<BBBHH", payload, 0)
+    boxes = [_parse_cam_box(payload, 7), _parse_cam_box(payload, 15)]
+    return CamDetectPush(
+        valid=bool(valid),
+        count=count,
+        best_index=best,
+        frame_w=fw,
+        frame_h=fh,
+        boxes=boxes,
+    )
+
+
+def parse_cam_servo_push(payload: bytes) -> CamServoPush:
+    if len(payload) < 17:
+        raise ProtoError("cam servo 推送过短")
+    valid, pan, tilt, pp, tp, pmin, pmax, tmin, tmax = struct.unpack_from(
+        "<BhhHHhhhh", payload, 0
+    )
+    return CamServoPush(
+        valid=bool(valid),
+        pan_deg_x100=pan,
+        tilt_deg_x100=tilt,
+        pan_pulse_us=pp,
+        tilt_pulse_us=tp,
+        pan_min_x100=pmin,
+        pan_max_x100=pmax,
+        tilt_min_x100=tmin,
+        tilt_max_x100=tmax,
+    )
+
+
+def parse_cam_snapshot(payload: bytes) -> CamSnapshot:
+    if len(payload) < 34:
+        raise ProtoError("cam snapshot 过短")
+    link, peer, det_valid, count, best, fw, fh = struct.unpack_from("<BBBBBHH", payload, 0)
+    boxes = [_parse_cam_box(payload, 9), _parse_cam_box(payload, 17)]
+    servo_valid, pan, tilt, pp, tp = struct.unpack_from("<BhhHH", payload, 25)
+    return CamSnapshot(
+        link=link,
+        peer_role=peer,
+        detect=CamDetectPush(
+            valid=bool(det_valid),
+            count=count,
+            best_index=best,
+            frame_w=fw,
+            frame_h=fh,
+            boxes=boxes,
+        ),
+        servo=CamServoPush(
+            valid=bool(servo_valid),
+            pan_deg_x100=pan,
+            tilt_deg_x100=tilt,
+            pan_pulse_us=pp,
+            tilt_pulse_us=tp,
+        ),
+    )
+
+
+def parse_cam_net(payload: bytes) -> CamNetInfo:
+    if len(payload) < 10:
+        raise ProtoError("cam net 过短")
+    ipv4, port, mode, flags, path_id, valid = struct.unpack_from("<IHBBBB", payload, 0)
+    return CamNetInfo(
+        ipv4=ipv4,
+        http_port=port,
+        wifi_mode=mode,
+        flags=flags,
+        stream_path_id=path_id,
+        valid=bool(valid),
+    )
+
+
 def parse_calib_yaw_ack(payload: bytes) -> tuple[int, int]:
     if len(payload) < 4:
         raise ValueError("calib yaw ack too short")
@@ -733,6 +913,8 @@ def caps_text(caps: int) -> str:
         names.append("DISTANCE_LOOP")
     if caps & Cap.LINE_FOLLOW:
         names.append("LINE_FOLLOW")
+    if caps & Cap.CAMERA:
+        names.append("CAMERA")
     return ", ".join(names) if names else "none"
 
 
