@@ -213,6 +213,7 @@ class MainWindow(QMainWindow):
             self._plot.reset()
             self._pid_tuning.reset()
             self._drive.reset()
+            self._camera.reset()
 
     def _on_chassis_combo(self) -> None:
         count = self._chassis_combo.currentData()
@@ -283,6 +284,7 @@ class MainWindow(QMainWindow):
                 self._dashboard.update_attitude_text(r, p, y)
                 self._plot.update_attitude(roll, pitch, yaw)
                 self._drive.on_attitude_yaw(yaw)
+                self._camera.on_attitude_yaw(yaw)
             elif push.channel_id == proto.CHANNEL_ID_LINE_ADC:
                 line = proto.parse_line_adc_push(push.payload)
                 self._dashboard.update_line_adc(line.detect)

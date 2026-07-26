@@ -44,6 +44,7 @@ tools/proto_client/
 | 仪表盘 | 常驻姿态/编码器 + 按需订阅（电量、循迹 ADC、**循迹环**、超声、RPM 等） |
 | **姿态 / 循迹 / 速度** | 子页：姿态、**循迹/调试**（ADC+环曲线+启停+pid_line）、编码器、转速/角度/距离 |
 | 遥控 | DRIVE / DRIVE_STOP |
+| **相机 / 云台** | 舵机 nudge/绝对角、检测开关、WiFi 图传预览；**Yaw 跟随**（固定偏角 / 世界锁定） |
 | 右侧参数 | schema.json 全部 NVS 参数读写 |
 
 连接成功后自动 SUBSCRIBE：姿态 + 编码器；若固件 caps 含 `SPEED_LOOP` 则**自动**订阅 **MOTOR_RPM** 推送。
