@@ -139,9 +139,9 @@
 #include "bsp_uart.h"
 #include "bsp_i2c.h"
 #include "bsp_adc.h"
+#include "bsp_spi.h"
 #include "bsp_timer.h"
 #include "bsp_qei.h"
-#include "bsp_spi.h"
 #define BOARD_SYSCLK_HZ  80000000
 extern const bsp_pwm_config_t BOARD_PWM_CFG;
 extern const bsp_qei_config_t BOARD_QEI_CFG;

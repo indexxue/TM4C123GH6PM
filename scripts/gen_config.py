@@ -1,35 +1,69 @@
 #!/usr/bin/env python3
-# Board codegen from .syscfg — see docs/build.md
+# 板级代码生成：按产品档案（小车底盘 / 遥控器 / 厂测）从 .syscfg 生成 board/ — see docs/build.md
 
 from __future__ import annotations
 
 import argparse
 import json
 from collections import defaultdict
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
 ROOT = Path(__file__).resolve().parent.parent
 TIVAWARE_VERSION = "2.2.0.295"
 
+# 底盘板级生成物（仅 chassis / factory 产品）
+CHASSIS_BOARD_STEMS = ("motor", "encoder", "line")
 
-def tivaware_root() -> Path:
-    return ROOT / "sdk" / f"TivaWare_C_Series-{TIVAWARE_VERSION}"
+
+@dataclass(frozen=True)
+class ProductSpec:
+    """各 products/<name> 的代码生成档案（与 Common/device_profile 的 product_id 对齐）。"""
+
+    name: str
+    kind: str  # chassis | rc | factory
+    product_id: int
+    chassis_modules: tuple[str, ...]
+    manual_board_src: tuple[str, ...]
 
 
-CAR_PROJECTS = {
-    "factory": ROOT / "projects" / "factory",
-    "car-4wd": ROOT / "projects" / "car-4wd",
-    "car-2wd": ROOT / "projects" / "car-2wd",
+PRODUCTS: dict[str, ProductSpec] = {
+    "car-4wd": ProductSpec(
+        "car-4wd", "chassis", 1, CHASSIS_BOARD_STEMS, ()
+    ),
+    "car-2wd": ProductSpec(
+        "car-2wd", "chassis", 2, CHASSIS_BOARD_STEMS, ()
+    ),
+    "factory": ProductSpec(
+        "factory", "factory", 0, CHASSIS_BOARD_STEMS, ()
+    ),
+    "rc-controller": ProductSpec(
+        "rc-controller",
+        "rc",
+        3,
+        (),
+        ("joystick.c", "lcd_panel.c", "nrf24.c"),
+    ),
 }
-DEFAULT_CAR_PROJECT = "car-4wd"
+
+DEFAULT_PRODUCT = "car-4wd"
 DEFAULT_DOCS = ROOT / "docs"
 
+# 兼容旧名
+CAR_PROJECTS = {name: ROOT / "projects" / name for name in PRODUCTS}
+DEFAULT_CAR_PROJECT = DEFAULT_PRODUCT
 
-def resolve_car_project(car_project: str) -> dict[str, Path]:
-    if car_project not in CAR_PROJECTS:
-        raise SystemExit(f"[ERROR] unknown car project: {car_project}")
-    base = CAR_PROJECTS[car_project]
+
+def product_spec(product: str) -> ProductSpec:
+    if product not in PRODUCTS:
+        raise SystemExit(f"[ERROR] unknown product: {product}")
+    return PRODUCTS[product]
+
+
+def resolve_product(product: str) -> dict[str, Path]:
+    spec = product_spec(product)
+    base = ROOT / "projects" / spec.name
     return {
         "root": base,
         "manifest": base / ".syscfg" / "project.json",
@@ -39,7 +73,18 @@ def resolve_car_project(car_project: str) -> dict[str, Path]:
         "build": base / "build",
         "gpio_doc": base / "gpio-allocation.md",
         "ide_compile_db": base / "build" / "ide-compile-db.json",
+        "spec": spec,
     }
+
+
+def resolve_car_project(car_project: str) -> dict[str, Path]:
+    """兼容 build.ps1 的 --car-project 参数名。"""
+    return resolve_product(car_project)
+
+
+def tivaware_root() -> Path:
+    return ROOT / "sdk" / f"TivaWare_C_Series-{TIVAWARE_VERSION}"
+
 
 BOARD_GPIO_GROUPS = ("button", "comm", "sensor", "hmi")
 BOARD_MUX_LABELS = frozenset(
@@ -48,14 +93,27 @@ BOARD_MUX_LABELS = frozenset(
 
 # TM4C123: PC0=SWCLK, PC1=SWDIO — 启动时配成 GPIO 会导致 J-Link 只能烧录一次
 TM4C123_SWD_GPIO = frozenset({("C", 0), ("C", 1)})
+# 延迟到 Board_Ultra_Init：超声波 Trig/Echo（可能占用 SWD 脚）
 DEFER_BOOT_GPIO_LABELS = frozenset({"ULTRA_ECHO", "ULTRA_TRIG"})
+# 由专用驱动接管，禁止进入 Board_Periph / Board_Ultra
+# （car-2wd 蜂鸣器在 PC0/SWCLK：若误进 Ultra，上电/测距会把蜂鸣器脚拉成输出常响）
+BOARD_DRIVER_OWNED_GPIO_LABELS = frozenset({"BUZZER"})
 
 
 def defer_gpio_at_boot(label: str, port: str, pin: int) -> bool:
-    """Return True if pin must not be touched in Board_Periph_Init (SWD reconnect)."""
-    if (port, pin) in TM4C123_SWD_GPIO:
+    """Return True if pin belongs in Board_Ultra_Init (not Board_Periph_Init)."""
+    del port, pin  # signature kept for call sites; defer is label-based
+    if label in DEFER_BOOT_GPIO_LABELS:
         return True
-    if label in DEFER_BOOT_GPIO_LABELS and port == "C" and pin in (1, 2):
+    return False
+
+
+def skip_board_gpio(label: str, port: str, pin: int) -> bool:
+    """Return True if Board_* must not touch this pin (driver-owned or unclaimed SWD)."""
+    if label in BOARD_DRIVER_OWNED_GPIO_LABELS:
+        return True
+    # 未声明为 ULTRA_* 的 SWD 脚：跳过 Periph，也勿塞进 Ultra（避免蜂鸣器等误伤）
+    if (port, pin) in TM4C123_SWD_GPIO and label not in DEFER_BOOT_GPIO_LABELS:
         return True
     return False
 
@@ -130,6 +188,7 @@ def gpio_helpers(plan: PinPlanner) -> str:
             "{",
             "    bsp_gpio_commit_locked_pins(port, pins);",
             "    GPIOPinTypeGPIOOutput(port, pins);",
+            "    GPIOPinWrite(port, pins, 0);",
             "}",
         ]
     if any(plan.inputs.values()) or any(plan.inputs_pu.values()):
@@ -421,13 +480,18 @@ def append_gpio_pins_section(header: BoardHeader, gpio: dict) -> None:
 def append_periph_bind_section(
     header: BoardHeader, modules: dict[str, dict], board: dict
 ) -> None:
-    lines = [
+    includes = [
         '#include "bsp_uart.h"',
         '#include "bsp_i2c.h"',
         '#include "bsp_adc.h"',
-        '#include "bsp_timer.h"',
-        '#include "bsp_qei.h"',
         '#include "bsp_spi.h"',
+    ]
+    if modules.get("motor", {}).get("pwm"):
+        includes.append('#include "bsp_timer.h"')
+    if modules.get("encoder", {}).get("encoder"):
+        includes.append('#include "bsp_qei.h"')
+
+    lines = includes + [
         "",
         f"#define BOARD_SYSCLK_HZ  {board.get('system', {}).get('clock_hz', 80000000)}",
         "",
@@ -457,6 +521,11 @@ def append_periph_bind_section(
         ]
         if battery_items:
             lines.append("extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;")
+        joystick_items = [
+            x for x in modules.get("adc", {}).get("adc", []) if x.get("role") == "joystick"
+        ]
+        if joystick_items:
+            lines.append("extern const bsp_adc_config_t BOARD_JOY_ADC_CFG;")
     if modules.get("ssi", {}).get("ssi"):
         lines.append("extern const bsp_spi_config_t BOARD_SPI_CFG;")
 
@@ -612,9 +681,11 @@ def gen_motor(gpio: dict, mod: dict, board: dict, src_dir: Path, header: BoardHe
         "",
         "void Motor_Init(void) {",
         *plan.emit_gpio_setup(),
-        "    bsp_pwm_init(&BOARD_PWM_CFG);",
-        "}",
-        "",
+    ]
+    if mod.get("pwm"):
+        body += ["    bsp_pwm_init(&BOARD_PWM_CFG);"]
+    body += ["}"]
+    body += [
         "void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille)",
         "{",
         "    if (duty_permille > 1000U) {",
@@ -1002,6 +1073,23 @@ def emit_board_config_defs(modules: dict[str, dict], board: dict) -> list[str]:
                 "",
             ]
 
+        joystick_items = [x for x in adc_items if x.get("role") == "joystick"]
+        if joystick_items:
+            joy_module = joystick_items[0]["module"]
+            lines.append("static const bsp_adc_channel_t board_joy_adc_channels[] = {")
+            for step, item in enumerate(joystick_items):
+                lines.append(f"    {{ {item['channel']}, {step} }},")
+            lines.append("};")
+            lines += [
+                "const bsp_adc_config_t BOARD_JOY_ADC_CFG = {",
+                f"    .base = {joy_module}_BASE,",
+                "    .sequence = 0,",
+                "    .channels = board_joy_adc_channels,",
+                f"    .channel_count = {len(joystick_items)},",
+                "};",
+                "",
+            ]
+
     ssi_items = modules.get("ssi", {}).get("ssi", [])
     for item in ssi_items:
         role = str(item.get("mode", "master")).lower()
@@ -1038,6 +1126,8 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
             p = labels[label]
             if pin_label_to_str(p) in adc_pins:
                 continue
+            if skip_board_gpio(label, p["port"], p["pin"]):
+                continue
             target = deferred_plan if defer_gpio_at_boot(label, p["port"], p["pin"]) else plan
             target.add_pin(p["port"], p["pin"], p["direction"], p.get("pull"))
 
@@ -1066,7 +1156,10 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
     ssi = modules.get("ssi", {})
     for item in ssi.get("ssi", []):
         by_port: dict[str, int] = defaultdict(int)
-        for role in ("rx", "tx", "clk", "fss"):
+        ssi_roles: tuple[str, ...] = ("rx", "tx", "clk", "fss")
+        if item.get("software_cs"):
+            ssi_roles = ("rx", "tx", "clk")
+        for role in ssi_roles:
             pin_str = item[role]
             port, pin = parse_pin(pin_str)
             plan._ports.add(port)
@@ -1116,10 +1209,13 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
     if adc.get("adc"):
         battery_items = [x for x in adc.get("adc", []) if x.get("role") == "battery"]
         line_items = [x for x in adc.get("adc", []) if x.get("role") == "line"]
+        joystick_items = [x for x in adc.get("adc", []) if x.get("role") == "joystick"]
         if line_items:
             body.extend(emit_init_guard("bsp_adc_init(&BOARD_LINE_ADC_CFG)"))
         if battery_items:
             body.extend(emit_init_guard("bsp_adc_init(&BOARD_BATTERY_ADC_CFG)"))
+        if joystick_items:
+            body.extend(emit_init_guard("bsp_adc_init(&BOARD_JOY_ADC_CFG)"))
 
     if ssi.get("ssi"):
         body.extend(emit_init_guard("bsp_spi_init(&BOARD_SPI_CFG)"))
@@ -1130,9 +1226,9 @@ def gen_board(gpio: dict, modules: dict[str, dict], board: dict, src_dir: Path, 
         body += [
             "",
             "/**",
-            " * HC-SR04 GPIO（PC1=Echo/SWDIO, PC2=Trig）。",
-            " * 勿在 Board_Periph_Init 里初始化，否则 J-Link 只能烧录一次。",
-            " * 启用超声波前由驱动调用。",
+            " * HC-SR04 GPIO（ULTRA_TRIG / ULTRA_ECHO，延迟初始化）。",
+            " * 勿在 Board_Periph_Init 里配置 SWD 相关脚，否则 J-Link 可能只能烧录一次。",
+            " * 启用超声波前由 ultrasonic_init → Board_Ultra_Init 调用。",
             " */",
             "bool Board_Ultra_Init(void) {",
             *deferred_plan.emit_gpio_setup(guarded=True),
@@ -1243,6 +1339,18 @@ def gen_gpio_allocation_md(gpio: dict, out_path: Path, car_project: str) -> None
     (out_path).write_text("\n".join(lines), encoding="utf-8")
 
 
+def cleanup_chassis_board_modules(src_dir: Path) -> None:
+    """非底盘产品：删除 motor/encoder/line 生成物（若曾误生成）。"""
+    for stem in CHASSIS_BOARD_STEMS:
+        path = src_dir / f"{stem}.c"
+        if path.exists():
+            path.unlink()
+
+
+# 兼容旧函数名
+cleanup_car_board_modules = cleanup_chassis_board_modules
+
+
 def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
     for stem in LEGACY_STEMS:
         for folder, ext in ((src_dir, ".c"), (inc_dir, ".h")):
@@ -1259,19 +1367,191 @@ def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
             path.unlink()
 
 
-def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
+def generate_board_modules(
+    spec: ProductSpec,
+    gpio: dict,
+    modules: dict[str, dict],
+    board: dict,
+    src_dir: Path,
+    header: BoardHeader,
+) -> None:
+    """按产品档案生成 board/src 下的 C 模块。"""
+    if spec.chassis_modules:
+        if "motor" in spec.chassis_modules:
+            gen_motor(gpio, modules["motor"], board, src_dir, header)
+        if "encoder" in spec.chassis_modules:
+            gen_encoder(gpio, modules["encoder"], src_dir, header)
+        if "line" in spec.chassis_modules:
+            gen_line(gpio, modules, src_dir, header)
+    else:
+        cleanup_chassis_board_modules(src_dir)
+    gen_board(gpio, modules, board, src_dir, header)
+
+
+def _bsp_source_list(bsp_src: Path, *, with_sw_qei: bool) -> list[Path]:
+    names = [
+        "bsp_sysctl.c",
+        "bsp_gpio.c",
+        "bsp_systick.c",
+        "bsp_uart.c",
+        "bsp_i2c.c",
+        "bsp_adc.c",
+        "bsp_timer.c",
+        "bsp_qei.c",
+        "bsp_dma.c",
+        "bsp_spi.c",
+        "bsp_dac.c",
+        "bsp_bus_lock.c",
+    ]
+    if with_sw_qei:
+        names.insert(names.index("bsp_qei.c") + 1, "bsp_sw_qei.c")
+    return [bsp_src / n for n in names]
+
+
+def _freertos_sources(freertos: Path, freertos_port: Path) -> list[Path]:
+    return [
+        freertos / "tasks.c",
+        freertos / "queue.c",
+        freertos / "list.c",
+        freertos / "timers.c",
+        freertos_port / "port.c",
+        freertos / "portable/MemMang/heap_4.c",
+    ]
+
+
+def _ide_common_core(common: Path) -> list[Path]:
+    return [
+        common / "device_profile.c",
+        common / "start.c",
+        common / "event.c",
+        common / "log.c",
+    ]
+
+
+def ide_sources_for_product(spec: ProductSpec, paths: dict[str, Path]) -> list[Path]:
+    """与 build.ps1 各产品源列表对齐的 IDE 编译数据库条目。"""
+    app_src = paths["app_src"]
+    device_src = paths["device_src"]
+    bsp_src = ROOT / "bsp_driver" / "src"
+    common = ROOT / "Common" / "src"
+    cbb = ROOT / "cbb"
+    fusion = ROOT / "third_party" / "Fusion" / "Fusion"
+    pid = ROOT / "third_party" / "pid"
+    freertos = tivaware_root() / "third_party/FreeRTOS/Source"
+    freertos_port = freertos / "portable/GCC/ARM_CM4F"
+
+    main_sources = [
+        app_src / "startup_tm4c123gh6pm.c",
+        app_src / "main.c",
+        app_src / "app.c",
+        app_src / "freertos_hooks.c",
+        app_src / "syscalls.c",
+    ]
+
+    board_sources = [device_src / "board.c"]
+    if spec.chassis_modules:
+        board_sources += [device_src / f"{stem}.c" for stem in spec.chassis_modules]
+    else:
+        board_sources += [device_src / name for name in spec.manual_board_src]
+
+    if spec.kind == "rc":
+        common_sources = _ide_common_core(common) + [
+            common / "crc32.c",
+            common / "nvs.c",
+            common / "cfg.c",
+            common / "battery.c",
+            common / "imu.c",
+            common / "magnetometer.c",
+            common / "attitude.c",
+            common / "led_scene.c",
+            common / "proto_client.c",
+        ]
+        cbb_sources = [
+            cbb / "qmc5883p/qmc5883p.c",
+            cbb / "mpu6050/mpu6050.c",
+            cbb / "ws2812b/ws2812b.c",
+            cbb / "st7789/st7789.c",
+            cbb / "st7789/lcd.c",
+        ]
+        third_party = [
+            fusion / "FusionAhrs.c",
+            fusion / "FusionBias.c",
+            fusion / "FusionCompass.c",
+            pid / "pid.c",
+        ]
+        return (
+            main_sources
+            + _bsp_source_list(bsp_src, with_sw_qei=True)
+            + cbb_sources
+            + third_party
+            + common_sources
+            + board_sources
+            + _freertos_sources(freertos, freertos_port)
+        )
+
+    # chassis / factory：完整小车 Common + 底盘 board 模块
+    common_sources = _ide_common_core(common) + [
+        common / "battery.c",
+        common / "button.c",
+        common / "flexible_button.c",
+        common / "crc32.c",
+        common / "nvs.c",
+        common / "cfg.c",
+        common / "imu.c",
+        common / "magnetometer.c",
+        common / "ultrasonic.c",
+        common / "attitude.c",
+        common / "motion.c",
+        common / "line_follow.c",
+        common / "chassis.c",
+        common / "proto.c",
+        common / "led_scene.c",
+        common / "camera_spi.c",
+        common / "oled_panel.c",
+    ]
+    if spec.kind == "factory":
+        common_sources.append(common / "cmd.c")
+    cbb_sources = [
+        cbb / "qmc5883p/qmc5883p.c",
+        cbb / "mpu6050/mpu6050.c",
+        cbb / "ws2812b/ws2812b.c",
+    ]
+    return (
+        main_sources
+        + _bsp_source_list(bsp_src, with_sw_qei=True)
+        + cbb_sources
+        + common_sources
+        + board_sources
+        + _freertos_sources(freertos, freertos_port)
+    )
+
+
+def remove_legacy(src_dir: Path, inc_dir: Path) -> None:
+    for stem in LEGACY_STEMS:
+        for folder, ext in ((src_dir, ".c"), (inc_dir, ".h")):
+            path = folder / f"{stem}{ext}"
+            if path.exists():
+                path.unlink()
+    for name in LEGACY_SRC_EXTRA:
+        path = src_dir / name
+        if path.exists():
+            path.unlink()
+    for name in LEGACY_INC_EXTRA:
+        path = inc_dir / name
+        if path.exists():
+            path.unlink()
+
+
+def gen_ide_compile_db(paths: dict[str, Path], product: str) -> None:
     """Emit per-project build/ide-compile-db.json for IDE navigation."""
+    spec = product_spec(product)
     tivaware = tivaware_root()
     freertos = tivaware / "third_party/FreeRTOS/Source"
     freertos_port = freertos / "portable/GCC/ARM_CM4F"
-    gcc = ROOT / "tools/bin/arm-none-eabi-gcc.exe"
-    gcc_cmd = gcc.as_posix() if gcc.exists() else "arm-none-eabi-gcc"
-    device_src = paths["device_src"]
     device_inc = paths["device_inc"]
-    app_src = paths["app_src"]
     ide_db = paths["ide_compile_db"]
     bsp_inc = ROOT / "bsp_driver" / "inc"
-    bsp_src = ROOT / "bsp_driver" / "src"
+    cbb = ROOT / "cbb"
 
     includes = [
         ROOT / "include",
@@ -1282,14 +1562,18 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
         freertos_port,
         tivaware,
         tivaware / "inc",
+        cbb / "qmc5883p",
+        cbb / "mpu6050",
+        cbb / "ws2812b",
     ]
-    if car_project == "factory":
-        product_id = 0
-    elif car_project == "car-2wd":
-        product_id = 2
-    else:
-        product_id = 1
-    profile_defines = [f"-DDEVICE_PRODUCT_ID={product_id}"]
+    if spec.kind == "rc":
+        includes.append(cbb / "st7789")
+        includes.append(ROOT / "third_party" / "Fusion" / "Fusion")
+        includes.append(ROOT / "third_party" / "pid")
+
+    profile_defines = [f"-DDEVICE_PRODUCT_ID={spec.product_id}"]
+    gcc = ROOT / "tools/bin/arm-none-eabi-gcc.exe"
+    gcc_cmd = gcc.as_posix() if gcc.exists() else "arm-none-eabi-gcc"
     flags = [
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16",
         "-DTM4C123GH6PM", "-DPART_TM4C123GH6PM",
@@ -1297,45 +1581,7 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
         "-ffunction-sections", "-fdata-sections", "-Os", "-g3",
     ] + profile_defines + [f"-I{inc.as_posix()}" for inc in includes]
 
-    sources = [
-        app_src / "startup_tm4c123gh6pm.c",
-        app_src / "main.c",
-        app_src / "app.c",
-        app_src / "freertos_hooks.c",
-        app_src / "syscalls.c",
-        bsp_src / "bsp_sysctl.c",
-        bsp_src / "bsp_gpio.c",
-        bsp_src / "bsp_systick.c",
-        bsp_src / "bsp_uart.c",
-        bsp_src / "bsp_i2c.c",
-        bsp_src / "bsp_adc.c",
-        bsp_src / "bsp_timer.c",
-        bsp_src / "bsp_qei.c",
-        bsp_src / "bsp_dma.c",
-        bsp_src / "bsp_spi.c",
-        bsp_src / "bsp_dac.c",
-        bsp_src / "bsp_bus_lock.c",
-        ROOT / "Common/src/device_profile.c",
-        ROOT / "Common/src/start.c",
-        ROOT / "Common/src/event.c",
-        ROOT / "Common/src/log.c",
-        freertos / "tasks.c",
-        freertos / "queue.c",
-        freertos / "list.c",
-        freertos / "timers.c",
-        freertos_port / "port.c",
-        freertos / "portable/MemMang/heap_4.c",
-        device_src / "motor.c",
-        device_src / "encoder.c",
-        device_src / "line.c",
-        device_src / "board.c",
-        ROOT / "Common/src/cmd.c",
-        ROOT / "Common/src/battery.c",
-        ROOT / "Common/src/button.c",
-        ROOT / "Common/src/flexible_button.c",
-        ROOT / "Common/src/crc32.c",
-        ROOT / "Common/src/nvs.c",
-    ]
+    sources = ide_sources_for_product(spec, paths)
 
     entries = []
     for src in sources:
@@ -1350,12 +1596,16 @@ def gen_ide_compile_db(paths: dict[str, Path], car_project: str) -> None:
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser()
+    ap = argparse.ArgumentParser(
+        description="Generate board/ from projects/<product>/.syscfg (per-product profile)."
+    )
     ap.add_argument(
         "--car-project",
-        choices=sorted(CAR_PROJECTS),
-        default=DEFAULT_CAR_PROJECT,
-        help="car project under projects/ (default: car-4wd)",
+        "--product",
+        dest="product",
+        choices=sorted(PRODUCTS),
+        default=DEFAULT_PRODUCT,
+        help="product under projects/ (default: car-4wd); --car-project kept for build.ps1",
     )
     ap.add_argument("--manifest", default=None, help="override .syscfg/project.json path")
     ap.add_argument("--src", default=None, help="override device source output directory")
@@ -1363,11 +1613,12 @@ def main() -> None:
     ap.add_argument(
         "--ide-db",
         action="store_true",
-        help="also generate projects/<car>/build/ide-compile-db.json",
+        help="also generate projects/<product>/build/ide-compile-db.json",
     )
     args = ap.parse_args()
 
-    paths = resolve_car_project(args.car_project)
+    spec = product_spec(args.product)
+    paths = resolve_product(args.product)
     manifest = Path(args.manifest) if args.manifest else paths["manifest"]
     if not manifest.exists():
         print(f"[SKIP] no manifest: {manifest}")
@@ -1378,22 +1629,23 @@ def main() -> None:
     for d in (src_dir, inc_dir, paths["build"]):
         d.mkdir(parents=True, exist_ok=True)
 
-    print("Generating optimized board modules...")
+    print(f"Generating board modules ({spec.kind})...")
     board, gpio, modules, variant = load_manifest(manifest)
-    print(f"  car-project: {args.car_project}")
+    print(f"  product: {args.product} (id={spec.product_id}, kind={spec.kind})")
     remove_legacy(src_dir, inc_dir)
     board_header = BoardHeader()
     append_gpio_pins_section(board_header, gpio)
     append_periph_bind_section(board_header, modules, board)
-    gen_motor(gpio, modules["motor"], board, src_dir, board_header)
-    gen_encoder(gpio, modules["encoder"], src_dir, board_header)
-    gen_line(gpio, modules, src_dir, board_header)
-    gen_board(gpio, modules, board, src_dir, board_header)
+    generate_board_modules(spec, gpio, modules, board, src_dir, board_header)
     board_header.write(inc_dir)
     print(f"  -> {inc_dir.relative_to(ROOT)}/board.h")
-    gen_gpio_allocation_md(gpio, paths["gpio_doc"], args.car_project)
+    for name in spec.manual_board_src:
+        manual = src_dir / name
+        if manual.exists():
+            print(f"  -> {manual.relative_to(ROOT)} (manual)")
+    gen_gpio_allocation_md(gpio, paths["gpio_doc"], args.product)
     if args.ide_db:
-        gen_ide_compile_db(paths, args.car_project)
+        gen_ide_compile_db(paths, args.product)
     print("Done.")
 
 

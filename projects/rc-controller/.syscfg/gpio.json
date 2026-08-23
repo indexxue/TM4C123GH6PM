@@ -1,0 +1,48 @@
+{
+  "pins": [
+    { "port": "A", "pin": 0, "label": "BT_RX", "direction": "input", "_usage": "UART0 蓝牙 RX" },
+    { "port": "A", "pin": 1, "label": "BT_TX", "direction": "output", "_usage": "UART0 蓝牙 TX" },
+    { "port": "E", "pin": 0, "label": "DBG_RX", "direction": "input", "_usage": "UART7 调试 RX" },
+    { "port": "E", "pin": 1, "label": "DBG_TX", "direction": "output", "_usage": "UART7 调试 TX" },
+    { "port": "B", "pin": 2, "label": "I2C_SCL", "direction": "input", "_usage": "I2C0 SCL（软件 I2C）" },
+    { "port": "B", "pin": 3, "label": "I2C_SDA", "direction": "input", "_usage": "I2C0 SDA（软件 I2C）" },
+    { "port": "C", "pin": 3, "label": "RGB_LED", "direction": "output", "_usage": "WS2812 RGB" },
+    { "port": "A", "pin": 2, "label": "SSI_CLK", "direction": "input", "_usage": "SSI0 CLK（ST7789/NRF24 共享）" },
+    { "port": "A", "pin": 3, "label": "LCD_CS", "direction": "output", "_usage": "ST7789 软件片选（原 SSI FSS 脚）" },
+    { "port": "A", "pin": 4, "label": "SSI_RX", "direction": "input", "_usage": "SSI0 MOSI" },
+    { "port": "A", "pin": 5, "label": "SSI_TX", "direction": "output", "_usage": "SSI0 MISO" },
+    { "port": "F", "pin": 0, "label": "LCD_RST", "direction": "output", "_usage": "ST7789 RST" },
+    { "port": "F", "pin": 1, "label": "LCD_DC", "direction": "output", "_usage": "ST7789 DC" },
+    { "port": "F", "pin": 2, "label": "LCD_BL", "direction": "output", "_usage": "ST7789 背光" },
+    { "port": "A", "pin": 6, "label": "NRF_CS", "direction": "output", "_usage": "NRF24 片选" },
+    { "port": "B", "pin": 0, "label": "NRF_CE", "direction": "output", "_usage": "NRF24 CE" },
+    { "port": "B", "pin": 1, "label": "NRF_IRQ", "direction": "input", "pull": "up", "_usage": "NRF24 IRQ" },
+    { "port": "C", "pin": 4, "label": "JS1_BTN", "direction": "input", "pull": "up", "_usage": "操纵杆1 按键（ADC PD0/PD1）" },
+    { "port": "B", "pin": 6, "label": "JS2_BTN", "direction": "input", "pull": "up", "_usage": "操纵杆2 按键（ADC PD2/PD3）" },
+    { "port": "E", "pin": 3, "label": "BAT_ADC", "direction": "input", "_usage": "电池分压 ADC1 AIN0（100K/100K）" }
+  ],
+  "pinout_groups": {
+    "line": [],
+    "button": ["JS1_BTN", "JS2_BTN"],
+    "comm": [
+      "BT_RX", "BT_TX", "I2C_SCL", "I2C_SDA", "DBG_RX", "DBG_TX",
+      "SSI_CLK", "SSI_RX", "SSI_TX",
+      "LCD_CS", "LCD_RST", "LCD_DC", "LCD_BL",
+      "NRF_CS", "NRF_CE", "NRF_IRQ"
+    ],
+    "sensor": ["BAT_ADC"],
+    "hmi": ["RGB_LED"]
+  },
+  "doc_groups": {
+    "蓝牙 / 调试串口": ["BT_RX", "BT_TX", "DBG_RX", "DBG_TX"],
+    "I2C 传感器（MPU6050 + QMC5883P）": ["I2C_SCL", "I2C_SDA"],
+    "共享 SPI（ST7789 + NRF24）": [
+      "SSI_CLK", "SSI_RX", "SSI_TX",
+      "LCD_CS", "LCD_RST", "LCD_DC", "LCD_BL",
+      "NRF_CS", "NRF_CE", "NRF_IRQ"
+    ],
+    "操纵杆": ["JS1_BTN", "JS2_BTN"],
+    "电池": ["BAT_ADC"],
+    "人机交互": ["RGB_LED"]
+  }
+}

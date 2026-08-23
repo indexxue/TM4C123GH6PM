@@ -31,6 +31,15 @@ static const device_product_profile_t s_product_profiles[] = {
         .platform_mask = DEVICE_PLATFORM_MASK_LOG | DEVICE_PLATFORM_MASK_BUTTON,
         .clock_source = DEVICE_CLOCK_MAIN_8MHZ,
     },
+    {
+        .product_id = DEVICE_PRODUCT_ID_RC_CONTROLLER,
+        .name = "rc-controller",
+        .board_mask = DEVICE_BOARD_MASK_PERIPH | DEVICE_BOARD_MASK_IMU | DEVICE_BOARD_MASK_MAG |
+                      DEVICE_BOARD_MASK_LED | DEVICE_BOARD_MASK_LCD | DEVICE_BOARD_MASK_NRF24 |
+                      DEVICE_BOARD_MASK_JOYSTICK | DEVICE_BOARD_MASK_BATTERY,
+        .platform_mask = DEVICE_PLATFORM_MASK_LOG,
+        .clock_source = DEVICE_CLOCK_MAIN_8MHZ,
+    },
 };
 
 static const device_product_profile_t *product_profile_lookup(uint32_t product_id)

@@ -4,7 +4,7 @@
 
 _COMMON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${_COMMON_DIR}/.." && pwd)"
-PRODUCTS=(factory car-4wd car-2wd)
+PRODUCTS=(factory car-4wd car-2wd rc-controller)
 
 # Apt mirror: tuna | aliyun | ustc | <full ubuntu base URL>
 APT_MIRROR="${APT_MIRROR:-tuna}"

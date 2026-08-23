@@ -1,8 +1,9 @@
 #!/usr/bin/env bash
-# WSL / Linux flash entry for TM4C123GH6PM (J-Link via Windows host).
+# WSL / Linux flash entry for TM4C123GH6PM (J-Link).
 #
-# Calls scripts/flash-jlink.ps1 through powershell.exe. J-Link must be installed
-# on Windows (path in flash-jlink.ps1).
+# In WSL2: usbipd attaches J-Link to Linux, then scripts/flash-jlink-wsl.sh runs
+# Linux JLinkExe. Windows JLink.exe cannot be used while the probe is in WSL.
+# Outside WSL: falls back to scripts/flash-jlink.ps1 via powershell.exe.
 #
 # Usage:
 #   ./flash.sh                              # car-4wd standalone
@@ -12,7 +13,7 @@
 #   ./flash.sh <product> <slot> --erase-apps
 #   ./flash.sh help
 #
-# Products: factory | car-4wd | car-2wd
+# Products: factory | car-4wd | car-2wd | rc-controller
 # Env:
 #   JLINK_SPEED   SWD speed kHz (default 400)
 set -euo pipefail
@@ -20,7 +21,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 source "${SCRIPT_DIR}/_common.sh"
-PRODUCTS=(factory car-4wd car-2wd)
 
 usage() {
     cat <<'EOF'
@@ -32,8 +32,8 @@ Usage:
   ./flash.sh <product> <slot> --erase-apps
   ./flash.sh help
 
-Products: factory | car-4wd | car-2wd
-  Tab-complete / path ok: ./flash.sh factory/  |  ./flash.sh ./car-4wd
+Products: factory | car-4wd | car-2wd | rc-controller
+  Tab-complete / path ok: ./flash.sh factory/  |  ./flash.sh ./car-2wd  |  ./flash.sh rc-controller/
 
 Slots:
   standalone   whole-image @ 0x0     (car default)
@@ -50,12 +50,14 @@ Examples:
   ./flash.sh car-4wd factory          # 四轮板厂测
   ./flash.sh car-2wd factory          # 两轮板厂测
   ./flash.sh factory                  # 兼容模板板 projects/factory/build/
+  ./flash.sh rc-controller            # 遥控器 standalone
   ./flash.sh car-4wd app
   ./flash.sh car-4wd bootloader --erase-all
   ./flash.sh car-4wd app --erase-apps
   JLINK_SPEED=1000 ./flash.sh car-2wd
 
-Requires: WSL2 on Windows + powershell.exe + J-Link (Windows).
+Requires (WSL): usbipd-win + one-time bind; Linux JLinkExe (/opt/SEGGER/JLink/).
+Requires (fallback): powershell.exe + J-Link (Windows).
 Build first: IMAGE_TARGET=factory ./build.sh <car>
   full image: ./build.sh <car> release   or   IMAGE_TARGET=all ./build.sh <car>
   If the slot image is missing, flash auto-builds it (LOG_ENABLE=1) then flashes.
@@ -85,6 +87,10 @@ repo_win_path() {
     else
         echo "${REPO_ROOT}"
     fi
+}
+
+in_wsl() {
+    [[ -n "${WSL_DISTRO_NAME:-}" ]] || grep -qi microsoft /proc/version 2>/dev/null
 }
 
 default_slot_for_product() {
@@ -151,6 +157,12 @@ if [[ "${product}" == "factory" ]]; then
     slot="factory"
 fi
 
+if [[ "${product}" == "rc-controller" ]]; then
+    if [[ "${slot}" != "standalone" ]]; then
+        die "rc-controller only supports slot 'standalone' (got '${slot}')"
+    fi
+fi
+
 if [[ "${erase_all}" -eq 1 && "${erase_apps}" -eq 1 ]]; then
     die "use either --erase-all or --erase-apps, not both"
 fi
@@ -159,27 +171,35 @@ case "${speed}" in
     ''|*[!0-9]*) die "bad JLINK_SPEED='${speed}' (need integer kHz)" ;;
 esac
 
-ps="$(find_powershell)" || die "powershell.exe not found — run from WSL2 on Windows, or use .\\flash-jlink.cmd"
-win_root="$(repo_win_path)"
-ps_file="${win_root}\\scripts\\flash-jlink.ps1"
-
-args=(
-    -NoProfile
-    -ExecutionPolicy Bypass
-    -File "${ps_file}"
-    -CarProject "${product}"
-    -Target "${slot}"
-    -Speed "${speed}"
-)
-if [[ "${erase_all}" -eq 1 ]]; then
-    args+=(-EraseAll)
-fi
-if [[ "${erase_apps}" -eq 1 ]]; then
-    args+=(-EraseApps)
-fi
-
 extra=""
 [[ "${erase_all}" -eq 1 ]] && extra+=" erase-all"
 [[ "${erase_apps}" -eq 1 ]] && extra+=" erase-apps"
 log "flash ${product} slot=${slot} speed=${speed} kHz${extra}"
-"${ps}" "${args[@]}"
+
+if in_wsl; then
+    wsl_flash="${REPO_ROOT}/scripts/flash-jlink-wsl.sh"
+    [[ -x "${wsl_flash}" ]] || chmod +x "${wsl_flash}" 2>/dev/null || true
+    args=(
+        -CarProject "${product}"
+        -Target "${slot}"
+        -Speed "${speed}"
+    )
+    [[ "${erase_all}" -eq 1 ]] && args+=(-EraseAll)
+    [[ "${erase_apps}" -eq 1 ]] && args+=(-EraseApps)
+    bash "${wsl_flash}" "${args[@]}"
+else
+    ps="$(find_powershell)" || die "powershell.exe not found — use .\\flash-jlink.cmd on Windows"
+    win_root="$(repo_win_path)"
+    ps_file="${win_root}\\scripts\\flash-jlink.ps1"
+    args=(
+        -NoProfile
+        -ExecutionPolicy Bypass
+        -File "${ps_file}"
+        -CarProject "${product}"
+        -Target "${slot}"
+        -Speed "${speed}"
+    )
+    [[ "${erase_all}" -eq 1 ]] && args+=(-EraseAll)
+    [[ "${erase_apps}" -eq 1 ]] && args+=(-EraseApps)
+    "${ps}" "${args[@]}"
+fi

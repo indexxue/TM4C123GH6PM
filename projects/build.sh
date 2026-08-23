@@ -14,7 +14,7 @@
 #   ./build.sh detect
 #   ./build.sh help
 #
-# Products: factory | car-4wd | car-2wd
+# Products: factory | car-4wd | car-2wd | rc-controller
 #
 # Env:
 #   IMAGE_TARGET   standalone|bootloader|app|factory|all  (default: standalone;
@@ -28,7 +28,6 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=_common.sh
 source "${SCRIPT_DIR}/_common.sh"
-PRODUCTS=(factory car-4wd car-2wd)
 
 FW_MCU_NAME="${FW_MCU_NAME:-TM4C123GH6PM}"
 IMAGE_TARGET="${IMAGE_TARGET:-standalone}"
@@ -44,10 +43,10 @@ Usage:
   ./build.sh detect                        Check powershell / gcc / SDK
   ./build.sh help
 
-Products: factory | car-4wd | car-2wd
-  Tab-complete / path ok: ./build.sh factory/  |  ./build.sh ./car-4wd
+Products: factory | car-4wd | car-2wd | rc-controller
+  Tab-complete / path ok: ./build.sh factory/  |  ./build.sh ./car-2wd  |  ./build.sh rc-controller/
 
-IMAGE_TARGET (env, default standalone; factory product forces factory):
+IMAGE_TARGET (env, default standalone; factory product forces factory; rc-controller forces standalone):
   standalone | bootloader | app | factory | all
   car products: IMAGE_TARGET=factory builds APP_B with that car's board + shared factory main
   car products: IMAGE_TARGET=all builds bootloader + app + factory (same board)
@@ -57,6 +56,7 @@ Examples:
   ./build.sh factory
   ./build.sh car-4wd
   ./build.sh car-2wd build
+  ./build.sh rc-controller
   ./build.sh car-4wd rebuild
   ./build.sh car-4wd release 0.1.0          # merged boot+app+factory HEX
   ./build.sh factory release 0.1.0          # APP_B only, no merge
@@ -162,9 +162,11 @@ invoke_build_ps1() {
     local -a args
     local image_target="${IMAGE_TARGET}"
 
-    # factory product always links APP_B; car products may also build IMAGE_TARGET=factory.
+    # factory → APP_B；rc-controller 仅 standalone 整片烧录镜像
     if [[ "${product}" == "factory" ]]; then
         image_target="factory"
+    elif [[ "${product}" == "rc-controller" ]]; then
+        image_target="standalone"
     fi
 
     ps="$(find_powershell)" || die "powershell.exe not found — run from WSL2 on Windows, or use .\\build.cmd"
@@ -221,6 +223,8 @@ build_debug() {
     local image_target="${IMAGE_TARGET}"
     if [[ "${product}" == "factory" ]]; then
         image_target="factory"
+    elif [[ "${product}" == "rc-controller" ]]; then
+        image_target="standalone"
     fi
     ver="$(resolve_debug_version)"
     log "build ${product} (debug) ver=${ver} LOG_ENABLE=${LOG_ENABLE:-1} IMAGE_TARGET=${image_target}"
@@ -252,6 +256,10 @@ clean_product() {
 build_release() {
     local product="$1"
     local version="$2"
+
+    if [[ "${product}" == "rc-controller" ]]; then
+        die "rc-controller does not support release (use: ./build.sh rc-controller build)"
+    fi
 
     log "release ${product} ${version} (LOG_ENABLE=0)"
     if [[ "${product}" != "factory" ]]; then

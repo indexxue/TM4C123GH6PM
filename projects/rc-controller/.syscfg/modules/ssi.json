@@ -1,0 +1,17 @@
+{
+  "module": "ssi",
+  "ssi": [
+    {
+      "name": "SPI_Shared",
+      "module": "SSI0",
+      "clk": "PA2",
+      "rx": "PA4",
+      "tx": "PA5",
+      "mode": "master",
+      "spi_mode": 0,
+      "speed": 10000000,
+      "software_cs": true,
+      "_usage": "ST7789/NRF24 共享；LCD_CS=PA3、NRF_CS=PA6 为 GPIO 软件片选"
+    }
+  ]
+}

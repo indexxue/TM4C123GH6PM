@@ -9,7 +9,7 @@
 | PF4 | M1_IN1 | 输出 | Motor 1 direction |
 | PC7 | M1_IN2 | 输出 | Motor 1 direction |
 | PC4 | M2_IN1 | 输出 | Motor 2 direction |
-| PA0 | M2_IN2 | 输出 | Motor 2 direction |
+| PA6 | M2_IN2 | 输出 | Motor 2 direction (same PCB as car-4wd) |
 | PB6 | M1_PWM | 输出 | PWM0 CH0 |
 | PB7 | M2_PWM | 输出 | PWM0 CH1 |
 | PC5 | M1_ENCA | 输入 | QEI1 PHA |
@@ -24,12 +24,12 @@
 | PD0 | LINE4 | 输入 | ADC0 AIN7 line 4 |
 | PE5 | LINE5 | 输入 | ADC0 AIN8 line 5 |
 | PE4 | LINE6 | 输入 | ADC0 AIN9 line 6 |
-| PC0 | BUZZER | 输出 | buzzer |
+| PB1 | BUZZER | 输出 | buzzer (same PCB as car-4wd; NOT PC0/SWCLK) |
 | PC3 | RGB_LED | 输出 | WS2812 |
 | PC2 | ULTRA_TRIG | 输出 | HC-SR04 trigger |
-| PD5 | ULTRA_ECHO | 输入 | HC-SR04 echo |
-| PB0 | BT_RX | 输入 | UART1 RX |
-| PB1 | BT_TX | 输出 | UART1 TX |
+| PC1 | ULTRA_ECHO | 输入 | HC-SR04 echo (SWDIO — deferred init, see Board_Ultra_Init) |
+| PA0 | BT_RX | 输入 | UART0 RX |
+| PA1 | BT_TX | 输出 | UART0 TX |
 | PB2 | I2C_SCL | 输入 | I2C0 SCL |
 | PB3 | I2C_SDA | 输入 | I2C0 SDA |
 | PE0 | DBG_RX | 输入 | UART7 RX |
@@ -53,7 +53,7 @@
 | PF4 | M1_IN1 | 输出 |
 | PC7 | M1_IN2 | 输出 |
 | PC4 | M2_IN1 | 输出 |
-| PA0 | M2_IN2 | 输出 |
+| PA6 | M2_IN2 | 输出 |
 
 ### 编码器 (QEI)
 
@@ -68,8 +68,8 @@
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
-| PB0 | BT_RX | 输入 |
-| PB1 | BT_TX | 输出 |
+| PA0 | BT_RX | 输入 |
+| PA1 | BT_TX | 输出 |
 | PB2 | I2C_SCL | 输入 |
 | PB3 | I2C_SDA | 输入 |
 | PE0 | DBG_RX | 输入 |
@@ -92,14 +92,14 @@
 |------|------|------|
 | PE3 | BAT_ADC | 输入 |
 | PC2 | ULTRA_TRIG | 输出 |
-| PD5 | ULTRA_ECHO | 输入 |
+| PC1 | ULTRA_ECHO | 输入 |
 
 ### 人机交互
 
 | 引脚 | 功能 | 方向 |
 |------|------|------|
 | PE2 | BTN_ADC | 输入 |
-| PC0 | BUZZER | 输出 |
+| PB1 | BUZZER | 输出 |
 | PC3 | RGB_LED | 输出 |
 
 ## 生成代码

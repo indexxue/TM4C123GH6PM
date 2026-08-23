@@ -1,0 +1,13 @@
+{
+  "module": "i2c",
+  "i2c": [
+    {
+      "name": "Sensors",
+      "module": "I2C0",
+      "scl": "PB2",
+      "sda": "PB3",
+      "speed": 400000,
+      "_devices": "MPU6050@0x69, QMC5883P@0x2C — 用户确认地址/引脚"
+    }
+  ]
+}

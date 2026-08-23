@@ -19,6 +19,7 @@ static void gpio_outputs(uint32_t port, uint8_t pins)
 {
     bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOOutput(port, pins);
+    GPIOPinWrite(port, pins, 0);
 }
 
 static void gpio_inputs(uint32_t port, uint8_t pins, bool pullup)
@@ -106,7 +107,6 @@ bool Board_Periph_Init(void) {
     if (!bsp_gpio_port_enable(0x1Fu)) {
         return false;
     }
-    gpio_outputs(GPIO_PORTB_BASE, GPIO_PIN_1);
     gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_3);
     GPIOPinConfigure(GPIO_PA0_U0RX);
     GPIOPinTypeUART(GPIO_PORTA_BASE, GPIO_PIN_0);
@@ -154,9 +154,9 @@ bool Board_Periph_Init(void) {
 }
 
 /**
- * HC-SR04 GPIO（PC1=Echo/SWDIO, PC2=Trig）。
- * 勿在 Board_Periph_Init 里初始化，否则 J-Link 只能烧录一次。
- * 启用超声波前由驱动调用。
+ * HC-SR04 GPIO（ULTRA_TRIG / ULTRA_ECHO，延迟初始化）。
+ * 勿在 Board_Periph_Init 里配置 SWD 相关脚，否则 J-Link 可能只能烧录一次。
+ * 启用超声波前由 ultrasonic_init → Board_Ultra_Init 调用。
  */
 bool Board_Ultra_Init(void) {
     if (!bsp_gpio_port_enable(0x04u)) {

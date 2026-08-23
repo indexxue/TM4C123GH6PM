@@ -1,0 +1,13 @@
+{
+  "_format": "tm4c123-sysconfig-v2",
+  "board": "board.json",
+  "gpio": "gpio.json",
+  "modules": [
+    "modules/uart_bt.json",
+    "modules/uart_debug.json",
+    "modules/i2c.json",
+    "modules/adc.json",
+    "modules/ssi.json",
+    "modules/dma.json"
+  ]
+}

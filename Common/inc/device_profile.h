@@ -22,6 +22,7 @@
 #define DEVICE_PRODUCT_ID_FACTORY      (0U)
 #define DEVICE_PRODUCT_ID_CAR_4WD_FULL (1U)
 #define DEVICE_PRODUCT_ID_CAR_2WD_FULL (2U)
+#define DEVICE_PRODUCT_ID_RC_CONTROLLER (3U)
 
 #ifndef DEVICE_PRODUCT_ID
 #define DEVICE_PRODUCT_ID DEVICE_PRODUCT_ID_CAR_4WD_FULL
@@ -62,13 +63,22 @@ typedef enum {
 #define DEVICE_BOARD_MASK_BUZZER  (1U << 7)
 #define DEVICE_BOARD_MASK_ULTRA   (1U << 8)
 #define DEVICE_BOARD_MASK_BATTERY (1U << 9)
+/** SSD1306 OLED（I2C0 @ 0x3C） */
+#define DEVICE_BOARD_MASK_OLED    (1U << 10)
+/** ST7789 LCD（SPI + GPIO CS） */
+#define DEVICE_BOARD_MASK_LCD     (1U << 11)
+/** NRF24 2.4G（SPI + GPIO CS） */
+#define DEVICE_BOARD_MASK_NRF24   (1U << 12)
+/** 操纵杆 ADC + 按键 */
+#define DEVICE_BOARD_MASK_JOYSTICK (1U << 13)
 
 #define DEVICE_BOARD_MASK_SENSORS (DEVICE_BOARD_MASK_IMU | DEVICE_BOARD_MASK_MAG)
 
 #define DEVICE_BOARD_MASK_FULL                                                                         \
     (DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER | DEVICE_BOARD_MASK_LINE |                   \
      DEVICE_BOARD_MASK_PERIPH | DEVICE_BOARD_MASK_SENSORS | DEVICE_BOARD_MASK_LED |                    \
-     DEVICE_BOARD_MASK_BUZZER | DEVICE_BOARD_MASK_ULTRA | DEVICE_BOARD_MASK_BATTERY)
+     DEVICE_BOARD_MASK_BUZZER | DEVICE_BOARD_MASK_ULTRA | DEVICE_BOARD_MASK_BATTERY |                 \
+     DEVICE_BOARD_MASK_OLED)
 
 /* -------------------------------------------------------------------------- */
 /* 平台壳层掩码（start.c / app.c：log、cmd、button）                   */

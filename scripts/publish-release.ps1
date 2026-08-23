@@ -28,7 +28,7 @@ param(
     [switch]$AllowDirty,
     [switch]$DryRun,
 
-    [ValidateSet("car-4wd", "car-2wd", "all")]
+    [ValidateSet("car-4wd", "car-2wd", "rc-controller", "all")]
     [string]$Products = "all",
 
     [string]$Title = "",
@@ -79,7 +79,10 @@ if ($status -and -not $AllowDirty) {
 
 # --- optional build ---
 if ($BuildFirst) {
-    $list = if ($Products -eq "all") { @("car-4wd", "car-2wd") } else { @($Products) }
+    $list = switch ($Products) {
+        "all" { @("car-4wd", "car-2wd", "rc-controller") }
+        default { @($Products) }
+    }
     foreach ($p in $list) {
         Write-Host "==> build release $p $ver" -ForegroundColor Cyan
         & (Join-Path $PSScriptRoot "build.ps1") $p -Target standalone -Action release -FwVersion $ver -LogEnable 0

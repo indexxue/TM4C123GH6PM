@@ -6,12 +6,15 @@
 #include "cmd.h"
 
 #include "boot_slot.h"
+#include "device_profile.h"
 #include "log.h"
 #include "nvs.h"
 #include "flash_layout.h"
 #include "board.h"
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
 #include "button.h"
 #include "chassis.h"
+#endif
 #include "bsp_adc.h"
 #include "bsp_i2c.h"
 #include "bsp_sysctl.h"
@@ -29,6 +32,9 @@
 
 #ifndef BOARD_MOTOR_COUNT
 #define BOARD_MOTOR_COUNT 4U
+#endif
+#ifndef LINE_SENSOR_COUNT
+#define LINE_SENSOR_COUNT 0U
 #endif
 
 static cmd_write_fn s_write_fn;
@@ -280,7 +286,11 @@ static void cmd_version(int argc, const char *argv[])
 {
     (void)argc;
     (void)argv;
+#if (DEVICE_PRODUCT_ID == DEVICE_PRODUCT_ID_RC_CONTROLLER)
+    cmd_reply_ok("version", "rc-controller");
+#else
     cmd_reply_ok("version", "tm4c123-car");
+#endif
 }
 
 static void cmd_i2c(int argc, const char *argv[])
@@ -341,6 +351,7 @@ static void cmd_nvs(int argc, const char *argv[])
 }
 #endif
 
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
 static void cmd_param(int argc, const char *argv[])
 {
     nvs_spd_limit_t limit;
@@ -623,6 +634,10 @@ static void cmd_adc(int argc, const char *argv[])
     cmd_reply_ok("adc", buf);
 }
 
+#endif /* !RC_CONTROLLER */
+
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
+
 status_t cmd_boot_slot_switch(uint32_t slot)
 {
     return boot_slot_switch(slot);
@@ -682,24 +697,30 @@ static void cmd_slot(int argc, const char *argv[])
     cmd_reply_ok("slot", buf);
 }
 
+#endif /* !RC_CONTROLLER */
+
 void cmd_register_defaults(void)
 {
     (void)cmd_register("reboot", cmd_reboot, "software reset");
     (void)cmd_register("log", cmd_log, "emit one log line + ok");
     (void)cmd_register("version", cmd_version, "firmware version string");
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
     (void)cmd_register("i2c", cmd_i2c, "scan I2C0 (addr list)");
     (void)cmd_register("motor", cmd_motor, "motor <id 1..N> <rpm>");
     (void)cmd_register("adc", cmd_adc, "adc [line] — bat/btn 或 6 路循迹 ADC");
     (void)cmd_register("ftmenter", cmd_ftmenter, "ng on app/factory (use OK long-press)");
     (void)cmd_register("ftmexit", cmd_ftmexit, "switch to app slot (APP_A, factory only)");
     (void)cmd_register("slot", cmd_slot, "show boot slot (0=A 1=B)");
+#endif
 #if defined(NVS_CMD_RAW_KV)
     (void)cmd_register("nvs", cmd_nvs, "nvs get <ns> <key>");
 #endif
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
     (void)cmd_register("param", cmd_param,
                        "param mot_dir|max_rpm|pid_spd|pid_line|pid_yaw|pid_dist|line_th|line_pol|line_base ...");
     (void)cmd_register("line", cmd_line, "line start [base_rpm]|stop");
     (void)cmd_register("cfg", cmd_cfg, "cfg show|reset");
+#endif
 }
 
 #define CMD_READER_STACK_WORDS (1024U)

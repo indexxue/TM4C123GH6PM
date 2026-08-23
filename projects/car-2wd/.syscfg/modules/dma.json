@@ -9,8 +9,8 @@
       "direction": "periph2mem"
     },
     {
-      "name": "UART1_RX",
-      "module": "UART1",
+      "name": "UART0_RX",
+      "module": "UART0",
       "trigger": "uart_rx",
       "chan": 1,
       "direction": "periph2mem"

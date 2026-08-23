@@ -82,7 +82,45 @@ IMAGE_TARGET=app ./build.sh car-4wd
 ./flash.sh car-4wd                 # J-Link standalone
 ```
 
-`build.sh` / `flash.sh` 经 `powershell.exe` 调用 Windows 侧 `scripts/build.ps1`、`scripts/flash-jlink.ps1`（工具链与 J-Link 在 Windows）。更细说明见 [build-pipeline.md](build-pipeline.md)。
+`build.sh` 经 `powershell.exe` 调用 Windows 侧 `scripts/build.ps1`（工具链在 Windows）。  
+`flash.sh` 在 WSL 内通过 **usbipd** 把 J-Link 挂进 Linux，再用 **Linux JLinkExe** 烧录（与 Windows `flash-jlink.cmd` **互斥**，不可同时占用同一 J-Link）。
+
+#### WSL J-Link 一次性配置
+
+1. Windows **管理员 PowerShell**（J-Link 已插入）：
+
+```powershell
+usbipd list
+usbipd bind --busid <BUSID> --force    # 例：2-4，VID:PID 1366:0105
+```
+
+2. WSL 安装 SEGGER Linux 版 J-Link（[下载页](https://www.segger.com/downloads/jlink/)）：
+
+```bash
+sudo dpkg -i JLink_Linux_V*_x86_64.deb
+# 默认：/opt/SEGGER/JLink/JLinkExe
+```
+
+3. （可选）登录 WSL 时自动 attach，写入 `~/.bashrc`：
+
+```bash
+[[ -n "$WSL_DISTRO_NAME" ]] && source /mnt/d/Ti/tm4c123-project/scripts/wsl-jlink-attach.sh
+```
+
+若仍引用旧 STM32 项目的 `wsl-usb-attach.sh`，请改成本仓库路径，避免重复 attach。
+
+4. 烧录：
+
+```bash
+cd projects && ./flash.sh car-4wd
+```
+
+| 环境 | 烧录入口 | J-Link 归属 |
+|------|----------|-------------|
+| WSL（推荐） | `./flash.sh` | usbipd → Linux |
+| Windows | `.\flash-jlink.cmd` | 需先 `usbipd detach --busid <BUSID>` |
+
+更细说明见 [build-pipeline.md](build-pipeline.md)。
 
 ### 3.2 Windows
 

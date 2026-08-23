@@ -7,6 +7,7 @@
 
 #include "device_profile.h"
 #include "log.h"
+#include "buzzer.h"
 
 #include "board.h"
 
@@ -32,24 +33,36 @@ void Start_Init(void)
     bsp_clock_init(map_clock_source(profile->clock_source));
     bsp_systick_init();
 
+    /*
+     * 尽早接管蜂鸣器并拉灭（避免上电到 App_Start 之间常响）。
+     * car-2wd/car-4wd 同 PCB：蜂鸣器在 PB1，勿占用 PC0/SWCLK。
+     */
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
+    buzzer_init();
+#endif
+
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         (void)Board_UartDebug_Init();
     }
 
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_MOTOR)) {
         Motor_Init();
     }
+#endif
     if (device_profile_board_wants(DEVICE_BOARD_MASK_PERIPH)) {
         if (!Board_Periph_Init()) {
             bsp_uart_debug_puts("[start] Board_Periph_Init FAILED\r\n");
         }
     }
+#if (DEVICE_PRODUCT_ID != DEVICE_PRODUCT_ID_RC_CONTROLLER)
     if (device_profile_board_wants(DEVICE_BOARD_MASK_LINE)) {
         Line_Init();
     }
     if (device_profile_board_wants(DEVICE_BOARD_MASK_ENCODER)) {
         Encoder_Init();
     }
+#endif
 
     if (device_profile_platform_wants(DEVICE_PLATFORM_MASK_LOG)) {
         if (log_init(NULL) != STATUS_OK) {

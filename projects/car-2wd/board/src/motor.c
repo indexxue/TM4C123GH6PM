@@ -14,6 +14,7 @@ static void gpio_outputs(uint32_t port, uint8_t pins)
 {
     bsp_gpio_commit_locked_pins(port, pins);
     GPIOPinTypeGPIOOutput(port, pins);
+    GPIOPinWrite(port, pins, 0);
 }
 
 static void motor_apply_dir(const bsp_gpio_pin_t *in1, const bsp_gpio_pin_t *in2, int32_t rpm)
@@ -32,7 +33,7 @@ static void motor_apply_dir(const bsp_gpio_pin_t *in1, const bsp_gpio_pin_t *in2
 
 void Motor_Init(void) {
     (void)bsp_gpio_port_enable(0x27u);
-    gpio_outputs(GPIO_PORTA_BASE, GPIO_PIN_0);
+    gpio_outputs(GPIO_PORTA_BASE, GPIO_PIN_6);
     gpio_outputs(GPIO_PORTC_BASE, GPIO_PIN_4 | GPIO_PIN_7);
     gpio_outputs(GPIO_PORTF_BASE, GPIO_PIN_4);
     GPIOPinConfigure(GPIO_PB6_T0CCP0);
@@ -40,7 +41,6 @@ void Motor_Init(void) {
     GPIOPinTypeTimer(GPIO_PORTB_BASE, GPIO_PIN_6 | GPIO_PIN_7);
     bsp_pwm_init(&BOARD_PWM_CFG);
 }
-
 void Motor_SetOutput(uint8_t motor_id, int32_t rpm, uint16_t duty_permille)
 {
     if (duty_permille > 1000U) {

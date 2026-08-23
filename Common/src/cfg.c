@@ -7,8 +7,11 @@
 
 #include "board.h"
 #include "device_profile.h"
-#include "encoder_polarity.h"
 #include "log.h"
+
+#if (BOARD_ENCODER_COUNT > 0U)
+#include "encoder_polarity.h"
+#endif
 
 #include <stdbool.h>
 
@@ -69,6 +72,7 @@ f32_t cfg_motor_cmd_space_rpm(u8_t motor_id, f32_t enc_corrected_rpm)
 
 int32_t cfg_encoder_count(uint8_t index)
 {
+#if (BOARD_ENCODER_COUNT > 0U)
     const nvs_cfg_t *n = nvs_cfg_get();
     int32_t raw = Encoder_GetCount(index);
 
@@ -77,10 +81,15 @@ int32_t cfg_encoder_count(uint8_t index)
     }
 
     return raw;
+#else
+    (void)index;
+    return 0;
+#endif
 }
 
 int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta)
 {
+#if (BOARD_ENCODER_COUNT > 0U)
     const nvs_cfg_t *n = nvs_cfg_get();
 
     if (wheel_index >= NVS_CFG_ENCODER_MAX) {
@@ -88,6 +97,10 @@ int32_t cfg_encoder_delta(uint8_t wheel_index, int32_t delta)
     }
 
     return encoder_polarity_to_logical_delta((u8_t)wheel_index, delta, n->encoder_dir_mask);
+#else
+    (void)wheel_index;
+    return delta;
+#endif
 }
 
 uint16_t cfg_line_threshold(uint8_t sensor_index)

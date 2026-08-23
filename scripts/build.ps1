@@ -1,6 +1,6 @@
 param(
     [Parameter(Position = 0)]
-    [ValidateSet("factory", "car-4wd", "car-2wd")]
+    [ValidateSet("factory", "car-4wd", "car-2wd", "rc-controller")]
     [string]$CarProject = "car-4wd",
 
     [ValidateSet("standalone", "bootloader", "app", "factory", "all")]
@@ -31,9 +31,15 @@ if ($CarProject -eq "factory") {
     $Target = "factory"
 }
 
-# Car release: always Boot + APP_A + APP_B, then merge into one HEX/BIN (factory product excluded).
+if ($CarProject -eq "rc-controller") {
+    if ($Target -ne "standalone") {
+        throw "rc-controller only supports -Target standalone (no OTA/factory slots). Got -Target $Target"
+    }
+}
+
+# Car release: Boot + APP_A + APP_B merge (factory / rc-controller excluded).
 $script:ReleaseFullImage = $false
-if (($Action -eq "release") -and ($CarProject -ne "factory")) {
+if (($Action -eq "release") -and ($CarProject -notin @("factory", "rc-controller"))) {
     $Target = "all"
     $script:ReleaseFullImage = $true
 }
@@ -233,6 +239,7 @@ function Get-DeviceDefines {
     $productId = switch ($CarProject) {
         "factory" { 0 }
         "car-2wd" { 2 }
+        "rc-controller" { 3 }
         default { 1 }
     }
     return @("-DDEVICE_PRODUCT_ID=$productId")
@@ -251,7 +258,8 @@ function Get-CbbSources {
         (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
         (Join-Path $CbbDir "mpu6050\mpu6050.c"),
         (Join-Path $CbbDir "ws2812b\ws2812b.c"),
-        (Join-Path $CbbDir "hc_sr04\hc_sr04.c")
+        (Join-Path $CbbDir "hc_sr04\hc_sr04.c"),
+        (Join-Path $CbbDir "oled\oled.c")
     )
 }
 
@@ -260,7 +268,8 @@ function Get-CbbIncludes {
         (Join-Path $CbbDir "qmc5883p"),
         (Join-Path $CbbDir "mpu6050"),
         (Join-Path $CbbDir "ws2812b"),
-        (Join-Path $CbbDir "hc_sr04")
+        (Join-Path $CbbDir "hc_sr04"),
+        (Join-Path $CbbDir "oled")
     )
 }
 
@@ -299,6 +308,14 @@ function Get-BspSources {
 }
 
 function Get-GeneratedBoardSources {
+    if ($CarProject -eq "rc-controller") {
+        return @(
+            (Join-Path $BoardSrc "board.c"),
+            (Join-Path $BoardSrc "joystick.c"),
+            (Join-Path $BoardSrc "lcd_panel.c"),
+            (Join-Path $BoardSrc "nrf24.c")
+        )
+    }
     return "motor.c", "encoder.c", "line.c", "board.c" | ForEach-Object {
         Join-Path $BoardSrc $_
     }
@@ -324,6 +341,39 @@ function Get-CommonCoreSources {
     )
 }
 
+function Get-RcCbbSources {
+    return @(
+        (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
+        (Join-Path $CbbDir "mpu6050\mpu6050.c"),
+        (Join-Path $CbbDir "ws2812b\ws2812b.c"),
+        (Join-Path $CbbDir "st7789\st7789.c"),
+        (Join-Path $CbbDir "st7789\lcd.c")
+    )
+}
+
+function Get-RcCbbIncludes {
+    return @(
+        (Join-Path $CbbDir "qmc5883p"),
+        (Join-Path $CbbDir "mpu6050"),
+        (Join-Path $CbbDir "ws2812b"),
+        (Join-Path $CbbDir "st7789")
+    )
+}
+
+function Get-RcCommonSources {
+    return (Get-CommonCoreSources) + @(
+        (Join-Path $CommonSrc "crc32.c"),
+        (Join-Path $CommonSrc "nvs.c"),
+        (Join-Path $CommonSrc "cfg.c"),
+        (Join-Path $CommonSrc "battery.c"),
+        (Join-Path $CommonSrc "imu.c"),
+        (Join-Path $CommonSrc "magnetometer.c"),
+        (Join-Path $CommonSrc "attitude.c"),
+        (Join-Path $CommonSrc "led_scene.c"),
+        (Join-Path $CommonSrc "proto_client.c")
+    )
+}
+
 function Get-FullCommonSources {
     return (Get-CommonCoreSources) + @(
         (Join-Path $CommonSrc "battery.c"),
@@ -343,7 +393,8 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "chassis.c"),
         (Join-Path $CommonSrc "proto.c"),
         (Join-Path $CommonSrc "led_scene.c"),
-        (Join-Path $CommonSrc "camera_spi.c")
+        (Join-Path $CommonSrc "camera_spi.c"),
+        (Join-Path $CommonSrc "oled_panel.c")
     )
 }
 
@@ -366,6 +417,10 @@ function Get-MainSources {
 }
 
 function Get-AppSources {
+    if ($CarProject -eq "rc-controller") {
+        return (Get-MainSources) + (Get-BspSources) + (Get-RcCbbSources) + (Get-ThirdPartySources) +
+               (Get-RcCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
+    }
     return (Get-MainSources) + (Get-BspSources) + (Get-CbbSources) + (Get-ThirdPartySources) +
            (Get-FullCommonSources) + (Get-GeneratedBoardSources) + (Get-FreeRtosSources)
 }
@@ -419,6 +474,7 @@ function Build-FirmwareTarget {
 
     $Defines = @("-DTM4C123GH6PM", "-DPART_TM4C123GH6PM") + (Get-DeviceDefines) +
                $script:IdentityDefines + $ExtraDefines
+    $cbbIncludes = if ($CarProject -eq "rc-controller") { Get-RcCbbIncludes } else { Get-CbbIncludes }
     $Includes = @(
         "-I$IncDir",
         "-I$BoardInc",
@@ -427,7 +483,7 @@ function Build-FirmwareTarget {
         "-I$BlDir",
         "-I$FreeRTOSRoot\include",
         "-I$FreeRTOSPort"
-    ) + (Get-CbbIncludes | ForEach-Object { "-I$_" }) +
+    ) + ($cbbIncludes | ForEach-Object { "-I$_" }) +
         (Get-ThirdPartyIncludes | ForEach-Object { "-I$_" }) + ($ExtraIncludes | ForEach-Object { "-I$_" })
 
     $CommonFlags = @(

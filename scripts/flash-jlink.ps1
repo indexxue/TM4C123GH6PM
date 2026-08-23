@@ -2,19 +2,40 @@ param(
     [string]$Image = "",
     [ValidateSet("standalone", "bootloader", "app", "factory", "full")]
     [string]$Target = "standalone",
-    [ValidateSet("factory", "car-4wd", "car-2wd")]
+    [ValidateSet("factory", "car-4wd", "car-2wd", "rc-controller")]
     [string]$CarProject = "car-4wd",
     [switch]$EraseAll,
     [switch]$EraseApps,
+    [switch]$Recover,
     [int]$Speed = 400
 )
 $ErrorActionPreference = "Stop"
 $ProjectRoot = Split-Path -Parent $PSScriptRoot
 
-# factory image: look under the selected car project's build/ (or projects/factory/)
+function Test-JLinkSharedToWsl {
+    $usbipdCandidates = @(
+        "${env:ProgramFiles}\usbipd-win\usbipd.exe",
+        "${env:ProgramFiles(x86)}\usbipd-win\usbipd.exe"
+    )
+    foreach ($usbipd in $usbipdCandidates) {
+        if (-not (Test-Path $usbipd)) { continue }
+        $list = & $usbipd list 2>&1 | Out-String
+        if ($list -match '1366:0105[^\r\n]*Shared') {
+            Write-Host ""
+            Write-Host "J-Link is attached to WSL (usbipd Shared). Windows J-Link cannot connect." -ForegroundColor Yellow
+            Write-Host "  WSL flash (preferred):  cd projects && ./flash.sh $CarProject" -ForegroundColor Cyan
+            Write-Host "  Or detach for Windows:  usbipd detach --busid <BUSID>" -ForegroundColor DarkGray
+            Write-Host ""
+            return $true
+        }
+    }
+    return $false
+}
+
+# factory image: look under the selected car project's build/
 #   .\flash-jlink.cmd -Target factory
 #   .\flash-jlink.cmd -Target factory -CarProject car-2wd
-#   .\flash-jlink.cmd -Target full -CarProject car-4wd   # boot+app+factory merge
+#   .\flash-jlink.cmd -Target full -CarProject car-4wd
 # Missing build artifacts: auto-build that Target (LOG_ENABLE=1) then flash.
 
 $BuildDir = Join-Path $ProjectRoot "projects\$CarProject\build"
@@ -78,8 +99,17 @@ if ([string]::IsNullOrWhiteSpace($Image)) {
 }
 if (-not (Test-Path $Image)) { throw "Image not found: $Image" }
 
+if (Test-JLinkSharedToWsl) { exit 1 }
+
 if ($EraseAll -and $EraseApps) {
     throw "Use -EraseAll or -EraseApps, not both."
+}
+
+if ($Recover) {
+    $EraseAll = $true
+    if ($Speed -gt 100) {
+        $Speed = 50
+    }
 }
 
 Write-Host "Flashing $Image via JLink..." -ForegroundColor Cyan
@@ -87,6 +117,9 @@ Write-Host "  Car:    $CarProject" -ForegroundColor DarkGray
 Write-Host "  Target: $Target" -ForegroundColor DarkGray
 Write-Host "  Image:  $Image" -ForegroundColor DarkGray
 Write-Host "  SWD:    ${Speed} kHz" -ForegroundColor DarkGray
+if ($Recover) {
+    Write-Host "  Mode:   RECOVER (erase chip + load; hold board RESET)" -ForegroundColor Yellow
+}
 if ($EraseAll) {
     Write-Host "  Erase:  full chip (256 KB)" -ForegroundColor Yellow
 } elseif ($EraseApps) {
@@ -122,17 +155,21 @@ $eraseCmd = if ($EraseAll) {
     ""
 }
 
-# halt 后再 load；若仍连不上，按住 RESET 到出现 Connecting...
+# rsettype 2 = connect under reset (needs J-Link nRESET wired; else hold board RESET)
+# r0 / r1 = assert / deassert probe RESET pin
 $jlinkBody = @(
     "si SWD",
     "speed $Speed",
     "device TM4C123GH6PM",
+    "rsettype 2",
+    "r0",
+    "sleep 200",
     "connect",
     "halt"
 )
 if ($eraseCmd) { $jlinkBody += $eraseCmd }
 $jlinkBody += $loadCmd
-$jlinkBody += @("r", "g", "exit")
+$jlinkBody += @("r1", "r", "g", "exit")
 
 ($jlinkBody -join "`n") + "`n" | Set-Content -Path $cmdFile -Encoding ASCII
 
@@ -141,18 +178,44 @@ if (-not (Test-Path $JLinkExe)) {
 }
 
 $log = Join-Path $tmpDir "jlink-flash.log"
-Write-Host "  Tip: if connect fails, hold RESET during 'Connecting to target via SWD'" -ForegroundColor DarkGray
+
+Write-Host ""
+Write-Host "===== BEFORE FLASH: hold board RESET now =====" -ForegroundColor Yellow
+Write-Host "  Keep holding until you see Erasing/Downloading (not only Connecting)." -ForegroundColor Yellow
+Write-Host "  Unplug HC-SR04 Echo (PC1/SWDIO) if plugged." -ForegroundColor Yellow
+Write-Host "  If J-Link nRESET is not wired to MCU, hand RESET is mandatory." -ForegroundColor Yellow
+Write-Host "==============================================" -ForegroundColor Yellow
+Write-Host ""
+Start-Sleep -Seconds 2
 
 $jlinkArgs = @("-AutoConnect", "1", "-CommanderScript", $cmdFile)
 $p = Start-Process -NoNewWindow -Wait -PassThru -FilePath $JLinkExe -ArgumentList $jlinkArgs -RedirectStandardOutput $log
 $logText = Get-Content $log -Raw
 Get-Content $log
 
-if ($logText -match 'Error occurred:' -or $logText -match 'Could not connect') {
+if ($logText -match 'Error occurred:' -or $logText -match 'Could not connect' -or
+    $logText -match 'Failed to power up DAP' -or $logText -match 'Failed to halt CPU') {
+    Write-Host ""
     Write-Host "J-Link connect/flash failed. See $log" -ForegroundColor Red
-    Write-Host "  1. Use -Target standalone or full (not app.elf @ 0x4000 only)" -ForegroundColor Yellow
-    Write-Host "  2. Unplug HC-SR04 Echo (PC1) if wired" -ForegroundColor Yellow
-    Write-Host "  3. Hold RESET, rerun flash, release when connecting" -ForegroundColor Yellow
+    Write-Host "Do this exactly:" -ForegroundColor Yellow
+    Write-Host "  A. Power OFF board 5s, unplug ultrasonic Echo (PC1)" -ForegroundColor Yellow
+    Write-Host "  B. Power ON, immediately HOLD board RESET (finger stays down)" -ForegroundColor Yellow
+    Write-Host "  C. Run:" -ForegroundColor Yellow
+    Write-Host "       .\flash-jlink.cmd -CarProject $CarProject -Recover" -ForegroundColor Cyan
+    Write-Host "  D. Release RESET ONLY after log shows Erasing or Downloading" -ForegroundColor Yellow
+    Write-Host ""
+    Write-Host "Manual J-Link Commander (hold RESET the whole time):" -ForegroundColor DarkGray
+    Write-Host "  si SWD" -ForegroundColor DarkGray
+    Write-Host "  speed 50" -ForegroundColor DarkGray
+    Write-Host "  device TM4C123GH6PM" -ForegroundColor DarkGray
+    Write-Host "  rsettype 2" -ForegroundColor DarkGray
+    Write-Host "  connect" -ForegroundColor DarkGray
+    Write-Host "  halt" -ForegroundColor DarkGray
+    Write-Host "  erase" -ForegroundColor DarkGray
+    Write-Host "  loadfile `"$Image`"" -ForegroundColor DarkGray
+    Write-Host "  r" -ForegroundColor DarkGray
+    Write-Host "  g" -ForegroundColor DarkGray
+    Write-Host "  exit" -ForegroundColor DarkGray
     exit 1
 }
 

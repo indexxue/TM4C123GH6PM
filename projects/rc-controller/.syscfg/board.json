@@ -1,0 +1,9 @@
+{
+  "project": {
+    "name": "TM4C123 RC Controller",
+    "mcu": "TM4C123GH6PM"
+  },
+  "system": {
+    "clock_hz": 80000000
+  }
+}
