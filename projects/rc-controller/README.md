@@ -15,7 +15,17 @@
 | `lcd_panel.c` | ST7789 1.14" 显示 |
 | `nrf24.c` | NRF24 GPIO 占位（SPI 驱动待接） |
 
-`main/` 仅保留应用入口（`app.c`、`main.c` 等），不含小车 motor/encoder/line 模块。
+产品独有逻辑在 `source/`（勿放进 Common）：
+
+| 文件 | 说明 |
+|------|------|
+| `joy_cal.*` | 摇杆校准 NVS |
+| `rc_ui.*` | HOME/菜单/校准 UI 状态机 |
+| `rc_lcd_cfg.h` | 屏向翻转 / BGR·RGB / 主题色宏 |
+
+`main/` 仅保留薄入口（`app.c`、`main.c`、启动与 hooks）。
+
+屏向/颜色：改 `source/rc_lcd_cfg.h` 里 `RC_LCD_FLIP_UD`、`RC_LCD_BGR`、`RC_LCD_COLOR_*` 后重编。
 
 | 功能 | 引脚 |
 |------|------|

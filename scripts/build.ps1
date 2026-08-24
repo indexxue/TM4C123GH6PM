@@ -407,13 +407,22 @@ function Get-FactoryCommonSources {
 }
 
 function Get-MainSources {
-    return @(
+    $sources = @(
         (Join-Path $MainDir "startup_tm4c123gh6pm.c"),
         (Join-Path $MainDir "main.c"),
         (Join-Path $MainDir "app.c"),
         (Join-Path $MainDir "freertos_hooks.c"),
         (Join-Path $MainDir "syscalls.c")
     )
+    if ($CarProject -eq "rc-controller") {
+        $RcSourceDir = Join-Path $CarDir "source"
+        $sources += @(
+            (Join-Path $RcSourceDir "joy_cal.c"),
+            (Join-Path $RcSourceDir "rc_ui.c"),
+            (Join-Path $ProjectRoot "components\menu\Src\menu.c")
+        )
+    }
+    return $sources
 }
 
 function Get-AppSources {
@@ -478,6 +487,7 @@ function Build-FirmwareTarget {
     $Includes = @(
         "-I$IncDir",
         "-I$BoardInc",
+        "-I$MainDir",
         "-I$BspInc",
         "-I$CommonInc",
         "-I$BlDir",
@@ -485,6 +495,10 @@ function Build-FirmwareTarget {
         "-I$FreeRTOSPort"
     ) + ($cbbIncludes | ForEach-Object { "-I$_" }) +
         (Get-ThirdPartyIncludes | ForEach-Object { "-I$_" }) + ($ExtraIncludes | ForEach-Object { "-I$_" })
+    if ($CarProject -eq "rc-controller") {
+        $Includes += "-I$(Join-Path $ProjectRoot 'components\menu\Inc')"
+        $Includes += "-I$(Join-Path $CarDir 'source')"
+    }
 
     $CommonFlags = @(
         "-mcpu=cortex-m4", "-mthumb", "-mfloat-abi=hard", "-mfpu=fpv4-sp-d16"
