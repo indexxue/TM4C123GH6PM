@@ -258,8 +258,7 @@ function Get-CbbSources {
         (Join-Path $CbbDir "qmc5883p\qmc5883p.c"),
         (Join-Path $CbbDir "mpu6050\mpu6050.c"),
         (Join-Path $CbbDir "ws2812b\ws2812b.c"),
-        (Join-Path $CbbDir "hc_sr04\hc_sr04.c"),
-        (Join-Path $CbbDir "oled\oled.c")
+        (Join-Path $CbbDir "hc_sr04\hc_sr04.c")
     )
 }
 
@@ -268,8 +267,7 @@ function Get-CbbIncludes {
         (Join-Path $CbbDir "qmc5883p"),
         (Join-Path $CbbDir "mpu6050"),
         (Join-Path $CbbDir "ws2812b"),
-        (Join-Path $CbbDir "hc_sr04"),
-        (Join-Path $CbbDir "oled")
+        (Join-Path $CbbDir "hc_sr04")
     )
 }
 
@@ -393,8 +391,7 @@ function Get-FullCommonSources {
         (Join-Path $CommonSrc "chassis.c"),
         (Join-Path $CommonSrc "proto.c"),
         (Join-Path $CommonSrc "led_scene.c"),
-        (Join-Path $CommonSrc "camera_spi.c"),
-        (Join-Path $CommonSrc "oled_panel.c")
+        (Join-Path $CommonSrc "camera_spi.c")
     )
 }
 

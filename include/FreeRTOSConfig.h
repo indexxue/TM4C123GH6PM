@@ -21,8 +21,8 @@
 #define configMAX_PRIORITIES            (5U)
 #define configMINIMAL_STACK_SIZE        (128U)
 #define configMAX_TASK_NAME_LEN         (16U)
-/* app_evt + app_tmr + cmd + proto_rx + timer service */
-#define configTOTAL_HEAP_SIZE           (18432U)
+/* app_evt + app_tmr + proto_rx/tx + timer；余量过小易在遥控峰值时 malloc 失败 */
+#define configTOTAL_HEAP_SIZE           (20480U)
 
 #define configUSE_MALLOC_FAILED_HOOK    1
 

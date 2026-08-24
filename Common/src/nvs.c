@@ -916,9 +916,13 @@ static void nvs_cfg_apply_defaults(nvs_cfg_t *cfg)
     (void)memset(cfg, 0, sizeof(*cfg));
 
     cfg->schema_version = NVS_CFG_SCHEMA_VERSION;
-    cfg->hw_rev = (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL)
-                      ? NVS_HW_REV_CAR_2WD_V1
-                      : NVS_HW_REV_CAR_4WD_V1;
+    if (profile->product_id == DEVICE_PRODUCT_ID_CAR_2WD_FULL) {
+        cfg->hw_rev = NVS_HW_REV_CAR_2WD_V1;
+    } else if (profile->product_id == DEVICE_PRODUCT_ID_RC_CONTROLLER) {
+        cfg->hw_rev = NVS_HW_REV_RC_V1;
+    } else {
+        cfg->hw_rev = NVS_HW_REV_CAR_4WD_V1;
+    }
 
     cfg->pid_speed.kp = 1.0f;
     cfg->pid_speed.ki = 0.20f;

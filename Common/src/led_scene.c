@@ -446,6 +446,8 @@ static void led_scene_begin_current_action(void)
         if (self.active_scene == LED_SCENE_ID_BOOTUP) {
             led_scene_bootup_rainbow_update(state);
             LOG_INFO("led_scene: bootup rainbow %lums", (unsigned long)LED_SCENE_BOOTUP_MS);
+            /* 开机动画仅由 led_scene_update() 轮询结束，勿再启 FreeRTOS 定时器（与 update 竞态） */
+            return;
         } else {
             led_scene_output(&action->sub.onoff.value);
         }

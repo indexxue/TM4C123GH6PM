@@ -63,8 +63,6 @@ typedef enum {
 #define DEVICE_BOARD_MASK_BUZZER  (1U << 7)
 #define DEVICE_BOARD_MASK_ULTRA   (1U << 8)
 #define DEVICE_BOARD_MASK_BATTERY (1U << 9)
-/** SSD1306 OLED（I2C0 @ 0x3C） */
-#define DEVICE_BOARD_MASK_OLED    (1U << 10)
 /** ST7789 LCD（SPI + GPIO CS） */
 #define DEVICE_BOARD_MASK_LCD     (1U << 11)
 /** NRF24 2.4G（SPI + GPIO CS） */
@@ -77,8 +75,7 @@ typedef enum {
 #define DEVICE_BOARD_MASK_FULL                                                                         \
     (DEVICE_BOARD_MASK_MOTOR | DEVICE_BOARD_MASK_ENCODER | DEVICE_BOARD_MASK_LINE |                   \
      DEVICE_BOARD_MASK_PERIPH | DEVICE_BOARD_MASK_SENSORS | DEVICE_BOARD_MASK_LED |                    \
-     DEVICE_BOARD_MASK_BUZZER | DEVICE_BOARD_MASK_ULTRA | DEVICE_BOARD_MASK_BATTERY |                 \
-     DEVICE_BOARD_MASK_OLED)
+     DEVICE_BOARD_MASK_BUZZER | DEVICE_BOARD_MASK_ULTRA | DEVICE_BOARD_MASK_BATTERY)
 
 /* -------------------------------------------------------------------------- */
 /* 平台壳层掩码（start.c / app.c：log、cmd、button）                   */

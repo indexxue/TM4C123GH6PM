@@ -1027,11 +1027,17 @@ void chassis_set_drive(s32_t throttle, s32_t steer, s32_t throttle_max, s32_t st
     }
 
     chassis_lock();
-    s_ctrl_mode = CHASSIS_CTRL_SPEED;
-    chassis_angle_clear_state();
-    chassis_distance_clear_state();
-    chassis_line_clear_state();
-    chassis_reset_speed_pids();
+    /*
+     * DRIVE 为流式指令（遥控器 20~50Hz）：只更新目标转速。
+     * 切模式时才清 PID；每帧 reset 会导致 PWM 跳变、电流尖峰甚至掉电复位。
+     */
+    if (s_ctrl_mode != CHASSIS_CTRL_SPEED) {
+        chassis_angle_clear_state();
+        chassis_distance_clear_state();
+        chassis_line_clear_state();
+        chassis_reset_speed_pids();
+        s_ctrl_mode = CHASSIS_CTRL_SPEED;
+    }
 
     max_rpm = (lim != NULL) ? lim->max_rpm : 300.0f;
     base_rpm = ((f32_t)throttle / (f32_t)throttle_max) * max_rpm;

@@ -72,6 +72,7 @@ typedef enum {
 
 #define NVS_HW_REV_CAR_4WD_V1       0U
 #define NVS_HW_REV_CAR_2WD_V1       1U
+#define NVS_HW_REV_RC_V1            2U
 
 /** 固件版本字符串默认值（可 -DFW_VERSION_STR=... 覆盖；≤15 字符） */
 #ifndef FW_VERSION_STR

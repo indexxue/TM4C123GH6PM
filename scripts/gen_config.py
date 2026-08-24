@@ -521,6 +521,16 @@ def append_periph_bind_section(
         ]
         if battery_items:
             lines.append("extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;")
+            bat = battery_items[0]
+            top = bat.get("divider_top_ohm")
+            bottom = bat.get("divider_bottom_ohm")
+            if top and bottom and int(bottom) > 0:
+                ratio = (int(top) + int(bottom)) // int(bottom)
+                lines.append(f"#define BOARD_BATTERY_DIVIDER_RATIO  {ratio}U")
+            if bat.get("mv_empty") is not None:
+                lines.append(f"#define BOARD_BATTERY_MV_EMPTY  {int(bat['mv_empty'])}U")
+            if bat.get("mv_full") is not None:
+                lines.append(f"#define BOARD_BATTERY_MV_FULL  {int(bat['mv_full'])}U")
         joystick_items = [
             x for x in modules.get("adc", {}).get("adc", []) if x.get("role") == "joystick"
         ]
@@ -1507,7 +1517,6 @@ def ide_sources_for_product(spec: ProductSpec, paths: dict[str, Path]) -> list[P
         common / "proto.c",
         common / "led_scene.c",
         common / "camera_spi.c",
-        common / "oled_panel.c",
     ]
     if spec.kind == "factory":
         common_sources.append(common / "cmd.c")

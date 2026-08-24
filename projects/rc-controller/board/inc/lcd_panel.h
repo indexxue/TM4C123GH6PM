@@ -22,12 +22,13 @@ void lcd_panel_show_home(void);
 
 /**
  * 刷新主屏动态内容（仅变化区域；无变化则不写屏）。
- * j1/j2 cmd ∈ [-1000,1000]；btn 按下为非 0。
+ * j1/j2 cmd ∈ [-1000,1000]；btn 按下为非 0；bat_percent 0..100（0xFF=未知）。
  * @return TRUE 表示发生了绘制
  */
 bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                              bool_t j1_btn, bool_t j2_btn,
-                             uint32_t bat_mv, bool_t link_up);
+                             uint8_t bat_percent, bool_t link_up,
+                             int16_t drive_throttle, int16_t drive_steer);
 
 /** 菜单列表：title + 最多 4 行可见；cursor_vis 为可见区高亮行 0..3 */
 void lcd_panel_show_menu(const char *title,
@@ -35,6 +36,12 @@ void lcd_panel_show_menu(const char *title,
                          uint8_t line_count,
                          uint8_t cursor_vis,
                          const char *foot);
+
+/**
+ * 仅重绘菜单某一可见行（不碰标题/页脚/其它行）。
+ * @param row 可见行 0..3；@param highlighted 是否为当前光标行
+ */
+void lcd_panel_update_menu_row(uint8_t row, const char *text, bool_t highlighted);
 
 /** 校准向导静态帧（标题/提示/十字准星，切步时调用一次） */
 void lcd_panel_show_cal_frame(const char *title, const char *hint);

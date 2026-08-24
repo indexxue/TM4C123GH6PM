@@ -31,7 +31,7 @@ status_t event_init(void)
     s_event = &local;
     (void)memset(s_event, 0, sizeof(event_ctx_t));
 
-    s_event->semaphore = xSemaphoreCreateBinary();
+    s_event->semaphore = xSemaphoreCreateCounting(32U, 0U);
     if (s_event->semaphore == NULL) {
         LOG_ERROR("event: semaphore create failed");
         s_event = NULL;
@@ -61,6 +61,8 @@ void event_set(evt_id_t id)
 
     if ((s_event->mask & (uint32_t)id) != 0U) {
         (void)xSemaphoreGive(s_event->mutex);
+        /* 计数信号量：主循环若仍卡在 handler 里，补一次唤醒避免丢 tick */
+        (void)xSemaphoreGive(s_event->semaphore);
         return;
     }
 

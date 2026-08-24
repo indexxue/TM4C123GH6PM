@@ -79,6 +79,9 @@ extern const bsp_uart_config_t BOARD_UART_BT_CFG;
 extern const bsp_uart_config_t BOARD_UART_DEBUG_CFG;
 extern const bsp_i2c_config_t BOARD_I2C_CFG;
 extern const bsp_adc_config_t BOARD_BATTERY_ADC_CFG;
+#define BOARD_BATTERY_DIVIDER_RATIO  2U
+#define BOARD_BATTERY_MV_EMPTY  3300U
+#define BOARD_BATTERY_MV_FULL  4200U
 extern const bsp_adc_config_t BOARD_JOY_ADC_CFG;
 extern const bsp_spi_config_t BOARD_SPI_CFG;
 

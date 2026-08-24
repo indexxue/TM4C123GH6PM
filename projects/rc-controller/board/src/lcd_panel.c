@@ -1,6 +1,6 @@
 /**
  * @file    lcd_panel.c
- * @brief   ST7789 主屏/菜单/校准 UI（按需局部刷新）
+ * @brief   ST7789 ÃÂ¤ÃÂ¸ÃÂ»ÃÂ¥ÃÂ±ÃÂ/ÃÂ¨ÃÂÃÂÃÂ¥ÃÂÃÂ/ÃÂ¦ÃÂ ÃÂ¡ÃÂ¥ÃÂÃÂ UIÃÂ¯ÃÂ¼ÃÂÃÂ¦ÃÂÃÂÃÂ©ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ©ÃÂÃÂ¨ÃÂ¥ÃÂÃÂ·ÃÂ¦ÃÂÃÂ°ÃÂ¯ÃÂ¼ÃÂ
  */
 
 #include "lcd_panel.h"
@@ -27,13 +27,14 @@
 #define J1_CY             78
 #define J2_CX             180
 #define J2_CY             78
-/** 摇杆显示死区：cmd 变化小于此值不刷新点 */
+/** æææ¾ç¤ºæ­»åºï¼cmd ååå°äºæ­¤å¼ä¸å·æ°ç¹ */
 #define HOME_CMD_DEADBAND 25
-/** 电池 mV 变化小于此值不刷新 BAT 行 */
-#define HOME_BAT_MV_STEP  50U
-/** 准星静态层像素尺寸（含边框，45×45） */
+/** åæéæå±åç´ å°ºå¯¸ï¼å«è¾¹æ¡ï¼ */
 #define CROSS_PX          ((uint16_t)(CROSS_HALF * 2U + 1U))
 #define DOT_RADIUS        2U
+/* bat_percent==0xFF means unknown; same as BATTERY_PERCENT_UNKNOWN */
+#define HOME_BAT_UNKNOWN  0xFFU
+#define HOME_BAT_WARN_PCT 20U
 
 static st7789_t s_lcd;
 static bool_t s_ready;
@@ -48,8 +49,10 @@ static int16_t s_home_j2x;
 static int16_t s_home_j2y;
 static bool_t s_home_j1_btn;
 static bool_t s_home_j2_btn;
-static uint32_t s_home_bat_mv;
+static uint8_t s_home_bat_pct;
 static bool_t s_home_link_up;
+static int16_t s_home_drive_t;
+static int16_t s_home_drive_s;
 static int16_t s_cal_dot_j1x;
 static int16_t s_cal_dot_j1y;
 static int16_t s_cal_dot_j2x;
@@ -131,19 +134,6 @@ static bool_t cmd_delta_ge(int16_t a, int16_t b, int16_t thresh)
     return (d >= thresh) ? TRUE : FALSE;
 }
 
-static bool_t bat_mv_changed(uint32_t prev, uint32_t cur)
-{
-    uint32_t lo;
-    uint32_t hi;
-
-    if (prev == cur) {
-        return FALSE;
-    }
-    lo = (prev > cur) ? cur : prev;
-    hi = (prev > cur) ? prev : cur;
-    return ((hi - lo) >= HOME_BAT_MV_STEP) ? TRUE : FALSE;
-}
-
 static void draw_crosshair_frame(uint16_t cx, uint16_t cy)
 {
     lcd_draw_line(&s_lcd, (uint16_t)(cx - CROSS_HALF), cy, (uint16_t)(cx + CROSS_HALF), cy,
@@ -154,7 +144,7 @@ static void draw_crosshair_frame(uint16_t cx, uint16_t cy)
                        (uint16_t)(cx + CROSS_HALF), (uint16_t)(cy + CROSS_HALF), RC_LCD_COLOR_CROSS);
 }
 
-/** 静态层：计算准星区域像素色（背景 / 十字线 / 方框） */
+/** ÃÂ©ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ¯ÃÂ¼ÃÂÃÂ¨ÃÂ®ÃÂ¡ÃÂ§ÃÂ®ÃÂÃÂ¥ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂÃÂºÃÂ¥ÃÂÃÂÃÂ¥ÃÂÃÂÃÂ§ÃÂ´ÃÂ ÃÂ¨ÃÂÃÂ²ÃÂ¯ÃÂ¼ÃÂÃÂ¨ÃÂÃÂÃÂ¦ÃÂÃÂ¯ / ÃÂ¥ÃÂÃÂÃÂ¥ÃÂ­ÃÂÃÂ§ÃÂºÃÂ¿ / ÃÂ¦ÃÂÃÂ¹ÃÂ¦ÃÂ¡ÃÂÃÂ¯ÃÂ¼ÃÂ */
 static uint16_t crosshair_pixel_color(uint16_t cx, uint16_t cy, uint16_t x, uint16_t y)
 {
     uint16_t left = (uint16_t)(cx - CROSS_HALF);
@@ -174,7 +164,7 @@ static uint16_t crosshair_pixel_color(uint16_t cx, uint16_t cy, uint16_t x, uint
     return HOME_BG;
 }
 
-/** 从静态层恢复旧点区域（按几何重绘像素，不用背景色块覆盖） */
+/** ÃÂ¤ÃÂ»ÃÂÃÂ©ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ¦ÃÂÃÂ¢ÃÂ¥ÃÂ¤ÃÂÃÂ¦ÃÂÃÂ§ÃÂ§ÃÂÃÂ¹ÃÂ¥ÃÂÃÂºÃÂ¥ÃÂÃÂÃÂ¯ÃÂ¼ÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂÃÂ ÃÂ¤ÃÂ½ÃÂÃÂ©ÃÂÃÂÃÂ§ÃÂ»ÃÂÃÂ¥ÃÂÃÂÃÂ§ÃÂ´ÃÂ ÃÂ¯ÃÂ¼ÃÂÃÂ¤ÃÂ¸ÃÂÃÂ§ÃÂÃÂ¨ÃÂ¨ÃÂÃÂÃÂ¦ÃÂÃÂ¯ÃÂ¨ÃÂÃÂ²ÃÂ¥ÃÂÃÂÃÂ¨ÃÂ¦ÃÂÃÂ§ÃÂÃÂÃÂ¯ÃÂ¼ÃÂ */
 static void restore_dot_patch(uint16_t cx, uint16_t cy, uint16_t px, uint16_t py)
 {
     uint16_t sx = (uint16_t)(px - DOT_RADIUS);
@@ -216,13 +206,13 @@ static void cmd_to_pixel(uint16_t cx, uint16_t cy, int16_t x_cmd, int16_t y_cmd,
     *py = (uint16_t)((int16_t)cy + dy);
 }
 
-/** 绘制静态准星层到屏幕（HOME/CAL 切页时调用一次） */
+/** ÃÂ§ÃÂ»ÃÂÃÂ¥ÃÂÃÂ¶ÃÂ©ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ¥ÃÂÃÂ°ÃÂ¥ÃÂ±ÃÂÃÂ¥ÃÂ¹ÃÂÃÂ¯ÃÂ¼ÃÂHOME/CAL ÃÂ¥ÃÂÃÂÃÂ©ÃÂ¡ÃÂµÃÂ¦ÃÂÃÂ¶ÃÂ¨ÃÂ°ÃÂÃÂ§ÃÂÃÂ¨ÃÂ¤ÃÂ¸ÃÂÃÂ¦ÃÂ¬ÃÂ¡ÃÂ¯ÃÂ¼ÃÂ */
 static void stick_layer_draw_static(const lcd_stick_layer_t *layer)
 {
     draw_crosshair_frame(layer->cx, layer->cy);
 }
 
-/** 擦除旧点：按静态层几何恢复像素 */
+/** ÃÂ¦ÃÂÃÂ¦ÃÂ©ÃÂÃÂ¤ÃÂ¦ÃÂÃÂ§ÃÂ§ÃÂÃÂ¹ÃÂ¯ÃÂ¼ÃÂÃÂ¦ÃÂÃÂÃÂ©ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ¥ÃÂÃÂ ÃÂ¤ÃÂ½ÃÂÃÂ¦ÃÂÃÂ¢ÃÂ¥ÃÂ¤ÃÂÃÂ¥ÃÂÃÂÃÂ§ÃÂ´ÃÂ  */
 static void stick_layer_erase_dot(const lcd_stick_layer_t *layer, int16_t x_cmd, int16_t y_cmd)
 {
     uint16_t px;
@@ -242,7 +232,7 @@ static void draw_dot(uint16_t cx, uint16_t cy, int16_t x_cmd, int16_t y_cmd, uin
              (uint16_t)(px + DOT_RADIUS + 1U), (uint16_t)(py + DOT_RADIUS + 1U), color);
 }
 
-/** 动态层：先恢复静态底图再画新点 */
+/** ÃÂ¥ÃÂÃÂ¨ÃÂ¦ÃÂÃÂÃÂ¥ÃÂ±ÃÂÃÂ¯ÃÂ¼ÃÂÃÂ¥ÃÂÃÂÃÂ¦ÃÂÃÂ¢ÃÂ¥ÃÂ¤ÃÂÃÂ©ÃÂÃÂÃÂ¦ÃÂÃÂÃÂ¥ÃÂºÃÂÃÂ¥ÃÂÃÂ¾ÃÂ¥ÃÂÃÂÃÂ§ÃÂÃÂ»ÃÂ¦ÃÂÃÂ°ÃÂ§ÃÂÃÂ¹ */
 static void stick_layer_update_dot(const lcd_stick_layer_t *layer,
                                    int16_t old_x, int16_t old_y,
                                    int16_t new_x, int16_t new_y,
@@ -310,11 +300,11 @@ void lcd_panel_show_home(void)
     lcd_fill_fast(&s_lcd, 0U, 0U, w, h, HOME_BG);
 
     lcd_show_string(&s_lcd, 4U, 2U, (const uint8_t *)"RC", HOME_FG, HOME_BG, 16U, 0U);
-    lcd_show_string(&s_lcd, 40U, 4U, (const uint8_t *)"BAT ----", RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 40U, 4U, (const uint8_t *)"BAT --%", RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
     lcd_show_string(&s_lcd, 170U, 4U, (const uint8_t *)"LINK --", RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
 
     lcd_show_string(&s_lcd, 44U, 28U, (const uint8_t *)"JS1", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
-    lcd_show_string(&s_lcd, 164U, 28U, (const uint8_t *)"JS2", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 164U, 28U, (const uint8_t *)"JS2 drv", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
 
     stick_layer_draw_static(&s_stick_j1);
     stick_layer_draw_static(&s_stick_j2);
@@ -327,19 +317,21 @@ void lcd_panel_show_home(void)
     draw_dot(J1_CX, J1_CY, 0, 0, RC_LCD_COLOR_ACCENT);
     draw_dot(J2_CX, J2_CY, 0, 0, RC_LCD_COLOR_ACCENT);
 
-    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)"hold JS2: menu", RC_LCD_COLOR_MUTED, HOME_BG, 12U,
-                    0U);
+    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)"JS2:F/B/L/R  hold:menu", RC_LCD_COLOR_MUTED,
+                    HOME_BG, 12U, 0U);
 }
 
 bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                              bool_t j1_btn, bool_t j2_btn,
-                             uint32_t bat_mv, bool_t link_up)
+                             uint8_t bat_percent, bool_t link_up,
+                             int16_t drive_throttle, int16_t drive_steer)
 {
     char buf[24];
     bool_t stick_dirty;
     bool_t btn_dirty;
     bool_t bat_dirty;
     bool_t link_dirty;
+    bool_t drive_dirty;
     bool_t drew = FALSE;
 
     if (s_ready == FALSE) {
@@ -352,10 +344,12 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                   cmd_delta_ge(j2x, s_home_j2x, HOME_CMD_DEADBAND) ||
                   cmd_delta_ge(j2y, s_home_j2y, HOME_CMD_DEADBAND);
     btn_dirty = !s_home_cache_valid || (j1_btn != s_home_j1_btn) || (j2_btn != s_home_j2_btn);
-    bat_dirty = !s_home_cache_valid || bat_mv_changed(s_home_bat_mv, bat_mv);
+    bat_dirty = !s_home_cache_valid || (bat_percent != s_home_bat_pct);
     link_dirty = !s_home_cache_valid || (link_up != s_home_link_up);
+    drive_dirty = !s_home_cache_valid || (drive_throttle != s_home_drive_t) ||
+                  (drive_steer != s_home_drive_s);
 
-    if (!stick_dirty && !btn_dirty && !bat_dirty && !link_dirty) {
+    if (!stick_dirty && !btn_dirty && !bat_dirty && !link_dirty && !drive_dirty) {
         return FALSE;
     }
 
@@ -389,11 +383,21 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
     }
 
     if (bat_dirty) {
-        (void)snprintf(buf, sizeof(buf), "BAT %4lu",
-                       (unsigned long)((bat_mv > 9999U) ? 9999U : bat_mv));
+        uint16_t bat_fc = RC_LCD_COLOR_OK;
+
+        if (bat_percent == HOME_BAT_UNKNOWN) {
+            (void)snprintf(buf, sizeof(buf), "BAT --%%");
+            bat_fc = RC_LCD_COLOR_MUTED;
+        } else {
+            uint8_t pct = (bat_percent > 100U) ? 100U : bat_percent;
+            (void)snprintf(buf, sizeof(buf), "BAT %3u%%", (unsigned)pct);
+            if (pct <= HOME_BAT_WARN_PCT) {
+                bat_fc = RC_LCD_COLOR_WARN;
+            }
+        }
         lcd_fill(&s_lcd, 40U, 4U, 120U, 16U, HOME_BG);
-        lcd_show_string(&s_lcd, 40U, 4U, (const uint8_t *)buf, RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
-        s_home_bat_mv = bat_mv;
+        lcd_show_string(&s_lcd, 40U, 4U, (const uint8_t *)buf, bat_fc, HOME_BG, 12U, 0U);
+        s_home_bat_pct = bat_percent;
         drew = TRUE;
     }
 
@@ -403,6 +407,23 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                         (const uint8_t *)(link_up ? "LINK OK" : "LINK --"),
                         link_up ? RC_LCD_COLOR_OK : RC_LCD_COLOR_MUTED, HOME_BG, 12U, 0U);
         s_home_link_up = link_up;
+        drew = TRUE;
+    }
+
+    if (drive_dirty) {
+        char f = (drive_throttle > 0) ? 'F' : '-';
+        char b = (drive_throttle < 0) ? 'B' : '-';
+        char l = (drive_steer < 0) ? 'L' : '-';
+        char r = (drive_steer > 0) ? 'R' : '-';
+
+        (void)snprintf(buf, sizeof(buf), "DRV %c%c%c%c", f, b, l, r);
+        lcd_fill(&s_lcd, 4U, 106U, 88U, 118U, HOME_BG);
+        lcd_show_string(&s_lcd, 4U, 106U, (const uint8_t *)buf,
+                         (f != '-' || b != '-' || l != '-' || r != '-') ? RC_LCD_COLOR_ACCENT :
+                                                                            RC_LCD_COLOR_MUTED,
+                         HOME_BG, 12U, 0U);
+        s_home_drive_t = drive_throttle;
+        s_home_drive_s = drive_steer;
         drew = TRUE;
     }
 
@@ -432,7 +453,10 @@ void lcd_panel_show_menu(const char *title,
 
     w = st7789_display_width(&s_lcd);
     h = st7789_display_height(&s_lcd);
-    lcd_fill_fast(&s_lcd, 0U, 0U, w, h, HOME_BG);
+    /* ååºéç»ï¼é¿åæ´å± fill_fast éªç */
+    lcd_fill(&s_lcd, 0U, 0U, w, 20U, HOME_BG);
+    lcd_fill(&s_lcd, 0U, 20U, w, 116U, HOME_BG);
+    lcd_fill(&s_lcd, 0U, 116U, w, h, HOME_BG);
 
     lcd_show_string(&s_lcd, 4U, 2U,
                     (const uint8_t *)((title != NULL) ? title : "Menu"),
@@ -452,6 +476,28 @@ void lcd_panel_show_menu(const char *title,
 
     if (foot != NULL) {
         lcd_show_string(&s_lcd, 4U, 118U, (const uint8_t *)foot, RC_LCD_COLOR_MUTED, HOME_BG, 12U, 0U);
+    }
+}
+
+void lcd_panel_update_menu_row(uint8_t row, const char *text, bool_t highlighted)
+{
+    uint16_t w;
+    uint16_t y;
+    uint16_t fc;
+    uint16_t bc;
+
+    if ((s_ready == FALSE) || (row >= 4U)) {
+        return;
+    }
+
+    w = st7789_display_width(&s_lcd);
+    y = (uint16_t)(22U + ((uint16_t)row * 20U));
+    fc = highlighted ? LCD_COLOR_BLACK : HOME_FG;
+    bc = highlighted ? RC_LCD_COLOR_ACCENT : HOME_BG;
+
+    lcd_fill(&s_lcd, 2U, y, (uint16_t)(w - 2U), (uint16_t)(y + 18U), bc);
+    if ((text != NULL) && (text[0] != '\0')) {
+        lcd_show_string(&s_lcd, 8U, (uint16_t)(y + 1U), (const uint8_t *)text, fc, bc, 16U, 0U);
     }
 }
 

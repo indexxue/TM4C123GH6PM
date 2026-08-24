@@ -212,7 +212,11 @@ static void slave_arm_next_frame(spi_slave_slot_t *slot)
     /* 显式清零：若日志仍见 5A，必来自 SSI 采样，而非软件预填 */
     (void)memset(slot->rx_cur, 0, BSP_SPI_SLAVE_FRAME_LEN);
     (void)slave_preload_tx(slot);
-    SSIIntEnable(slot->base, SSI_TXFF | SSI_RXFF | SSI_RXTO | SSI_RXOR);
+    /*
+     * 无主机时钟时勿开 TXFF：FIFO 半空会持续进 ISR，饿死 FreeRTOS。
+     * 仅等 RX 活动（主在时钟）后再开 TX 补仓。
+     */
+    SSIIntEnable(slot->base, SSI_RXFF | SSI_RXTO | SSI_RXOR);
 }
 
 static void slave_frame_complete(spi_slave_slot_t *slot)
@@ -294,8 +298,11 @@ static void slave_isr(spi_slave_slot_t *slot)
         slave_pump(slot);
     }
 
-    if (slot->tx_idx < BSP_SPI_SLAVE_FRAME_LEN) {
+    /* 仅在本拍已有 RX（主机在时钟）且 TX 未装完时开 TXFF */
+    if ((slot->rx_idx > 0U) && (slot->tx_idx < BSP_SPI_SLAVE_FRAME_LEN)) {
         SSIIntEnable(slot->base, SSI_TXFF);
+    } else {
+        SSIIntDisable(slot->base, SSI_TXFF);
     }
 }
 
@@ -521,7 +528,8 @@ bool bsp_spi_slave_start(uint32_t base, const uint8_t *initial_tx,
     /* 高于 FreeRTOS syscall 屏蔽线，保证补 FIFO 不被临界区拖死（ISR 不调 RTOS API） */
     IntPrioritySet(irqn, 0x40U);
     IntEnable(irqn);
-    SSIIntEnable(base, SSI_TXFF | SSI_RXFF | SSI_RXTO | SSI_RXOR);
+    /* 启动时不开 TXFF，避免无 ESP 主机时 ISR 空转占满 CPU */
+    SSIIntEnable(base, SSI_RXFF | SSI_RXTO | SSI_RXOR);
     return true;
 }
 

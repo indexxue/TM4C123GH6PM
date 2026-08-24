@@ -3,7 +3,8 @@
 **版本**：1.1  
 **日期**：2026-08-24  
 **产品**：`projects/rc-controller`  
-**状态**：阶段 A 已落地（联调通过：屏向/色序/双杆校准 UI）  
+**状态**：阶段 A + B1 已落地（联调通过：屏向/色序/双杆校准 UI + 行程门槛）  
+**使用说明**：[rc-controller-usage.md](./rc-controller-usage.md)
 
 **参考**：EdgeTX / OpenTX 摇杆校准向导；OpenRC-STM32（min/center/max + deadband + NVS）；仓库内 `components/menu`。
 
@@ -172,15 +173,14 @@ typedef struct {
 
 ## 8. 软件分层（建议落点）
 
-| 模块 | 路径（建议） | 职责 |
-|------|--------------|------|
+| 模块 | 路径 | 职责 |
+|------|------|------|
 | 采样 + 映射 | `projects/rc-controller/board/joystick.*` | raw；应用运行时 `axis_cfg`；`sample_drive` |
-| 校准状态机 | `projects/rc-controller/main/joy_cal.*`（或 `app/`） | 向导步骤、min/max 跟踪、写 NVS |
-| NVS 适配 | 同上或 `Common` 薄封装 | `rc_joy_cal_t` load/save/default/crc |
-| 菜单定义 | `projects/rc-controller/main/rc_menu.*` | page/item 表 + 回调 |
-| 输入适配 | `rc_menu` / `app` | 摇杆边沿 → `menu_dispatch`；长按检测 |
-| 主屏绘制 | `board/lcd_panel.*` 扩展 | 双十字 + 顶栏 |
-| 应用编排 | `main/app.c` | HOME/MENU/CAL 模式机；禁发 DRIVE |
+| 校准状态机 | `projects/rc-controller/source/joy_cal.*` | NVS load/save；向导 min/max 数据结构 |
+| NVS 适配 | `source/joy_cal.*` | `joy_cal_t` load/save/default/crc |
+| 菜单 + UI 状态机 | `projects/rc-controller/source/rc_ui.*` | page/item 表、HOME/MENU/CAL 模式、输入适配 |
+| 主屏绘制 | `board/lcd_panel.*` + `source/rc_lcd_cfg.h` | 双十字 + 顶栏 + 菜单/校准帧 |
+| 应用编排 | `main/app.c` | 周期 tick；DRIVE 禁发与 proto 发送 |
 
 依赖方向：`app` → menu / joy_cal / joystick / lcd；**menu 组件不依赖 board**。
 

@@ -1,6 +1,11 @@
 /**
  * @file battery.c
- * @brief TM4C123 电池电压采样（ADC1 AIN0 @ PE3，1MΩ+200kΩ 分压，3S 18650 标称 12V）
+ * @brief 电池电压采样（ADC1 AIN0 @ PE3）
+ *
+ * 分压比 / SOC 量程可由 board.h 覆盖（syscfg → gen_config）：
+ *   BOARD_BATTERY_DIVIDER_RATIO / BOARD_BATTERY_MV_EMPTY / BOARD_BATTERY_MV_FULL
+ * 默认按小车：1MΩ+200kΩ（×6），3S 9.0–12.6 V。
+ * 遥控器：100K/100K（×2），1S 3.3–4.2 V。
  */
 
 #include "battery.h"
@@ -15,15 +20,19 @@
 #include "task.h"
 
 #define BATTERY_SAMPLE_CNT (8U)
-/* PE3 / ADC1 AIN0：1MΩ（电池侧）+ 200kΩ（GND），V_adc = V_batt × 200k / (1M + 200k) */
-#define BATTERY_DIVIDER_R_TOP_OHM (1000000U)
-#define BATTERY_DIVIDER_R_BOTTOM_OHM (200000U)
-#define BATTERY_DIVIDER_RATIO \
-    ((BATTERY_DIVIDER_R_TOP_OHM + BATTERY_DIVIDER_R_BOTTOM_OHM) / BATTERY_DIVIDER_R_BOTTOM_OHM)
-/* 3S 18650 Li-ion：标称 12V，满电 12.6V，放空 9.0V */
-#define BATTERY_MV_EMPTY (9000U)
-#define BATTERY_MV_FULL_SOC (12600U)
-#define BATTERY_MV_CHARGING (12600U)
+
+/* 未在 board.h 声明时：小车默认分压与 SOC 区间 */
+#ifndef BOARD_BATTERY_DIVIDER_RATIO
+#define BOARD_BATTERY_DIVIDER_RATIO (6U) /* (1M + 200k) / 200k */
+#endif
+#ifndef BOARD_BATTERY_MV_EMPTY
+#define BOARD_BATTERY_MV_EMPTY (9000U)
+#endif
+#ifndef BOARD_BATTERY_MV_FULL
+#define BOARD_BATTERY_MV_FULL (12600U)
+#endif
+
+#define BATTERY_MV_CHARGING (BOARD_BATTERY_MV_FULL)
 #define BATTERY_LEVEL_PERCENT_VALUES 20, 50, 80, 100
 #define BATTERY_SAMPLE_PERIOD_MS (2000U)
 
@@ -61,13 +70,14 @@ static bool_t battery_read_adc_raw(uint32_t *raw_out)
 
 static uint8_t mv_to_percent(uint32_t mv)
 {
-    if (mv >= BATTERY_MV_FULL_SOC) {
+    if (mv >= BOARD_BATTERY_MV_FULL) {
         return 100U;
     }
-    if (mv <= BATTERY_MV_EMPTY) {
+    if (mv <= BOARD_BATTERY_MV_EMPTY) {
         return 0U;
     }
-    return (uint8_t)((mv - BATTERY_MV_EMPTY) * 100U / (BATTERY_MV_FULL_SOC - BATTERY_MV_EMPTY));
+    return (uint8_t)((mv - BOARD_BATTERY_MV_EMPTY) * 100U /
+                     (BOARD_BATTERY_MV_FULL - BOARD_BATTERY_MV_EMPTY));
 }
 
 void battery_init(void)
@@ -137,14 +147,16 @@ static uint32_t battery_voltage_sample_hw(battery_voltage_t *voltage)
     {
         uint32_t avg_raw = sum / (uint32_t)count;
         uint32_t vadc_mv = (avg_raw * 3300U) / 4095U;
-        uint32_t vbatt_mv = vadc_mv * BATTERY_DIVIDER_RATIO;
+        uint32_t vbatt_mv = vadc_mv * BOARD_BATTERY_DIVIDER_RATIO;
 
         vbatt_mv = cfg_battery_calibrate_mv(vbatt_mv);
 
         if (voltage != NULL) {
-            voltage->current_mv = (uint16_t)vbatt_mv;
-            voltage->min_mv = (uint16_t)((min_raw * 3300U * BATTERY_DIVIDER_RATIO) / 4095U);
-            voltage->max_mv = (uint16_t)((max_raw * 3300U * BATTERY_DIVIDER_RATIO) / 4095U);
+            voltage->current_mv = (uint16_t)((vbatt_mv > 65535U) ? 65535U : vbatt_mv);
+            voltage->min_mv =
+                (uint16_t)((min_raw * 3300U * BOARD_BATTERY_DIVIDER_RATIO) / 4095U);
+            voltage->max_mv =
+                (uint16_t)((max_raw * 3300U * BOARD_BATTERY_DIVIDER_RATIO) / 4095U);
         }
         return vbatt_mv;
     }
@@ -223,4 +235,12 @@ bool_t battery_info_read(battery_info_t *info, battery_voltage_t *voltage)
         *voltage = s_self.voltage;
     }
     return TRUE;
+}
+
+uint8_t battery_get_percent(void)
+{
+    if (!battery_percent_update()) {
+        return BATTERY_PERCENT_UNKNOWN;
+    }
+    return s_self.info.percent;
 }

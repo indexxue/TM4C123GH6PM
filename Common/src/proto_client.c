@@ -27,15 +27,24 @@
 #define PC_CMD_DRIVE            0x0030U
 #define PC_CMD_DRIVE_STOP       0x0031U
 
-#define PC_PING_PERIOD_MS       3000U
-#define PC_LINK_TIMEOUT_MS      30000U
+#define PC_PING_PERIOD_MS       1000U
+#define PC_HELLO_RETRY_MS       1000U
+#define PC_LINK_TIMEOUT_MS      8000U
 #define PC_DRIVE_IDLE_STOP_MS   500U
+#define PC_DRIVE_MIN_PERIOD_MS  50U
+#define PC_LINK_LOG_PERIOD_MS   5000U
 
 static uint8_t s_seq;
 static bool_t s_link_up;
 static uint32_t s_last_rx_ms;
 static uint32_t s_last_ping_ms;
+static uint32_t s_last_hello_ms;
 static uint32_t s_last_drive_ms;
+static uint32_t s_last_link_log_ms;
+static uint32_t s_rx_byte_count;
+static int16_t s_last_sent_throttle;
+static int16_t s_last_sent_steer;
+static bool_t s_drive_session;
 
 static uint32_t proto_client_uptime_ms(void)
 {
@@ -120,14 +129,26 @@ static void proto_client_poll_rx(void)
 {
     uint32_t base = BOARD_UART_BT_CFG.base;
     int32_t ch;
+    bool_t got = FALSE;
 
     while (UARTCharsAvail(base)) {
         ch = UARTCharGetNonBlocking(base);
         if (ch < 0) {
             break;
         }
+        s_rx_byte_count++;
         s_last_rx_ms = proto_client_uptime_ms();
-        s_link_up = TRUE;
+        got = TRUE;
+    }
+
+    if (got != FALSE) {
+        if (s_link_up == FALSE) {
+            s_link_up = TRUE;
+            LOG_INFO("proto_client: link UP (rx=%lu B)",
+                     (unsigned long)s_rx_byte_count);
+        } else {
+            s_link_up = TRUE;
+        }
     }
 }
 
@@ -137,7 +158,13 @@ status_t proto_client_init(void)
     s_link_up = FALSE;
     s_last_rx_ms = 0U;
     s_last_ping_ms = 0U;
+    s_last_hello_ms = 0U;
     s_last_drive_ms = 0U;
+    s_last_link_log_ms = 0U;
+    s_rx_byte_count = 0U;
+    s_last_sent_throttle = 0;
+    s_last_sent_steer = 0;
+    s_drive_session = FALSE;
     return STATUS_OK;
 }
 
@@ -146,7 +173,6 @@ status_t proto_client_send_hello(void)
     if (!proto_client_send(PC_CMD_HELLO, NULL, 0U)) {
         return STATUS_FAIL;
     }
-    LOG_INFO("proto_client: HELLO sent");
     return STATUS_OK;
 }
 
@@ -190,7 +216,61 @@ status_t proto_client_send_drive_stop(void)
     if (!proto_client_send(PC_CMD_DRIVE_STOP, NULL, 0U)) {
         return STATUS_FAIL;
     }
+    s_drive_session = FALSE;
+    s_last_sent_throttle = 0;
+    s_last_sent_steer = 0;
+    s_last_drive_ms = 0U;
     return STATUS_OK;
+}
+
+void proto_client_drive_update(int16_t throttle, int16_t steer, bool_t muted)
+{
+    uint32_t now;
+    uint32_t min_period;
+    bool_t idle;
+    bool_t changed;
+
+    if (s_link_up == FALSE) {
+        return;
+    }
+
+    if (muted != FALSE) {
+        throttle = 0;
+        steer = 0;
+    }
+
+    if (throttle > PROTO_CLIENT_DRIVE_THROTTLE_MAX) {
+        throttle = PROTO_CLIENT_DRIVE_THROTTLE_MAX;
+    } else if (throttle < -PROTO_CLIENT_DRIVE_THROTTLE_MAX) {
+        throttle = (int16_t)(-PROTO_CLIENT_DRIVE_THROTTLE_MAX);
+    }
+    if (steer > PROTO_CLIENT_DRIVE_STEER_MAX) {
+        steer = PROTO_CLIENT_DRIVE_STEER_MAX;
+    } else if (steer < -PROTO_CLIENT_DRIVE_STEER_MAX) {
+        steer = (int16_t)(-PROTO_CLIENT_DRIVE_STEER_MAX);
+    }
+
+    idle = ((throttle == 0) && (steer == 0)) ? TRUE : FALSE;
+    if (idle != FALSE) {
+        if (s_drive_session != FALSE) {
+            (void)proto_client_send_drive_stop();
+        }
+        return;
+    }
+
+    now = proto_client_uptime_ms();
+    changed = ((throttle != s_last_sent_throttle) || (steer != s_last_sent_steer)) ? TRUE : FALSE;
+    /* 变化：最快 25Hz；不变：约 5Hz 保活（小车 500ms 无帧会停车） */
+    min_period = (changed != FALSE) ? PC_DRIVE_MIN_PERIOD_MS : 200U;
+    if ((s_last_drive_ms != 0U) && ((now - s_last_drive_ms) < min_period)) {
+        return;
+    }
+
+    if (proto_client_send_drive(throttle, steer) == STATUS_OK) {
+        s_last_sent_throttle = throttle;
+        s_last_sent_steer = steer;
+        s_drive_session = TRUE;
+    }
 }
 
 bool_t proto_client_link_up(void)
@@ -205,18 +285,34 @@ void proto_client_tick(uint32_t period_ms)
     (void)period_ms;
     proto_client_poll_rx();
 
-    if ((now - s_last_ping_ms) >= PC_PING_PERIOD_MS) {
+    /* 未建链：周期重发 HELLO（上电时对端可能尚未配对/未就绪） */
+    if (s_link_up == FALSE) {
+        if ((s_last_hello_ms == 0U) || ((now - s_last_hello_ms) >= PC_HELLO_RETRY_MS)) {
+            if (proto_client_send_hello() == STATUS_OK) {
+                LOG_INFO("proto_client: HELLO (retry, waiting RX)");
+            }
+            s_last_hello_ms = (now == 0U) ? 1U : now;
+        }
+        if ((now - s_last_link_log_ms) >= PC_LINK_LOG_PERIOD_MS) {
+            s_last_link_log_ms = now;
+            LOG_INFO("proto_client: waiting BT link (UART0, no RX yet)");
+        }
+    } else if ((now - s_last_ping_ms) >= PC_PING_PERIOD_MS) {
         (void)proto_client_send_ping();
         s_last_ping_ms = now;
     }
 
     if (s_link_up && (s_last_rx_ms != 0U) && ((now - s_last_rx_ms) > PC_LINK_TIMEOUT_MS)) {
         s_link_up = FALSE;
-        LOG_WARN("proto_client: link timeout");
+        s_drive_session = FALSE;
+        s_last_hello_ms = 0U;
+        LOG_WARN("proto_client: link timeout (no RX %lums), retry HELLO",
+                 (unsigned long)PC_LINK_TIMEOUT_MS);
     }
 
-    if ((s_last_drive_ms != 0U) && ((now - s_last_drive_ms) > PC_DRIVE_IDLE_STOP_MS)) {
+    /* drive_update 负责会话停驶；此处仅兜底：曾发 DRIVE 后长时间未再 update */
+    if ((s_drive_session != FALSE) && (s_last_drive_ms != 0U) &&
+        ((now - s_last_drive_ms) > PC_DRIVE_IDLE_STOP_MS)) {
         (void)proto_client_send_drive_stop();
-        s_last_drive_ms = 0U;
     }
 }

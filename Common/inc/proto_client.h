@@ -24,6 +24,12 @@ status_t proto_client_send_ping(void);
 status_t proto_client_send_drive(int16_t throttle, int16_t steer);
 status_t proto_client_send_drive_stop(void);
 
+/**
+ * 遥控更新（在 tick 同周期调用）：仅在 link UP 时发送；
+ * 静止发一次 STOP；运动指令限频并跳过重复值。
+ */
+void proto_client_drive_update(int16_t throttle, int16_t steer, bool_t muted);
+
 /** 周期调用：链路保活（PING）与超时停驶 */
 void proto_client_tick(uint32_t period_ms);
 

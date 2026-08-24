@@ -12,6 +12,7 @@
 #include "battery.h"
 #include "log.h"
 #include "menu.h"
+#include "nvs.h"
 #include "proto_client.h"
 
 #include <stdio.h>
@@ -21,9 +22,15 @@
 #define RC_UI_BAT_POLL_MS        500U
 #define RC_UI_NAV_THRESH         350
 #define RC_UI_NAV_REARM          150
+/** JS2 推过门限视为「方向键」：前进/后退/左转/右转 */
+#define RC_UI_DRIVE_BTN_THRESH   RC_UI_NAV_THRESH
+#define RC_UI_DRIVE_BTN_MAG      700
 #define RC_UI_VISIBLE_ROWS       4U
 /** 校准：相对回中点，每侧至少走这么多 ADC 才算推到位 */
 #define RC_UI_CAL_SIDE_MIN       600U
+/** Monitor：抑制 ADC 噪声；仅超门限的行做局部重绘 */
+#define RC_UI_MON_RAW_STEP       8U
+#define RC_UI_MON_CMD_STEP       10
 
 typedef enum {
     CAL_STEP_CENTER = 0,
@@ -35,7 +42,7 @@ static rc_ui_mode_t s_mode = RC_UI_MODE_HOME;
 static menu_engine_t s_menu;
 static uint16_t s_js2_hold_ms;
 static uint16_t s_bat_poll_ms;
-static uint32_t s_last_bat_mv;
+static uint8_t s_last_bat_pct = BATTERY_PERCENT_UNKNOWN;
 static int16_t s_throttle;
 static int16_t s_steer;
 static bool_t s_nav_armed = TRUE;
@@ -52,6 +59,8 @@ static bool_t s_menu_dirty = TRUE;
 /* ---- menu callbacks ---- */
 
 static void rc_ui_enter_home(void);
+static void rc_ui_home_compute_drive(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
+                                     int16_t *throttle_out, int16_t *steer_out);
 static void rc_ui_render_menu(void);
 static void rc_ui_on_root_back(void *app_ctx, menu_engine_t *eng, const menu_page_t *page);
 
@@ -115,6 +124,11 @@ static const menu_page_t s_reset_page = {
 };
 
 static char s_monitor_line[4][28];
+static uint16_t s_mon_raw[4];
+static int16_t s_mon_cmd[4];
+static bool_t s_mon_cache_valid;
+
+static const char *const s_mon_labels[4] = {"J1X", "J1Y", "J2X", "J2Y"};
 
 static const char *monitor_aux(void *app_ctx, const menu_item_t *item, char *buf, size_t buflen)
 {
@@ -126,6 +140,22 @@ static const char *monitor_aux(void *app_ctx, const menu_item_t *item, char *buf
         return s_monitor_line[idx];
     }
     return "";
+}
+
+static bool_t rc_ui_delta_u16(uint16_t a, uint16_t b, uint16_t thresh)
+{
+    uint16_t lo = (a < b) ? a : b;
+    uint16_t hi = (a < b) ? b : a;
+    return ((uint16_t)(hi - lo) >= thresh) ? TRUE : FALSE;
+}
+
+static bool_t rc_ui_delta_i16(int16_t a, int16_t b, int16_t thresh)
+{
+    int16_t d = (int16_t)(a - b);
+    if (d < 0) {
+        d = (int16_t)(-d);
+    }
+    return (d >= thresh) ? TRUE : FALSE;
 }
 
 static const menu_item_t s_monitor_items[] = {
@@ -146,9 +176,36 @@ static const menu_page_t s_monitor_page = {
     .foot_hint = "JS2 back",
 };
 
+static const char *about_fw_aux(void *app_ctx, const menu_item_t *item, char *buf, size_t buflen)
+{
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+    (void)app_ctx;
+    (void)item;
+    if ((buf == NULL) || (buflen == 0U)) {
+        return (cfg->fw_version[0] != '\0') ? cfg->fw_version : "-";
+    }
+    (void)snprintf(buf, buflen, "%s",
+                   (cfg->fw_version[0] != '\0') ? cfg->fw_version : "-");
+    return buf;
+}
+
+static const char *about_sn_aux(void *app_ctx, const menu_item_t *item, char *buf, size_t buflen)
+{
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+    (void)app_ctx;
+    (void)item;
+    if ((buf == NULL) || (buflen == 0U)) {
+        return (cfg->serial[0] != '\0') ? cfg->serial : "-";
+    }
+    (void)snprintf(buf, buflen, "%s",
+                   (cfg->serial[0] != '\0') ? cfg->serial : "-");
+    return buf;
+}
+
 static const menu_item_t s_about_items[] = {
     { .label = "RC Controller", .type = MENU_ITEM_LABEL },
-    { .label = "joy cal + menu", .type = MENU_ITEM_LABEL },
+    { .label = "fw", .type = MENU_ITEM_LABEL, .aux = about_fw_aux },
+    { .label = "sn", .type = MENU_ITEM_LABEL, .aux = about_sn_aux },
 };
 
 static const menu_page_t s_about_page = {
@@ -182,8 +239,46 @@ static void rc_ui_enter_home(void)
     s_mode = RC_UI_MODE_HOME;
     s_js2_hold_ms = 0U;
     s_bat_poll_ms = RC_UI_BAT_POLL_MS;
+    s_throttle = 0;
+    s_steer = 0;
     lcd_panel_show_home();
     LOG_INFO("rc_ui: HOME");
+}
+
+static void rc_ui_home_compute_drive(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
+                                     int16_t *throttle_out, int16_t *steer_out)
+{
+    int16_t t = 0;
+    int16_t s = 0;
+    bool_t j2_drive = FALSE;
+
+    if ((throttle_out == NULL) || (steer_out == NULL)) {
+        return;
+    }
+
+    if (j2y >= RC_UI_DRIVE_BTN_THRESH) {
+        t = RC_UI_DRIVE_BTN_MAG;
+        j2_drive = TRUE;
+    } else if (j2y <= -RC_UI_DRIVE_BTN_THRESH) {
+        t = (int16_t)(-RC_UI_DRIVE_BTN_MAG);
+        j2_drive = TRUE;
+    }
+    if (j2x <= -RC_UI_DRIVE_BTN_THRESH) {
+        s = (int16_t)(-RC_UI_DRIVE_BTN_MAG);
+        j2_drive = TRUE;
+    } else if (j2x >= RC_UI_DRIVE_BTN_THRESH) {
+        s = RC_UI_DRIVE_BTN_MAG;
+        j2_drive = TRUE;
+    }
+
+    if (j2_drive != FALSE) {
+        *throttle_out = t;
+        *steer_out = s;
+        return;
+    }
+
+    *throttle_out = j1y;
+    *steer_out = j1x;
 }
 
 static void rc_ui_on_root_back(void *app_ctx, menu_engine_t *eng, const menu_page_t *page)
@@ -318,29 +413,69 @@ static const char *param_invert_fmt(void *app_ctx, const menu_item_t *item, int3
     return buf;
 }
 
-static bool_t rc_ui_update_monitor_cache(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT])
+/**
+ * 更新 Monitor 文案；返回需要重绘的行位图 bit0..3。
+ * 不触发整页 dirty——调用方对变化行做局部刷新。
+ */
+static uint8_t rc_ui_update_monitor_cache(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT])
 {
-    char next[4][28];
-    bool_t changed = FALSE;
+    uint16_t raw[4];
+    int16_t cmd[4];
     uint8_t i;
+    uint8_t dirty = 0U;
 
-    (void)snprintf(next[0], sizeof(next[0]), "%u/%d",
-                   (unsigned)js[0].raw.x_raw, (int)js[0].mapped.x_cmd);
-    (void)snprintf(next[1], sizeof(next[1]), "%u/%d",
-                   (unsigned)js[0].raw.y_raw, (int)js[0].mapped.y_cmd);
-    (void)snprintf(next[2], sizeof(next[2]), "%u/%d",
-                   (unsigned)js[1].raw.x_raw, (int)js[1].mapped.x_cmd);
-    (void)snprintf(next[3], sizeof(next[3]), "%u/%d",
-                   (unsigned)js[1].raw.y_raw, (int)js[1].mapped.y_cmd);
+    raw[0] = js[0].raw.x_raw;
+    raw[1] = js[0].raw.y_raw;
+    raw[2] = js[1].raw.x_raw;
+    raw[3] = js[1].raw.y_raw;
+    cmd[0] = js[0].mapped.x_cmd;
+    cmd[1] = js[0].mapped.y_cmd;
+    cmd[2] = js[1].mapped.x_cmd;
+    cmd[3] = js[1].mapped.y_cmd;
 
     for (i = 0U; i < 4U; i++) {
-        if (strcmp(next[i], s_monitor_line[i]) != 0) {
+        bool_t changed;
+
+        if (!s_mon_cache_valid) {
             changed = TRUE;
-            (void)strncpy(s_monitor_line[i], next[i], sizeof(s_monitor_line[i]) - 1U);
-            s_monitor_line[i][sizeof(s_monitor_line[i]) - 1U] = '\0';
+        } else {
+            changed = rc_ui_delta_u16(raw[i], s_mon_raw[i], RC_UI_MON_RAW_STEP) ||
+                      rc_ui_delta_i16(cmd[i], s_mon_cmd[i], RC_UI_MON_CMD_STEP);
         }
+        if (!changed) {
+            continue;
+        }
+        s_mon_raw[i] = raw[i];
+        s_mon_cmd[i] = cmd[i];
+        (void)snprintf(s_monitor_line[i], sizeof(s_monitor_line[i]), "%u/%d",
+                       (unsigned)raw[i], (int)cmd[i]);
+        dirty |= (uint8_t)(1U << i);
     }
-    return changed;
+
+    s_mon_cache_valid = TRUE;
+    return dirty;
+}
+
+/** 仅重绘 Monitor 中数值变化的行（标题/光标/其它行不动） */
+static void rc_ui_paint_monitor_rows(uint8_t dirty_mask)
+{
+    uint16_t focus_pos = 0U;
+    uint8_t i;
+    char rowbuf[36];
+
+    if (dirty_mask == 0U) {
+        return;
+    }
+
+    (void)menu_page_focus_cursor_pos(&s_monitor_page, menu_current_index(&s_menu), &focus_pos);
+
+    for (i = 0U; i < 4U; i++) {
+        if ((dirty_mask & (uint8_t)(1U << i)) == 0U) {
+            continue;
+        }
+        (void)snprintf(rowbuf, sizeof(rowbuf), "%s %s", s_mon_labels[i], s_monitor_line[i]);
+        lcd_panel_update_menu_row(i, rowbuf, (i == (uint8_t)focus_pos) ? TRUE : FALSE);
+    }
 }
 
 static void rc_ui_render_menu(void)
@@ -613,17 +748,18 @@ void rc_ui_tick(uint32_t dt_ms)
         return;
     }
 
-    s_throttle = js[BOARD_JOYSTICK_1].mapped.y_cmd;
-    s_steer = js[BOARD_JOYSTICK_1].mapped.x_cmd;
-
-    js2_down = js[BOARD_JOYSTICK_2].raw.btn_pressed;
     js1_edge = (js[BOARD_JOYSTICK_1].raw.btn_pressed && !s_js1_btn_prev) ? TRUE : FALSE;
-    js2_edge = (js2_down && !s_js2_btn_prev) ? TRUE : FALSE;
+    js2_edge = (js[BOARD_JOYSTICK_2].raw.btn_pressed && !s_js2_btn_prev) ? TRUE : FALSE;
     s_js1_btn_prev = js[BOARD_JOYSTICK_1].raw.btn_pressed;
-    s_js2_btn_prev = js2_down;
+    s_js2_btn_prev = js[BOARD_JOYSTICK_2].raw.btn_pressed;
 
     if (s_mode == RC_UI_MODE_HOME) {
-        battery_voltage_t bat;
+        js2_down = js[BOARD_JOYSTICK_2].raw.btn_pressed;
+        rc_ui_home_compute_drive(js[BOARD_JOYSTICK_1].mapped.x_cmd,
+                                 js[BOARD_JOYSTICK_1].mapped.y_cmd,
+                                 js[BOARD_JOYSTICK_2].mapped.x_cmd,
+                                 js[BOARD_JOYSTICK_2].mapped.y_cmd,
+                                 &s_throttle, &s_steer);
 
         if (js2_down) {
             s_js2_hold_ms = (uint16_t)(s_js2_hold_ms + dt_ms);
@@ -638,17 +774,18 @@ void rc_ui_tick(uint32_t dt_ms)
         s_bat_poll_ms = (uint16_t)(s_bat_poll_ms + dt_ms);
         if (s_bat_poll_ms >= RC_UI_BAT_POLL_MS) {
             s_bat_poll_ms = 0U;
-            if (battery_voltage_read_mv(&bat) > 0U) {
-                s_last_bat_mv = bat.current_mv;
-            }
+            s_last_bat_pct = battery_get_percent();
         }
 
         (void)lcd_panel_update_home(js[0].mapped.x_cmd, js[0].mapped.y_cmd,
                                     js[1].mapped.x_cmd, js[1].mapped.y_cmd,
                                     js[0].mapped.btn_pressed, js[1].mapped.btn_pressed,
-                                    s_last_bat_mv, proto_client_link_up());
+                                    s_last_bat_pct, proto_client_link_up(),
+                                    s_throttle, s_steer);
         return;
     }
+
+    js2_down = js[BOARD_JOYSTICK_2].raw.btn_pressed;
 
     if (s_mode == RC_UI_MODE_CAL) {
         rc_ui_cal_tick(js, js1_edge, js2_edge);
@@ -677,10 +814,21 @@ void rc_ui_tick(uint32_t dt_ms)
     rc_ui_menu_nav_from_stick(&js[BOARD_JOYSTICK_1]);
 
     if (menu_current_page(&s_menu) == &s_monitor_page) {
-        if (rc_ui_update_monitor_cache(js)) {
-            s_menu_dirty = TRUE;
+        uint8_t mon_dirty = rc_ui_update_monitor_cache(js);
+
+        if (s_menu_dirty) {
+            /* 进页/光标变化：整页一次；数值已写入 s_monitor_line */
+            rc_ui_render_menu();
+        } else if (mon_dirty != 0U) {
+            /* 仅数值变化：只刷对应行 */
+            rc_ui_paint_monitor_rows(mon_dirty);
         }
+        return;
     }
+
+    /* 离开 Monitor 后下次进入重新采首帧 */
+    s_mon_cache_valid = FALSE;
+
     if (s_menu_dirty) {
         rc_ui_render_menu();
     }

@@ -14,8 +14,10 @@
 #include "attitude.h"
 #include "battery.h"
 #include "board.h"
+#include "cfg.h"
 #include "device_profile.h"
 #include "event.h"
+#include "flash_layout.h"
 #include "imu.h"
 #include "led_scene.h"
 #include "log.h"
@@ -51,6 +53,25 @@ static bool_t s_imu_ready;
 static bool_t s_mag_ready;
 #endif
 static uint16_t s_sensor_retry_ms;
+
+static void rc_log_device_info(void)
+{
+    const nvs_cfg_t *cfg = nvs_cfg_get();
+    const device_product_profile_t *profile = device_profile_product();
+    uint32_t slot = BOOT_SLOT_A;
+
+    (void)nvs_boot_slot_get(&slot);
+
+    LOG_INFO("rc:nvs product=%s id=%lu serial=%s hw=%lu boot=%lu fw=%s slot=%lu first=%d",
+             profile->name,
+             (unsigned long)profile->product_id,
+             (cfg->serial[0] != '\0') ? cfg->serial : "-",
+             (unsigned long)cfg->hw_rev,
+             (unsigned long)cfg->boot_count,
+             (cfg->fw_version[0] != '\0') ? cfg->fw_version : "-",
+             (unsigned long)slot,
+             nvs_first_boot() ? 1 : 0);
+}
 
 static void rc_peripherals_init(void)
 {
@@ -98,11 +119,8 @@ static void rc_on_timer(void)
     rc_ui_tick(RC_CTRL_PERIOD_MS);
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_JOYSTICK)) {
-        if (rc_ui_drive_muted()) {
-            (void)proto_client_send_drive(0, 0);
-        } else {
-            (void)proto_client_send_drive(rc_ui_last_throttle(), rc_ui_last_steer());
-        }
+        proto_client_drive_update(rc_ui_last_throttle(), rc_ui_last_steer(),
+                                  rc_ui_drive_muted());
     }
 
     if (s_sensor_retry_ms < RC_SENSOR_RETRY_MS) {
@@ -123,6 +141,11 @@ static void rc_evt_task_fn(void *arg)
     if (nvs_init() != STATUS_OK) {
         LOG_WARN("rc: nvs_init fail (cal will use defaults)");
     }
+    if (nvs_startup_finalize() != STATUS_OK) {
+        LOG_WARN("rc: nvs_startup_finalize fail");
+    }
+    cfg_init();
+    rc_log_device_info();
 
     rc_peripherals_init();
 
@@ -138,6 +161,18 @@ static void rc_evt_task_fn(void *arg)
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_BATTERY)) {
         battery_init();
+        {
+            uint8_t pct = battery_get_percent();
+            battery_voltage_t bat;
+
+            if ((pct != BATTERY_PERCENT_UNKNOWN) &&
+                (battery_voltage_read_mv(&bat) > 0U)) {
+                LOG_INFO("rc: battery %lumV %u%%",
+                         (unsigned long)bat.current_mv, (unsigned)pct);
+            } else {
+                LOG_WARN("rc: battery read fail");
+            }
+        }
     }
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_LED)) {
@@ -185,7 +220,7 @@ status_t App_Start(void)
     }
 
     (void)proto_client_init();
-    (void)proto_client_send_hello();
+    /* HELLO 由 proto_client_tick 在未建链时周期重发，避免上电瞬间对端未就绪 */
 
     if (xTaskCreate(rc_evt_task_fn, APP_TASK_NAME_EVT, RC_EVT_STACK_WORDS, NULL, RC_TASK_PRIO_EVT,
                     &s_evt_task) != pdPASS) {

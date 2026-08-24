@@ -146,12 +146,24 @@
 #define PROTO_DRIVE_THROTTLE_MAX    1000
 #define PROTO_DRIVE_STEER_MAX       1000
 
+/** 无主机命令视为掉线；自动重连间隔与次数 */
+#define PROTO_LINK_LOST_MS          4000U
+#define PROTO_RECONNECT_PERIOD_MS   2000U
+#define PROTO_RECONNECT_MAX         5U
+
 #define PROTO_TASK_NAME_RX          "proto_rx"
 #define PROTO_RX_STACK_WORDS        (768U)
 #define PROTO_RX_PRIORITY           (4U)
 #define PROTO_RX_POLL_MS            (1U)
-#define PROTO_RX_GATE_MS            (30U)
-#define PROTO_RX_GATE_CMD_MS        120U
+/** 收字节后短暂避让 TX；过长会导致遥控流式 DRIVE 期间回包饿死 */
+#define PROTO_RX_GATE_MS            (8U)
+#define PROTO_RX_GATE_CMD_MS        (40U)
+/** TX 等待 RX 空闲的上限，超时仍发送（半双工保活优先） */
+#define PROTO_TX_RX_WAIT_MAX_MS     (5U)
+/** 链路保活：姿态推送最低频率（不受 host_rx_active 阻塞） */
+#define PROTO_KEEPALIVE_ATT_MS      (500U)
+/** 流式 DRIVE 合并 ACK 间隔（兼容上位机，避免每帧应答） */
+#define PROTO_DRIVE_ACK_PERIOD_MS   (200U)
 
 #define PROTO_TASK_NAME_TX          "proto_tx"
 #define PROTO_TX_STACK_WORDS        (512U)
@@ -228,6 +240,8 @@ static volatile bool s_drive_stop_req;
 static volatile int16_t s_drive_throttle;
 static volatile int16_t s_drive_steer;
 static volatile uint32_t s_drive_last_ms;
+static uint32_t s_keepalive_att_ms;
+static uint32_t s_drive_ack_last_ms;
 
 typedef enum {
     PROTO_PARSE_SOF0 = 0,
@@ -244,10 +258,25 @@ static struct {
 static volatile uint32_t s_rx_gate_until_ms;
 static volatile uint32_t s_push_suppress_until_ms;
 
+static uint32_t s_last_host_rx_ms;
+static bool_t s_host_linked;
+static uint8_t s_reconnect_attempts;
+static uint32_t s_reconnect_wait_ms;
+static volatile bool_t s_link_recover_req;
+static const char *s_link_recover_reason;
+static bool_t s_reconnect_budget_logged;
+
 static bool_t proto_host_rx_active(void);
 static void proto_rx_gate_hold(void);
 static bool_t proto_push_blocked(void);
 static void proto_suppress_pushes(uint32_t ms);
+static void proto_link_note_host_rx(void);
+static void proto_link_recover_do(const char *reason);
+static void proto_drive_stop_internal(void);
+static void proto_push_attitude(void);
+static bool_t proto_uart_send_frame(uint16_t cmd, uint8_t seq, const uint8_t *payload, uint16_t len,
+                                    uint8_t extra_flags, bool_t immediate, bool_t queue_front);
+static void proto_put_u32(uint8_t *p, uint32_t v);
 
 /* -------------------------------------------------------------------------- */
 /* CRC16-CCITT-FALSE                                                          */
@@ -361,6 +390,7 @@ static void proto_tx_unlock(void)
 static void proto_tx_task(void *arg)
 {
     proto_tx_item_t item;
+    uint32_t wait_ms;
 
     (void)arg;
 
@@ -368,8 +398,14 @@ static void proto_tx_task(void *arg)
         if (xQueueReceive(s_tx_queue, &item, portMAX_DELAY) != pdTRUE) {
             continue;
         }
-        while (proto_host_rx_active()) {
+        /*
+         * 短暂避让 RX，避免与半帧交错；超时仍发送。
+         * 旧逻辑无限等待 host_rx_active，流式 DRIVE 时回包会被饿死。
+         */
+        wait_ms = 0U;
+        while (proto_host_rx_active() && (wait_ms < PROTO_TX_RX_WAIT_MAX_MS)) {
             vTaskDelay(pdMS_TO_TICKS(1U));
+            wait_ms++;
         }
         if (!proto_tx_lock()) {
             continue;
@@ -396,10 +432,20 @@ static void proto_rx_gate_hold_cmd(void)
 
 static bool_t proto_push_blocked(void)
 {
-    if (proto_host_rx_active()) {
+    /* 仅抑制参数写等事务窗口；不再因 host_rx_active 永久挡遥测 */
+    if (proto_uptime_ms() < s_push_suppress_until_ms) {
         return TRUE;
     }
-    if (proto_uptime_ms() < s_push_suppress_until_ms) {
+    return FALSE;
+}
+
+static bool_t proto_push_soft_blocked(void)
+{
+    /* 完整遥测通道：RX 忙时暂缓，避免与半帧强行交错 */
+    if (proto_push_blocked()) {
+        return TRUE;
+    }
+    if (proto_host_rx_active()) {
         return TRUE;
     }
     return FALSE;
@@ -408,6 +454,64 @@ static bool_t proto_push_blocked(void)
 static void proto_suppress_pushes(uint32_t ms)
 {
     s_push_suppress_until_ms = proto_uptime_ms() + ms;
+}
+
+static void proto_link_note_host_rx(void)
+{
+    uint32_t now = proto_uptime_ms();
+
+    s_last_host_rx_ms = (now == 0U) ? 1U : now;
+    if (s_host_linked == FALSE) {
+        s_host_linked = TRUE;
+        LOG_INFO("proto: host link UP");
+    }
+    s_reconnect_attempts = 0U;
+    s_reconnect_wait_ms = 0U;
+    s_reconnect_budget_logged = FALSE;
+}
+
+static void proto_uart_rx_drain(void)
+{
+    char ch;
+
+    while (UART_Getc(&ch) != 0) {
+    }
+}
+
+static void proto_parse_reset_idle(void)
+{
+    s_parser.state = PROTO_PARSE_SOF0;
+    s_parser.body_len = 0U;
+    s_rx_gate_until_ms = 0U;
+}
+
+static void proto_link_send_announce(void)
+{
+    uint8_t payload[4];
+
+    /* 无请求宣告：让遥控器 UART 收到字节 → link UP，并提示本机仍在线 */
+    proto_put_u32(payload, proto_uptime_ms());
+    (void)proto_uart_send_frame((uint16_t)(PROTO_CMD_PING | PROTO_RESPONSE_BIT), 0U,
+                                payload, (uint16_t)sizeof(payload),
+                                PROTO_FLAG_UNSOLICITED, FALSE, TRUE);
+}
+
+static void proto_link_recover_do(const char *reason)
+{
+    LOG_INFO("proto: link recover (%s) attempt=%u/%u",
+             (reason != NULL) ? reason : "auto",
+             (unsigned)(s_reconnect_attempts + 1U),
+             (unsigned)PROTO_RECONNECT_MAX);
+
+    proto_drive_stop_internal();
+    s_push_suppress_until_ms = 0U;
+    proto_parse_reset_idle();
+    proto_uart_rx_drain();
+    proto_link_send_announce();
+    /* 强制推一帧姿态，帮助对端保活 */
+    if (s_base.active != FALSE) {
+        proto_push_attitude();
+    }
 }
 
 static bool_t proto_host_rx_active(void)
@@ -1540,7 +1644,16 @@ static void proto_handle_drive(uint8_t seq, const uint8_t *payload, uint16_t len
     s_drive_last_ms = proto_uptime_ms();
     s_drive_active = true;
     s_drive_stop_req = false;
-    proto_reply_ack(PROTO_CMD_DRIVE, seq, NULL, 0U);
+    /*
+     * 流式 DRIVE：合并 ACK（≤5Hz），非法仍即时 NAK。
+     * 全帧 ACK 会占满半双工，导致保活推送饿死、遥控器 link timeout。
+     */
+    if ((s_drive_ack_last_ms == 0U) ||
+        ((s_drive_last_ms - s_drive_ack_last_ms) >= PROTO_DRIVE_ACK_PERIOD_MS)) {
+        s_drive_ack_last_ms = s_drive_last_ms;
+        (void)proto_uart_send_frame((uint16_t)(PROTO_CMD_DRIVE | PROTO_RESPONSE_BIT), seq,
+                                    NULL, 0U, 0U, FALSE, FALSE);
+    }
 }
 
 static void proto_handle_drive_stop(uint8_t seq)
@@ -1550,6 +1663,7 @@ static void proto_handle_drive_stop(uint8_t seq)
         return;
     }
     proto_drive_stop_internal();
+    s_drive_ack_last_ms = 0U;
     proto_reply_ack(PROTO_CMD_DRIVE_STOP, seq, NULL, 0U);
 }
 
@@ -2361,10 +2475,13 @@ static void proto_parse_byte(uint8_t byte)
             break;
         }
 
-        if ((cmd != PROTO_CMD_PING) && (cmd != PROTO_CMD_GET_TELEMETRY)) {
+        /* DRIVE/STOP 高频：勿刷 INFO，否则 UART7 阻塞会拖垮遥控时序 */
+        if ((cmd != PROTO_CMD_PING) && (cmd != PROTO_CMD_GET_TELEMETRY) &&
+            (cmd != PROTO_CMD_DRIVE) && (cmd != PROTO_CMD_DRIVE_STOP)) {
             LOG_INFO("proto: rx cmd=0x%04x seq=%u len=%u", (unsigned)cmd, (unsigned)seq,
                      (unsigned)payload_len);
         }
+        proto_link_note_host_rx();
         proto_dispatch(cmd, seq, payload, payload_len);
         proto_parse_reset();
         break;
@@ -2389,6 +2506,18 @@ static void proto_rx_task(void *arg)
             s_stack_logged = true;
             LOG_INFO("proto: stack hw proto_rx=%u words",
                      (unsigned)uxTaskGetStackHighWaterMark(NULL));
+        }
+
+        if (s_link_recover_req != FALSE) {
+            const char *reason = s_link_recover_reason;
+
+            s_link_recover_req = FALSE;
+            s_link_recover_reason = NULL;
+            proto_link_recover_do(reason);
+            if (s_reconnect_attempts < 0xFFU) {
+                s_reconnect_attempts++;
+            }
+            s_reconnect_wait_ms = PROTO_RECONNECT_PERIOD_MS;
         }
 
         char ch;
@@ -2416,12 +2545,26 @@ void proto_telemetry_tick(uint32_t period_ms)
         if ((now - s_drive_last_ms) > PROTO_DRIVE_TIMEOUT_MS) {
             proto_motor_all_stop();
             s_drive_active = false;
+            LOG_WARN("proto: drive timeout %ums → stop", (unsigned)PROTO_DRIVE_TIMEOUT_MS);
         } else {
             proto_apply_drive(s_drive_throttle, s_drive_steer);
         }
     }
 
-    if (proto_push_blocked()) {
+    /*
+     * 链路保活：2Hz 姿态，只避开参数写 suppress，不受 host_rx_active 阻塞。
+     * 保证遥控器能持续收到字节，避免 30s link timeout。
+     */
+    s_keepalive_att_ms += period_ms;
+    if (s_keepalive_att_ms >= PROTO_KEEPALIVE_ATT_MS) {
+        s_keepalive_att_ms = 0U;
+        if (proto_push_blocked() == FALSE) {
+            proto_push_attitude();
+            s_base.acc_att_ms = 0U;
+        }
+    }
+
+    if (proto_push_soft_blocked()) {
         return;
     }
 
@@ -2573,7 +2716,82 @@ status_t proto_uart_service_start(void)
     }
 
     LOG_INFO("proto: uart0 service ready");
+    /* 上电后主动宣告，便于遥控器在未复位小车时也能建链 */
+    s_host_linked = FALSE;
+    s_last_host_rx_ms = 0U;
+    s_reconnect_attempts = 0U;
+    s_reconnect_wait_ms = 0U;
+    s_link_recover_req = TRUE;
+    s_link_recover_reason = "boot";
     return STATUS_OK;
+}
+
+bool_t proto_host_is_linked(void)
+{
+    return s_host_linked;
+}
+
+void proto_link_force_reconnect(void)
+{
+    s_host_linked = FALSE;
+    s_last_host_rx_ms = 0U;
+    s_reconnect_attempts = 0U;
+    s_reconnect_wait_ms = 0U;
+    s_reconnect_budget_logged = FALSE;
+    s_link_recover_req = TRUE;
+    s_link_recover_reason = "button";
+    LOG_INFO("proto: force reconnect (button), auto budget=%u",
+             (unsigned)PROTO_RECONNECT_MAX);
+}
+
+void proto_link_tick(uint32_t period_ms)
+{
+    uint32_t now;
+    uint32_t silent_ms;
+
+    if (s_rx_task == NULL) {
+        return;
+    }
+
+    now = proto_uptime_ms();
+
+    if (s_host_linked != FALSE) {
+        if (s_last_host_rx_ms == 0U) {
+            return;
+        }
+        silent_ms = now - s_last_host_rx_ms;
+        if (silent_ms < PROTO_LINK_LOST_MS) {
+            return;
+        }
+        s_host_linked = FALSE;
+        LOG_WARN("proto: host link LOST (silent %lums)", (unsigned long)silent_ms);
+        s_reconnect_attempts = 0U;
+        s_reconnect_wait_ms = 0U;
+    }
+
+    if (s_reconnect_attempts >= PROTO_RECONNECT_MAX) {
+        if (s_reconnect_budget_logged == FALSE) {
+            s_reconnect_budget_logged = TRUE;
+            LOG_WARN("proto: reconnect budget exhausted; press OK to retry");
+        }
+        return;
+    }
+
+    if (s_link_recover_req != FALSE) {
+        return;
+    }
+
+    if (s_reconnect_wait_ms < period_ms) {
+        s_reconnect_wait_ms = 0U;
+    } else {
+        s_reconnect_wait_ms -= period_ms;
+    }
+
+    if (s_reconnect_wait_ms == 0U) {
+        s_link_recover_req = TRUE;
+        s_link_recover_reason = "auto";
+        s_reconnect_wait_ms = PROTO_RECONNECT_PERIOD_MS;
+    }
 }
 
 void proto_echo_set(bool_t enable)

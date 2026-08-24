@@ -73,6 +73,14 @@ extern "C" {
 status_t proto_uart_service_start(void);
 void proto_telemetry_tick(uint32_t period_ms);
 
+/**
+ * 主机链路监测与主动重连（在 app 定时器上下文调用）。
+ * 无主机有效命令超过阈值时，最多自动恢复 5 次；按键可强制再启一轮。
+ */
+void proto_link_tick(uint32_t period_ms);
+void proto_link_force_reconnect(void);
+bool_t proto_host_is_linked(void);
+
 /** 原始字节回显（绕过帧解析），用于 UART0/蓝牙链路验证 */
 void proto_echo_set(bool_t enable);
 bool_t proto_echo_get(void);

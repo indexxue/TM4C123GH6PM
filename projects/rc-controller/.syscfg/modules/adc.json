@@ -5,6 +5,17 @@
     { "name": "JS1_Y", "module": "ADC0", "channel": 6, "pin": "PD1", "role": "joystick", "_usage": "操纵杆1 Y" },
     { "name": "JS2_X", "module": "ADC0", "channel": 5, "pin": "PD2", "role": "joystick", "_usage": "操纵杆2 X" },
     { "name": "JS2_Y", "module": "ADC0", "channel": 4, "pin": "PD3", "role": "joystick", "_usage": "操纵杆2 Y" },
-    { "name": "Battery", "module": "ADC1", "channel": 0, "pin": "PE3", "role": "battery", "_usage": "3.7V 锂电 100K/100K 分压" }
+    {
+      "name": "Battery",
+      "module": "ADC1",
+      "channel": 0,
+      "pin": "PE3",
+      "role": "battery",
+      "divider_top_ohm": 100000,
+      "divider_bottom_ohm": 100000,
+      "mv_empty": 3300,
+      "mv_full": 4200,
+      "_usage": "3.7V 锂电 100K/100K 分压"
+    }
   ]
 }

@@ -2,6 +2,21 @@
 
 基于 TM4C123GH6PM + FreeRTOS 的手持遥控器，经 **UART0 蓝牙**向小车发送 `docs/bluetooth-protocol.md` 协议帧。
 
+**使用说明（操作/校准/菜单）** → [docs/rc-controller-usage.md](../../docs/rc-controller-usage.md)  
+**设计文档** → [docs/rc-joystick-menu-design.md](../../docs/rc-joystick-menu-design.md)
+
+## 功能摘要（阶段 A + B1）
+
+| 功能 | 说明 |
+|------|------|
+| 主屏 HOME | 双十字准星 + 电池 + 蓝牙 LINK |
+| JS1 遥控 | Y→throttle，X→steer，50 Hz `DRIVE` |
+| 设置菜单 | 长按 JS2 ≥1.5 s 进入；菜单/校准时 **禁发 DRIVE（发 0）** |
+| 摇杆校准 | 回中 → 极限（每侧 ≥600 ADC）→ 确认写 NVS |
+| NVS | `cal/joy` blob：min/center/max ×4 轴 + deadband + invert |
+| 通道监视 | 四轴 raw/cmd |
+| 死区 / 反转 | 菜单可调，改完即落盘 |
+
 ## 引脚分配（当前板）
 
 配置源：`projects/rc-controller/.syscfg/`（改后重新编译）
@@ -11,8 +26,8 @@
 | 文件 | 说明 |
 |------|------|
 | `board.c` / `board.h` | 自动生成：UART/I2C/SPI/ADC 初始化 |
-| `joystick.c` | 双摇杆 ADC + 按键 |
-| `lcd_panel.c` | ST7789 1.14" 显示 |
+| `joystick.c` | 双摇杆 ADC + 按键 + 校准表映射 |
+| `lcd_panel.c` | ST7789 1.14" 主屏/菜单/校准 UI |
 | `nrf24.c` | NRF24 GPIO 占位（SPI 驱动待接） |
 
 产品独有逻辑在 `source/`（勿放进 Common）：
@@ -22,6 +37,8 @@
 | `joy_cal.*` | 摇杆校准 NVS |
 | `rc_ui.*` | HOME/菜单/校准 UI 状态机 |
 | `rc_lcd_cfg.h` | 屏向翻转 / BGR·RGB / 主题色宏 |
+
+共享菜单引擎：`components/menu/`（`build.ps1` 已编入本工程）。
 
 `main/` 仅保留薄入口（`app.c`、`main.c`、启动与 hooks）。
 
@@ -54,34 +71,32 @@
 - 主机：`Common/src/proto_client.c`（发 `HELLO` / `DRIVE`）
 - 小车：`Common/src/proto.c`（收 `DRIVE`）
 
-操纵杆1：Y→throttle，X→steer。
+操纵杆1：Y→throttle，X→steer。操纵杆2：阶段 A 仅占位（监视/校准），不发 aux。
 
-## 冒烟测试（UART7 @ 115200）
+## 调试日志（UART7 @ 115200）
 
-上电后 `app.c` 内 `RC_BOOT_SMOKE` 块自动跑一轮外设检测（验证通过后改 `RC_BOOT_SMOKE` 为 0 或删除该块）。日志示例：
+上电正常应看到类似：
 
 ```
-[INFO] smoke: start product=rc-controller
-[INFO] smoke: i2c 0x2C,0x69
-[INFO] smoke: imu ok
-[INFO] smoke: mag ok
-[INFO] smoke: joy j1=2048,1850
-[INFO] smoke: bat 3720mV
-[INFO] smoke: led green
-[INFO] smoke: spi ok
-[INFO] smoke: proto link up
-[INFO] smoke: done pass=8/8
+[INFO] rc: tasks started
+[INFO] joy_cal: loaded from nvs
+[INFO] lcd: st7789 240x135 ready
+[INFO] rc: ui ready mode=HOME (hold JS2 for menu)
 ```
 
-无需交互命令；失败项会打 `[WARN] smoke: ...`。
+进入菜单 / 校准 / 保存校准时会有 `rc_ui:` 前缀日志。
 
 ## 显示（ST7789 1.14" 240×135）
 
 - 驱动：`cbb/st7789` + `board/lcd_panel.c`
-- 横屏：标题、版本、摇杆 T/S、电池 mV、蓝牙链路状态
-- 上电约 1s 内应看到深蓝底 + 白字 **RC Controller**
+- **HOME**：顶栏 BAT xx% + LINK，左右 JS1/JS2 十字准星，底栏进菜单提示
+- **Settings**：列表菜单（校准、监视、死区、反转、恢复默认、关于）
+- **Calibrate**：三步向导 + 双十字实时反馈
+
+操作细节见 [docs/rc-controller-usage.md](../../docs/rc-controller-usage.md)。
 
 ## 待实现
 
 - NRF24 2.4G 驱动
-- 操纵杆2 功能映射
+- 操纵杆2 业务通道映射（aux / 云台等）
+- Expo / Dual Rate / EPA
