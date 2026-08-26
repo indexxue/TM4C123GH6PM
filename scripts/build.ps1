@@ -415,6 +415,7 @@ function Get-MainSources {
         $RcSourceDir = Join-Path $CarDir "source"
         $sources += @(
             (Join-Path $RcSourceDir "joy_cal.c"),
+            (Join-Path $RcSourceDir "rc_sub.c"),
             (Join-Path $RcSourceDir "rc_ui.c"),
             (Join-Path $ProjectRoot "components\menu\Src\menu.c")
         )

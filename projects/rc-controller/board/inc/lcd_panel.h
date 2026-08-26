@@ -23,12 +23,29 @@ void lcd_panel_show_home(void);
 /**
  * 刷新主屏动态内容（仅变化区域；无变化则不写屏）。
  * j1/j2 cmd ∈ [-1000,1000]；btn 按下为非 0；bat_percent 0..100（0xFF=未知）。
+ * drive_armed：FALSE=IDLE，TRUE=DRIVE；tip 非空时覆盖底栏提示（进控失败等）。
  * @return TRUE 表示发生了绘制
  */
 bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                              bool_t j1_btn, bool_t j2_btn,
                              uint8_t bat_percent, bool_t link_up,
-                             int16_t drive_throttle, int16_t drive_steer);
+                             int16_t drive_throttle, int16_t drive_steer,
+                             bool_t drive_armed, const char *tip);
+
+/** DRIVE 遥测页静态骨架 */
+void lcd_panel_show_drive(void);
+
+/**
+ * 刷新遥测页文案行（bat/us/att/spd/enc 已格式化为显示串，可为 "null"）。
+ * @return TRUE 表示发生了绘制
+ */
+bool_t lcd_panel_update_drive(bool_t link_up,
+                              const char *bat, const char *us, const char *att,
+                              const char *spd, const char *enc,
+                              int16_t throttle, int16_t steer);
+
+/** 订阅勾选页：lines 最多 5 行；cursor 高亮行 */
+void lcd_panel_show_subscribe(const char *const lines[], uint8_t line_count, uint8_t cursor);
 
 /** 菜单列表：title + 最多 4 行可见；cursor_vis 为可见区高亮行 0..3 */
 void lcd_panel_show_menu(const char *title,

@@ -95,21 +95,29 @@ typedef struct {
 
 ### 5.1 模式
 
-| 模式 | 进入 | 退出 | DRIVE |
-|------|------|------|-------|
-| **HOME** | 上电默认 | — | 按校准后 cmd 发送 |
-| **MENU** | 长按 JS2 ≥ 1.5 s | 根页 BACK / 退出项 | **禁发**（发 0,0 或停发） |
-| **CAL_WIZARD** | 菜单「摇杆校准」 | 完成 / 取消 | **禁发** |
+| 模式 | 进入 | 退出 | DRIVE 帧 |
+|------|------|------|----------|
+| **HOME (IDLE)** | 上电默认；从 DRIVE/MENU/CAL 返回 | — | **禁发** |
+| **DRIVE** | HOME 下 JS1 **短按**（须 LINK UP + 四轴死区内）→ **全屏遥测页** | JS1 回中短按；JS2 长按进菜单前。链路闪断**不退出**（禁发+LINK --，恢复后重订续控） | JS1 Y→throttle，X→steer（link DOWN 时禁发） |
+| **SUBSCRIBE** | DRIVE 下 JS2 **短按松手** | Save / Cancel / JS2 短按 → 回 DRIVE（会话保持） | **禁发**（mute） |
+| **MENU** | HOME/DRIVE/SUBSCRIBE 长按 JS2 ≥ 1.5 s（先 `DRIVE_STOP` + 退订可选） | 根页 BACK → **HOME** | **禁发** |
+| **CAL_WIZARD** | 菜单「摇杆校准」 | 完成 / 取消 → MENU | **禁发** |
 
-### 5.2 HOME / MENU 按键
+协议仍用既有 `DRIVE`/`DRIVE_STOP`/`SUBSCRIBE`/`UNSUBSCRIBE`；会话门控在遥控器 UI。
 
-| 输入 | HOME | MENU |
-|------|------|------|
-| JS1 Y↑ / Y↓ | （控制） | `MENU_EVT_UP` / `DOWN` |
-| JS1 X← / X→ | （控制） | 调 `PARAM`：`LEFT` / `RIGHT` |
-| JS1 键短按 | （预留，阶段 A 不用） | `MENU_EVT_ENTER` |
-| JS2 键短按 | （预留） | `MENU_EVT_BACK` |
-| JS2 键长按 ≥1.5 s | 进 MENU | 忽略或仍作 BACK（实现任选，文档约定：**仅 HOME 触发进入**） |
+**DRIVE 遥测页字段**：电量% / 超声 mm / 姿态 RPY / 速度 L/R RPM / 编码器均值；缺或超时（2s）→ `null`。  
+**默认可选订阅**（NVS `rc/sub`）：电量 + 超声 + 电机 RPM；进 DRIVE 时下发，出控 `UNSUBSCRIBE`。
+
+### 5.2 HOME / DRIVE / SUBSCRIBE / MENU 按键
+
+| 输入 | HOME (IDLE) | DRIVE | SUBSCRIBE | MENU |
+|------|-------------|-------|-----------|------|
+| JS1 Y↑ / Y↓ | （仅可视化） | throttle | 光标上下 | `MENU_EVT_UP` / `DOWN` |
+| JS1 X← / X→ | （仅可视化） | steer | — | 调 `PARAM` |
+| JS1 键短按 | 尝试进 DRIVE | **回中后**短按退出 → HOME | 勾选翻转 / Save / Cancel | `MENU_EVT_ENTER` |
+| JS2 键短按松手 | — | 进订阅页 | Cancel 回 DRIVE | `MENU_EVT_BACK` |
+| JS2 键长按 ≥1.5 s | 进 MENU | 先停控退订再进 MENU | 同左 | — |
+| JS2 摇杆 | 本阶段不参与控车 | 不参与 | — | — |
 
 摇杆导航需：**死区门限 + 边沿触发**（推过阈值产生一次事件，回中后才能再触发），避免连跳。
 
@@ -133,17 +141,18 @@ typedef struct {
 
 ```
 ┌──────────────────────────────────────┐
-│ BAT xxxxmV          LINK ●/○         │  ← 顶栏
+│ RC  BAT xx%  IDLE/DRIVE   LINK ●/○   │  ← 顶栏含会话状态
 │                                      │
 │   ┌────┐              ┌────┐         │
 │   │  + │   JS1        │  + │   JS2   │  ← 双十字，点=归一化 cmd
 │   └────┘              └────┘         │
-│   T:±xxxx S:±xxxx                    │  ← 可选小字（JS1）
+│ JS1:arm hold JS2:menu                │  ← IDLE 底栏；DRIVE 为 disarm
 └──────────────────────────────────────┘
 ```
 
 - 十字中心 = 死区中心；点坐标由 `x_cmd/y_cmd` 线性映射到准星框
 - 刷新：与控制周期同级或略慢（如 10–20 Hz），避免 SPI 抢带宽
+- 进控失败：底栏短暂显示 `CENTER` 或 `NO LINK`
 
 通道条 **不** 放主屏；见菜单「通道监视」。
 

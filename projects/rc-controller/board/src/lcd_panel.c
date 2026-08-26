@@ -53,6 +53,18 @@ static uint8_t s_home_bat_pct;
 static bool_t s_home_link_up;
 static int16_t s_home_drive_t;
 static int16_t s_home_drive_s;
+static bool_t s_home_drive_armed;
+static char s_home_tip[20];
+static char s_home_foot[28];
+static bool_t s_drive_cache_valid;
+static bool_t s_drive_link_up;
+static char s_drive_bat[16];
+static char s_drive_us[16];
+static char s_drive_att[24];
+static char s_drive_spd[24];
+static char s_drive_enc[24];
+static int16_t s_drive_t;
+static int16_t s_drive_s;
 static int16_t s_cal_dot_j1x;
 static int16_t s_cal_dot_j1y;
 static int16_t s_cal_dot_j2x;
@@ -301,10 +313,11 @@ void lcd_panel_show_home(void)
 
     lcd_show_string(&s_lcd, 4U, 2U, (const uint8_t *)"RC", HOME_FG, HOME_BG, 16U, 0U);
     lcd_show_string(&s_lcd, 40U, 4U, (const uint8_t *)"BAT --%", RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 112U, 4U, (const uint8_t *)"IDLE", RC_LCD_COLOR_MUTED, HOME_BG, 12U, 0U);
     lcd_show_string(&s_lcd, 170U, 4U, (const uint8_t *)"LINK --", RC_LCD_COLOR_OK, HOME_BG, 12U, 0U);
 
     lcd_show_string(&s_lcd, 44U, 28U, (const uint8_t *)"JS1", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
-    lcd_show_string(&s_lcd, 164U, 28U, (const uint8_t *)"JS2 drv", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 164U, 28U, (const uint8_t *)"JS2", RC_LCD_COLOR_WARN, HOME_BG, 12U, 0U);
 
     stick_layer_draw_static(&s_stick_j1);
     stick_layer_draw_static(&s_stick_j2);
@@ -314,28 +327,43 @@ void lcd_panel_show_home(void)
     s_dot_j2x = 0;
     s_dot_j2y = 0;
     s_home_cache_valid = FALSE;
+    s_home_drive_armed = FALSE;
+    s_home_tip[0] = '\0';
+    (void)snprintf(s_home_foot, sizeof(s_home_foot), "JS1:arm hold JS2:menu");
     draw_dot(J1_CX, J1_CY, 0, 0, RC_LCD_COLOR_ACCENT);
     draw_dot(J2_CX, J2_CY, 0, 0, RC_LCD_COLOR_ACCENT);
 
-    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)"JS2:F/B/L/R  hold:menu", RC_LCD_COLOR_MUTED,
-                    HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)s_home_foot, RC_LCD_COLOR_MUTED, HOME_BG, 12U,
+                    0U);
 }
 
 bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                              bool_t j1_btn, bool_t j2_btn,
                              uint8_t bat_percent, bool_t link_up,
-                             int16_t drive_throttle, int16_t drive_steer)
+                             int16_t drive_throttle, int16_t drive_steer,
+                             bool_t drive_armed, const char *tip)
 {
     char buf[24];
+    char foot[28];
     bool_t stick_dirty;
     bool_t btn_dirty;
     bool_t bat_dirty;
     bool_t link_dirty;
     bool_t drive_dirty;
+    bool_t mode_dirty;
+    bool_t foot_dirty;
     bool_t drew = FALSE;
 
     if (s_ready == FALSE) {
         return FALSE;
+    }
+
+    if ((tip != NULL) && (tip[0] != '\0')) {
+        (void)snprintf(foot, sizeof(foot), "%s", tip);
+    } else if (drive_armed != FALSE) {
+        (void)snprintf(foot, sizeof(foot), "JS1:disarm hold:menu");
+    } else {
+        (void)snprintf(foot, sizeof(foot), "JS1:arm hold JS2:menu");
     }
 
     stick_dirty = !s_home_cache_valid ||
@@ -348,8 +376,11 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
     link_dirty = !s_home_cache_valid || (link_up != s_home_link_up);
     drive_dirty = !s_home_cache_valid || (drive_throttle != s_home_drive_t) ||
                   (drive_steer != s_home_drive_s);
+    mode_dirty = !s_home_cache_valid || (drive_armed != s_home_drive_armed);
+    foot_dirty = !s_home_cache_valid || (strncmp(foot, s_home_foot, sizeof(foot)) != 0);
 
-    if (!stick_dirty && !btn_dirty && !bat_dirty && !link_dirty && !drive_dirty) {
+    if (!stick_dirty && !btn_dirty && !bat_dirty && !link_dirty && !drive_dirty && !mode_dirty &&
+        !foot_dirty) {
         return FALSE;
     }
 
@@ -410,6 +441,15 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
         drew = TRUE;
     }
 
+    if (mode_dirty) {
+        lcd_fill(&s_lcd, 112U, 4U, 160U, 16U, HOME_BG);
+        lcd_show_string(&s_lcd, 112U, 4U,
+                        (const uint8_t *)(drive_armed ? "DRIVE" : "IDLE"),
+                        drive_armed ? RC_LCD_COLOR_OK : RC_LCD_COLOR_MUTED, HOME_BG, 12U, 0U);
+        s_home_drive_armed = drive_armed;
+        drew = TRUE;
+    }
+
     if (drive_dirty) {
         char f = (drive_throttle > 0) ? 'F' : '-';
         char b = (drive_throttle < 0) ? 'B' : '-';
@@ -427,6 +467,22 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
         drew = TRUE;
     }
 
+    if (foot_dirty) {
+        uint16_t w = st7789_display_width(&s_lcd);
+        uint16_t tip_color =
+            ((tip != NULL) && (tip[0] != '\0')) ? RC_LCD_COLOR_WARN : RC_LCD_COLOR_MUTED;
+
+        lcd_fill(&s_lcd, 4U, 120U, w, 135U, HOME_BG);
+        lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)foot, tip_color, HOME_BG, 12U, 0U);
+        (void)snprintf(s_home_foot, sizeof(s_home_foot), "%s", foot);
+        if ((tip != NULL) && (tip[0] != '\0')) {
+            (void)snprintf(s_home_tip, sizeof(s_home_tip), "%s", tip);
+        } else {
+            s_home_tip[0] = '\0';
+        }
+        drew = TRUE;
+    }
+
     s_home_j1x = j1x;
     s_home_j1y = j1y;
     s_home_j2x = j2x;
@@ -435,6 +491,185 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
     s_home_j2_btn = j2_btn;
     s_home_cache_valid = TRUE;
     return drew;
+}
+
+void lcd_panel_show_drive(void)
+{
+    uint16_t w;
+    uint16_t h;
+
+    if (s_ready == FALSE) {
+        return;
+    }
+
+    w = st7789_display_width(&s_lcd);
+    h = st7789_display_height(&s_lcd);
+    lcd_fill_fast(&s_lcd, 0U, 0U, w, h, HOME_BG);
+
+    lcd_show_string(&s_lcd, 4U, 2U, (const uint8_t *)"DRIVE", RC_LCD_COLOR_OK, HOME_BG, 16U, 0U);
+    lcd_show_string(&s_lcd, 170U, 4U, (const uint8_t *)"LINK --", RC_LCD_COLOR_MUTED, HOME_BG, 12U,
+                    0U);
+
+    lcd_show_string(&s_lcd, 4U, 22U, (const uint8_t *)"Bat  --", HOME_FG, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 38U, (const uint8_t *)"US   --", HOME_FG, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 54U, (const uint8_t *)"Att  --", HOME_FG, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 70U, (const uint8_t *)"Spd  --", HOME_FG, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 86U, (const uint8_t *)"Enc  --", HOME_FG, HOME_BG, 12U, 0U);
+    lcd_show_string(&s_lcd, 4U, 102U, (const uint8_t *)"CMD ---", RC_LCD_COLOR_MUTED, HOME_BG, 12U,
+                    0U);
+    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)"JS2:sub hold:menu", RC_LCD_COLOR_MUTED,
+                    HOME_BG, 12U, 0U);
+
+    s_drive_cache_valid = FALSE;
+    s_drive_bat[0] = '\0';
+    s_drive_us[0] = '\0';
+    s_drive_att[0] = '\0';
+    s_drive_spd[0] = '\0';
+    s_drive_enc[0] = '\0';
+}
+
+static void lcd_drive_draw_row(uint16_t y, const char *label, const char *value, uint16_t color)
+{
+    char line[36];
+
+    (void)snprintf(line, sizeof(line), "%-4s %s", label, (value != NULL) ? value : "null");
+    lcd_fill(&s_lcd, 4U, y, 236U, (uint16_t)(y + 14U), HOME_BG);
+    lcd_show_string(&s_lcd, 4U, y, (const uint8_t *)line, color, HOME_BG, 12U, 0U);
+}
+
+bool_t lcd_panel_update_drive(bool_t link_up,
+                              const char *bat, const char *us, const char *att,
+                              const char *spd, const char *enc,
+                              int16_t throttle, int16_t steer)
+{
+    bool_t drew = FALSE;
+    bool_t link_dirty;
+    bool_t row_dirty;
+    char cmd[20];
+
+    if (s_ready == FALSE) {
+        return FALSE;
+    }
+    if (bat == NULL) {
+        bat = "null";
+    }
+    if (us == NULL) {
+        us = "null";
+    }
+    if (att == NULL) {
+        att = "null";
+    }
+    if (spd == NULL) {
+        spd = "null";
+    }
+    if (enc == NULL) {
+        enc = "null";
+    }
+
+    link_dirty = !s_drive_cache_valid || (link_up != s_drive_link_up);
+    if (link_dirty) {
+        lcd_fill(&s_lcd, 170U, 4U, 236U, 16U, HOME_BG);
+        lcd_show_string(&s_lcd, 170U, 4U,
+                        (const uint8_t *)(link_up ? "LINK OK" : "LINK --"),
+                        link_up ? RC_LCD_COLOR_OK : RC_LCD_COLOR_MUTED, HOME_BG, 12U, 0U);
+        s_drive_link_up = link_up;
+        drew = TRUE;
+    }
+
+    row_dirty = !s_drive_cache_valid || (strncmp(bat, s_drive_bat, sizeof(s_drive_bat)) != 0);
+    if (row_dirty) {
+        lcd_drive_draw_row(22U, "Bat", bat,
+                           (strncmp(bat, "null", 4) == 0) ? RC_LCD_COLOR_MUTED : HOME_FG);
+        (void)snprintf(s_drive_bat, sizeof(s_drive_bat), "%s", bat);
+        drew = TRUE;
+    }
+
+    row_dirty = !s_drive_cache_valid || (strncmp(us, s_drive_us, sizeof(s_drive_us)) != 0);
+    if (row_dirty) {
+        lcd_drive_draw_row(38U, "US", us,
+                           (strncmp(us, "null", 4) == 0) ? RC_LCD_COLOR_MUTED : HOME_FG);
+        (void)snprintf(s_drive_us, sizeof(s_drive_us), "%s", us);
+        drew = TRUE;
+    }
+
+    row_dirty = !s_drive_cache_valid || (strncmp(att, s_drive_att, sizeof(s_drive_att)) != 0);
+    if (row_dirty) {
+        lcd_drive_draw_row(54U, "Att", att,
+                           (strncmp(att, "null", 4) == 0) ? RC_LCD_COLOR_MUTED : HOME_FG);
+        (void)snprintf(s_drive_att, sizeof(s_drive_att), "%s", att);
+        drew = TRUE;
+    }
+
+    row_dirty = !s_drive_cache_valid || (strncmp(spd, s_drive_spd, sizeof(s_drive_spd)) != 0);
+    if (row_dirty) {
+        lcd_drive_draw_row(70U, "Spd", spd,
+                           (strncmp(spd, "null", 4) == 0) ? RC_LCD_COLOR_MUTED : HOME_FG);
+        (void)snprintf(s_drive_spd, sizeof(s_drive_spd), "%s", spd);
+        drew = TRUE;
+    }
+
+    row_dirty = !s_drive_cache_valid || (strncmp(enc, s_drive_enc, sizeof(s_drive_enc)) != 0);
+    if (row_dirty) {
+        lcd_drive_draw_row(86U, "Enc", enc,
+                           (strncmp(enc, "null", 4) == 0) ? RC_LCD_COLOR_MUTED : HOME_FG);
+        (void)snprintf(s_drive_enc, sizeof(s_drive_enc), "%s", enc);
+        drew = TRUE;
+    }
+
+    if (!s_drive_cache_valid || (throttle != s_drive_t) || (steer != s_drive_s)) {
+        (void)snprintf(cmd, sizeof(cmd), "CMD T%+d S%+d", (int)throttle, (int)steer);
+        lcd_fill(&s_lcd, 4U, 102U, 236U, 116U, HOME_BG);
+        lcd_show_string(&s_lcd, 4U, 102U, (const uint8_t *)cmd, RC_LCD_COLOR_ACCENT, HOME_BG, 12U,
+                        0U);
+        s_drive_t = throttle;
+        s_drive_s = steer;
+        drew = TRUE;
+    }
+
+    s_drive_cache_valid = TRUE;
+    return drew;
+}
+
+void lcd_panel_show_subscribe(const char *const lines[], uint8_t line_count, uint8_t cursor)
+{
+    uint16_t w;
+    uint16_t h;
+    uint8_t i;
+
+    if (s_ready == FALSE) {
+        return;
+    }
+
+    w = st7789_display_width(&s_lcd);
+    h = st7789_display_height(&s_lcd);
+    lcd_fill(&s_lcd, 0U, 0U, w, 20U, HOME_BG);
+    lcd_fill(&s_lcd, 0U, 20U, w, 116U, HOME_BG);
+    lcd_fill(&s_lcd, 0U, 116U, w, h, HOME_BG);
+
+    lcd_show_string(&s_lcd, 4U, 2U, (const uint8_t *)"Subscribe", HOME_FG, HOME_BG, 16U, 0U);
+
+    if (lines == NULL) {
+        line_count = 0U;
+    }
+    if (line_count > 5U) {
+        line_count = 5U;
+    }
+
+    for (i = 0U; i < line_count; i++) {
+        uint16_t y = (uint16_t)(22U + (i * 16U));
+        const char *text = (lines[i] != NULL) ? lines[i] : "";
+
+        if (i == cursor) {
+            lcd_fill(&s_lcd, 2U, y, 238U, (uint16_t)(y + 14U), RC_LCD_RGB565(16, 40, 96));
+            lcd_show_string(&s_lcd, 8U, y, (const uint8_t *)text, RC_LCD_COLOR_ACCENT,
+                            RC_LCD_RGB565(16, 40, 96), 12U, 0U);
+        } else {
+            lcd_show_string(&s_lcd, 8U, y, (const uint8_t *)text, HOME_FG, HOME_BG, 12U, 0U);
+        }
+    }
+
+    lcd_show_string(&s_lcd, 4U, 120U, (const uint8_t *)"JS1:tog/ok  JS2:back", RC_LCD_COLOR_MUTED,
+                    HOME_BG, 12U, 0U);
 }
 
 void lcd_panel_show_menu(const char *title,

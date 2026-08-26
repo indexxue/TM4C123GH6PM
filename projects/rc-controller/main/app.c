@@ -1,6 +1,6 @@
 /**
  * @file    app.c
- * @brief   遥控器应用：摇杆校准/菜单 UI + 蓝牙 DRIVE
+ * @brief   遥控器应用：摇杆校准/菜单 UI + 蓝牙 DRIVE（须 JS1 短按进会话）
  */
 
 #include "app.h"
@@ -9,6 +9,7 @@
 #include "joystick.h"
 #include "lcd_panel.h"
 #include "nrf24.h"
+#include "rc_sub.h"
 #include "rc_ui.h"
 
 #include "attitude.h"
@@ -42,8 +43,10 @@
 
 #define RC_CTRL_PERIOD_MS           (20U)
 #define RC_LED_SCENE_TICK_MS        (50U)
-#define RC_SENSOR_RETRY_MS          (1000U)
+#define RC_SENSOR_RETRY_MS          1000U
 #define RC_ATT_SAMPLE_HZ            (50.0f)
+/** UART7 通信诊断：LINK 后每 3s 一行 rc:stats（找半双工平衡点） */
+#define RC_PROTO_STATS_LOG_MS       3000U
 
 static TaskHandle_t s_evt_task;
 static TaskHandle_t s_tmr_task;
@@ -53,6 +56,23 @@ static bool_t s_imu_ready;
 static bool_t s_mag_ready;
 #endif
 static uint16_t s_sensor_retry_ms;
+static uint32_t s_stats_log_ms;
+
+static const char *rc_ui_mode_tag(void)
+{
+    switch (rc_ui_mode()) {
+    case RC_UI_MODE_DRIVE:
+        return "DRIVE";
+    case RC_UI_MODE_SUBSCRIBE:
+        return "SUB";
+    case RC_UI_MODE_MENU:
+        return "MENU";
+    case RC_UI_MODE_CAL:
+        return "CAL";
+    default:
+        return "IDLE";
+    }
+}
 
 static void rc_log_device_info(void)
 {
@@ -83,6 +103,9 @@ static void rc_peripherals_init(void)
 
     if (joy_cal_init() != STATUS_OK) {
         LOG_WARN("rc: joy_cal init fail");
+    }
+    if (rc_sub_init() != STATUS_OK) {
+        LOG_WARN("rc: sub mask init fail");
     }
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_NRF24)) {
@@ -128,6 +151,17 @@ static void rc_on_timer(void)
     } else {
         s_sensor_retry_ms = 0U;
         rc_sensors_try_init();
+    }
+
+    if (proto_client_link_up() != FALSE) {
+        s_stats_log_ms += RC_CTRL_PERIOD_MS;
+        if (s_stats_log_ms >= RC_PROTO_STATS_LOG_MS) {
+            s_stats_log_ms = 0U;
+            proto_client_stats_log_delta(rc_ui_mode_tag(), (uint32_t)xPortGetFreeHeapSize(),
+                                         (uint32_t)uxTaskGetStackHighWaterMark(s_evt_task));
+        }
+    } else {
+        s_stats_log_ms = 0U;
     }
 }
 
