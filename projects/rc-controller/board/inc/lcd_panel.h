@@ -30,7 +30,8 @@ bool_t lcd_panel_update_home(int16_t j1x, int16_t j1y, int16_t j2x, int16_t j2y,
                              bool_t j1_btn, bool_t j2_btn,
                              uint8_t bat_percent, bool_t link_up,
                              int16_t drive_throttle, int16_t drive_steer,
-                             bool_t drive_armed, const char *tip);
+                             bool_t drive_armed, const char *model_name,
+                             const char *target_name, const char *tip);
 
 /** DRIVE 遥测页静态骨架 */
 void lcd_panel_show_drive(void);

@@ -416,7 +416,14 @@ function Get-MainSources {
         $sources += @(
             (Join-Path $RcSourceDir "joy_cal.c"),
             (Join-Path $RcSourceDir "rc_sub.c"),
+            (Join-Path $RcSourceDir "rc_input.c"),
+            (Join-Path $RcSourceDir "rc_link.c"),
+            (Join-Path $RcSourceDir "rc_target.c"),
+            (Join-Path $RcSourceDir "rc_model.c"),
+            (Join-Path $RcSourceDir "rc_mixer.c"),
             (Join-Path $RcSourceDir "rc_ui.c"),
+            (Join-Path $RcSourceDir "screen\screen_home.c"),
+            (Join-Path $RcSourceDir "screen\screen_target.c"),
             (Join-Path $ProjectRoot "components\menu\Src\menu.c")
         )
     }

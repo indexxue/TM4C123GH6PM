@@ -8,20 +8,22 @@
 #include "joy_cal.h"
 #include "joystick.h"
 #include "lcd_panel.h"
+#include "rc_input.h"
+#include "rc_link.h"
+#include "rc_model.h"
 #include "rc_sub.h"
+#include "screen/screen_home.h"
+#include "screen/screen_target.h"
+#include "rc_mixer.h"
 
-#include "battery.h"
 #include "log.h"
 #include "menu.h"
 #include "nvs.h"
-#include "proto_client.h"
 
 #include <stdio.h>
 #include <string.h>
 
-#define RC_UI_MENU_HOLD_MS       1500U
 #define RC_UI_TIP_MS             1500U
-#define RC_UI_BAT_POLL_MS        500U
 #define RC_UI_NAV_THRESH         350
 #define RC_UI_NAV_REARM          150
 #define RC_UI_VISIBLE_ROWS       4U
@@ -46,16 +48,11 @@ typedef enum {
 
 static rc_ui_mode_t s_mode = RC_UI_MODE_HOME;
 static menu_engine_t s_menu;
-static uint16_t s_js2_hold_ms;
-static uint16_t s_bat_poll_ms;
 static uint16_t s_tip_ms;
 static const char *s_tip;
-static uint8_t s_last_bat_pct = BATTERY_PERCENT_UNKNOWN;
 static int16_t s_throttle;
 static int16_t s_steer;
 static bool_t s_nav_armed = TRUE;
-static bool_t s_js1_btn_prev;
-static bool_t s_js2_btn_prev;
 /** 上一拍链路状态：用于 DRIVE 内闪断边沿（停驶 / 恢复后重订） */
 static bool_t s_link_up_prev;
 
@@ -69,6 +66,7 @@ static joy_cal_t s_cal_draft;
 static uint16_t s_cal_min[JOY_CAL_AXIS_COUNT];
 static uint16_t s_cal_max[JOY_CAL_AXIS_COUNT];
 static bool_t s_menu_dirty = TRUE;
+static bool_t s_sub_return_drive = TRUE;
 
 /* ---- menu callbacks ---- */
 
@@ -78,10 +76,6 @@ static void rc_ui_disarm_to_home(void);
 static void rc_ui_enter_subscribe(void);
 static void rc_ui_leave_subscribe(bool_t save);
 static void rc_ui_set_tip(const char *tip);
-static bool_t rc_ui_sticks_centered(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT]);
-static void rc_ui_paint_home(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT],
-                             uint32_t dt_ms);
-static void rc_ui_paint_drive(void);
 static void rc_ui_render_subscribe(void);
 static void rc_ui_subscribe_nav(const board_joystick_state_t *js1);
 static void rc_ui_render_menu(void);
@@ -90,6 +84,8 @@ static void rc_ui_on_root_back(void *app_ctx, menu_engine_t *eng, const menu_pag
 static void action_start_cal(void *app_ctx, menu_engine_t *eng, const menu_item_t *item);
 static void action_restore_cal(void *app_ctx, menu_engine_t *eng, const menu_item_t *item);
 static void action_reset_confirm(void *app_ctx, menu_engine_t *eng, const menu_item_t *item);
+static void action_switch_model(void *app_ctx, menu_engine_t *eng, const menu_item_t *item);
+static void action_open_subscribe(void *app_ctx, menu_engine_t *eng, const menu_item_t *item);
 
 static int32_t param_deadband_get(void *app_ctx, const menu_item_t *item);
 static void param_deadband_set(void *app_ctx, const menu_item_t *item, int32_t value);
@@ -238,7 +234,26 @@ static const menu_page_t s_about_page = {
     .foot_hint = "JS2 back",
 };
 
+static const char *model_menu_aux(void *app_ctx, const menu_item_t *item, char *buf, size_t buflen)
+{
+    const rc_model_t *m = rc_model_active();
+    (void)app_ctx;
+    (void)item;
+    if (m == NULL) {
+        return "-";
+    }
+    if ((buf == NULL) || (buflen == 0U)) {
+        return m->name;
+    }
+    (void)snprintf(buf, buflen, "%s %u/%u", m->name,
+                   (unsigned)(rc_model_active_index() + 1U), (unsigned)rc_model_count());
+    return buf;
+}
+
 static const menu_item_t s_root_items[] = {
+    { .label = "Switch Model", .type = MENU_ITEM_ACTION, .on_select = action_switch_model,
+      .aux = model_menu_aux },
+    { .label = "Subscribe...", .type = MENU_ITEM_ACTION, .on_select = action_open_subscribe },
     { .label = "Calibrate...", .type = MENU_ITEM_ACTION, .on_select = action_start_cal },
     { .label = "Monitor", .type = MENU_ITEM_SUBMENU, .submenu = &s_monitor_page },
     { .label = "Deadband", .type = MENU_ITEM_PARAM, .param = &s_deadband_vtbl,
@@ -260,27 +275,24 @@ static const menu_page_t s_root_page = {
 static void rc_ui_enter_home(void)
 {
     s_mode = RC_UI_MODE_HOME;
-    s_js2_hold_ms = 0U;
-    s_bat_poll_ms = RC_UI_BAT_POLL_MS;
     s_throttle = 0;
     s_steer = 0;
     s_tip = NULL;
     s_tip_ms = 0U;
-    lcd_panel_show_home();
+    screen_target_close();
+    screen_home_show();
     LOG_INFO("rc_ui: HOME");
 }
 
 static void rc_ui_enter_drive(void)
 {
     s_mode = RC_UI_MODE_DRIVE;
-    s_js2_hold_ms = 0U;
     s_tip = NULL;
     s_tip_ms = 0U;
     s_throttle = 0;
     s_steer = 0;
-    s_link_up_prev = proto_client_link_up();
-    /* 不整表清空：半双工下首包可能慢，保留旧值直至超时刷新 */
-    (void)proto_client_subscribe(rc_sub_get_mask());
+    s_link_up_prev = rc_link_up();
+    (void)rc_link_subscribe(rc_sub_get_mask());
     lcd_panel_show_drive();
     LOG_INFO("rc_ui: DRIVE");
 }
@@ -289,29 +301,27 @@ static void rc_ui_disarm_to_home(void)
 {
     s_throttle = 0;
     s_steer = 0;
-    (void)proto_client_send_drive_stop();
-    (void)proto_client_unsubscribe_optional();
-    proto_client_telem_clear();
+    (void)rc_link_send_drive_stop();
+    (void)rc_link_unsubscribe_optional();
+    rc_link_telem_clear();
     s_mode = RC_UI_MODE_HOME;
-    s_js2_hold_ms = 0U;
     s_tip = NULL;
     s_tip_ms = 0U;
-    lcd_panel_show_home();
-    LOG_INFO("rc_ui: HOME (disarm)");
+    screen_home_show();
+    LOG_INFO("rc_ui: HOME (disarm, link kept)");
 }
 
 static void rc_ui_enter_subscribe(void)
 {
     s_mode = RC_UI_MODE_SUBSCRIBE;
-    s_js2_hold_ms = 0U;
     s_nav_armed = TRUE;
     s_sub_draft = rc_sub_get_mask();
     s_sub_cursor = 0U;
     s_sub_dirty = TRUE;
     s_throttle = 0;
     s_steer = 0;
-    s_link_up_prev = proto_client_link_up();
-    (void)proto_client_send_drive_stop();
+    s_link_up_prev = rc_link_up();
+    (void)rc_link_send_drive_stop();
     LOG_INFO("rc_ui: SUBSCRIBE");
 }
 
@@ -319,15 +329,20 @@ static void rc_ui_leave_subscribe(bool_t save)
 {
     if (save != FALSE) {
         if (rc_sub_save_mask(s_sub_draft) == STATUS_OK) {
-            (void)proto_client_subscribe(rc_sub_get_mask());
+            (void)rc_link_subscribe(rc_sub_get_mask());
         }
     }
-    s_mode = RC_UI_MODE_DRIVE;
-    s_js2_hold_ms = 0U;
-    s_nav_armed = TRUE;
-    s_link_up_prev = proto_client_link_up();
-    lcd_panel_show_drive();
-    LOG_INFO("rc_ui: DRIVE (from sub)");
+    if (s_sub_return_drive != FALSE) {
+        s_mode = RC_UI_MODE_DRIVE;
+        s_nav_armed = TRUE;
+        s_link_up_prev = rc_link_up();
+        lcd_panel_show_drive();
+        LOG_INFO("rc_ui: DRIVE (from sub)");
+    } else {
+        s_mode = RC_UI_MODE_MENU;
+        s_menu_dirty = TRUE;
+        LOG_INFO("rc_ui: MENU (from sub)");
+    }
 }
 
 static void rc_ui_set_tip(const char *tip)
@@ -336,30 +351,66 @@ static void rc_ui_set_tip(const char *tip)
     s_tip_ms = (tip != NULL) ? RC_UI_TIP_MS : 0U;
 }
 
-static bool_t rc_ui_sticks_centered(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT])
+static void rc_ui_switch_model(bool_t in_drive)
 {
-    if (js == NULL) {
-        return FALSE;
+    const rc_model_t *model;
+
+    if (in_drive != FALSE) {
+        s_throttle = 0;
+        s_steer = 0;
+        (void)rc_link_send_drive_stop();
     }
-    if ((js[BOARD_JOYSTICK_1].mapped.x_in_deadband == FALSE) ||
-        (js[BOARD_JOYSTICK_1].mapped.y_in_deadband == FALSE) ||
-        (js[BOARD_JOYSTICK_2].mapped.x_in_deadband == FALSE) ||
-        (js[BOARD_JOYSTICK_2].mapped.y_in_deadband == FALSE)) {
-        return FALSE;
+
+    if (rc_model_cycle_next() != STATUS_OK) {
+        rc_ui_set_tip("MODEL?");
+        return;
     }
-    return TRUE;
+
+    rc_mixer_on_model_changed();
+
+    model = rc_model_active();
+    if (model != NULL) {
+        LOG_INFO("rc_ui: model -> %s", model->name);
+    }
+
+    /* 模型名已在顶栏显示；切换模型时不弹 tip */
+    if (in_drive == FALSE) {
+        s_tip = NULL;
+        s_tip_ms = 0U;
+    }
+
+    if ((in_drive != FALSE) && (rc_link_up() != FALSE)) {
+        (void)rc_link_subscribe(rc_sub_get_mask());
+    }
 }
 
-static void rc_ui_paint_home(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT],
-                             uint32_t dt_ms)
+static bool_t rc_ui_drive_sticks_released(const board_joystick_state_t *js)
+{
+    const rc_model_t *model = rc_model_active();
+
+    if (model == NULL) {
+        return FALSE;
+    }
+    if (model->input_src == RC_MODEL_INPUT_IMU_TILT) {
+        if ((s_throttle > -80) && (s_throttle < 80) && (s_steer > -80) && (s_steer < 80)) {
+            return TRUE;
+        }
+        return FALSE;
+    }
+    return rc_input_sticks_centered(js);
+}
+
+static bool_t rc_ui_tilt_arm_ready(void)
+{
+    if (rc_mixer_attitude_ready() == FALSE) {
+        return FALSE;
+    }
+    return rc_mixer_zero_ready();
+}
+
+static bool_t rc_ui_tip_active(uint32_t dt_ms, const char **tip_out)
 {
     const char *tip = NULL;
-
-    s_bat_poll_ms = (uint16_t)(s_bat_poll_ms + dt_ms);
-    if (s_bat_poll_ms >= RC_UI_BAT_POLL_MS) {
-        s_bat_poll_ms = 0U;
-        s_last_bat_pct = battery_get_percent();
-    }
 
     if (s_tip_ms > 0U) {
         if (s_tip_ms > dt_ms) {
@@ -370,12 +421,10 @@ static void rc_ui_paint_home(const board_joystick_state_t js[BOARD_JOYSTICK_COUN
             s_tip = NULL;
         }
     }
-
-    (void)lcd_panel_update_home(js[0].mapped.x_cmd, js[0].mapped.y_cmd,
-                                js[1].mapped.x_cmd, js[1].mapped.y_cmd,
-                                js[0].mapped.btn_pressed, js[1].mapped.btn_pressed,
-                                s_last_bat_pct, proto_client_link_up(),
-                                0, 0, FALSE, tip);
+    if (tip_out != NULL) {
+        *tip_out = tip;
+    }
+    return (tip != NULL) ? TRUE : FALSE;
 }
 
 static void rc_ui_paint_drive(void)
@@ -389,7 +438,7 @@ static void rc_ui_paint_drive(void)
     int32_t left_rpm;
     int32_t right_rpm;
 
-    proto_client_telem_get(&t);
+    rc_link_telem_get(&t);
 
     if (t.bat_valid != FALSE) {
         (void)snprintf(bat, sizeof(bat), "%u%%", (unsigned)t.bat_pct);
@@ -424,7 +473,7 @@ static void rc_ui_paint_drive(void)
         (void)snprintf(enc, sizeof(enc), "null");
     }
 
-    (void)lcd_panel_update_drive(proto_client_link_up(), bat, us, att, spd, enc, s_throttle,
+    (void)lcd_panel_update_drive(rc_link_up(), bat, us, att, spd, enc, s_throttle,
                                  s_steer);
 }
 
@@ -517,13 +566,13 @@ static void rc_ui_enter_menu(void)
     if ((s_mode == RC_UI_MODE_DRIVE) || (s_mode == RC_UI_MODE_SUBSCRIBE)) {
         s_throttle = 0;
         s_steer = 0;
-        (void)proto_client_send_drive_stop();
-        (void)proto_client_unsubscribe_optional();
-        proto_client_telem_clear();
+        (void)rc_link_send_drive_stop();
+        (void)rc_link_unsubscribe_optional();
+        rc_link_telem_clear();
     }
 
+    screen_target_close();
     s_mode = RC_UI_MODE_MENU;
-    s_js2_hold_ms = 0U;
     s_nav_armed = TRUE;
     s_tip = NULL;
     s_tip_ms = 0U;
@@ -571,6 +620,28 @@ static void action_reset_confirm(void *app_ctx, menu_engine_t *eng, const menu_i
     }
     menu_engine_reset(eng);
     s_menu_dirty = TRUE;
+}
+
+static void action_switch_model(void *app_ctx, menu_engine_t *eng, const menu_item_t *item)
+{
+    (void)app_ctx;
+    (void)eng;
+    (void)item;
+    rc_ui_switch_model(FALSE);
+    s_menu_dirty = TRUE;
+}
+
+static void action_open_subscribe(void *app_ctx, menu_engine_t *eng, const menu_item_t *item)
+{
+    (void)app_ctx;
+    (void)eng;
+    (void)item;
+    if (rc_link_up() == FALSE) {
+        LOG_WARN("rc_ui: subscribe needs link");
+        return;
+    }
+    s_sub_return_drive = FALSE;
+    rc_ui_enter_subscribe();
 }
 
 static int32_t param_deadband_get(void *app_ctx, const menu_item_t *item)
@@ -964,78 +1035,120 @@ static void rc_ui_cal_tick(const board_joystick_state_t js[BOARD_JOYSTICK_COUNT]
 status_t rc_ui_init(void)
 {
     menu_engine_init(&s_menu, &s_root_page, NULL);
+    rc_input_reset();
     s_link_up_prev = FALSE;
     rc_ui_enter_home();
     return STATUS_OK;
 }
 
-void rc_ui_tick(uint32_t dt_ms)
+static void rc_ui_handle_home(const rc_input_snapshot_t *in, uint32_t dt_ms)
 {
-    board_joystick_state_t js[BOARD_JOYSTICK_COUNT];
-    bool_t js1_edge;
-    bool_t js2_edge;
-    bool_t js2_down;
-    bool_t js2_release;
-    bool_t js2_short;
-    bool_t link_up;
+    rc_link_state_t link_state = rc_link_state();
+    const char *tip = NULL;
+    const board_joystick_state_t *js = in->js;
 
-    if (!board_joystick_sample(js)) {
+    s_throttle = 0;
+    s_steer = 0;
+
+    if (screen_target_is_active() != FALSE) {
+        if (in->js2_edge || in->js2_short) {
+            screen_target_close();
+            screen_home_show();
+        } else if (in->js1_edge) {
+            (void)screen_target_confirm();
+            screen_target_close();
+            screen_home_show();
+        } else {
+            screen_target_nav_js2(in->js[BOARD_JOYSTICK_2].mapped.x_cmd);
+        }
         return;
     }
 
-    js2_down = js[BOARD_JOYSTICK_2].raw.btn_pressed;
-    js1_edge = (js[BOARD_JOYSTICK_1].raw.btn_pressed && !s_js1_btn_prev) ? TRUE : FALSE;
-    js2_edge = (js2_down && !s_js2_btn_prev) ? TRUE : FALSE;
-    js2_release = ((!js2_down) && s_js2_btn_prev) ? TRUE : FALSE;
-    js2_short = (js2_release && (s_js2_hold_ms > 0U) && (s_js2_hold_ms < RC_UI_MENU_HOLD_MS))
-                    ? TRUE
-                    : FALSE;
+    if (in->js1_js2_combo_edge) {
+        rc_ui_enter_menu();
+        return;
+    }
 
-    s_js1_btn_prev = js[BOARD_JOYSTICK_1].raw.btn_pressed;
-    s_js2_btn_prev = js2_down;
-    link_up = proto_client_link_up();
+    if (in->js1_edge) {
+        if (link_state == RC_LINK_OFF) {
+            (void)rc_link_connect();
+            rc_ui_set_tip("CONNECT");
+        } else if (link_state == RC_LINK_CONNECTING) {
+            rc_link_cancel_connect();
+            rc_ui_set_tip("CANCEL");
+        } else if (rc_link_up() != FALSE) {
+            const rc_model_t *model = rc_model_active();
 
-    if (s_mode == RC_UI_MODE_HOME) {
-        s_throttle = 0;
-        s_steer = 0;
-
-        if (js1_edge) {
-            if (link_up == FALSE) {
-                rc_ui_set_tip("NO LINK");
-            } else if (!rc_ui_sticks_centered(js)) {
+            if ((model != NULL) && (model->input_src == RC_MODEL_INPUT_IMU_TILT)) {
+                if (!rc_ui_tilt_arm_ready()) {
+                    rc_ui_set_tip("LEVEL");
+                } else {
+                    rc_ui_enter_drive();
+                    return;
+                }
+            } else if (!rc_input_sticks_centered(js)) {
                 rc_ui_set_tip("CENTER");
             } else {
                 rc_ui_enter_drive();
                 return;
             }
-        }
-
-        if (js2_down) {
-            s_js2_hold_ms = (uint16_t)(s_js2_hold_ms + dt_ms);
-            if (s_js2_hold_ms >= RC_UI_MENU_HOLD_MS) {
-                rc_ui_enter_menu();
-                return;
-            }
         } else {
-            s_js2_hold_ms = 0U;
+            rc_ui_set_tip("NO LINK");
         }
+    }
 
-        rc_ui_paint_home(js, dt_ms);
+    if (in->js2_long) {
+        screen_target_open();
+        screen_target_paint();
+        return;
+    }
+
+    if (in->js2_short) {
+        rc_ui_switch_model(FALSE);
+    }
+
+    (void)rc_ui_tip_active(dt_ms, &tip);
+    if ((tip == NULL) && rc_link_wrong_device()) {
+        tip = "WRONG DEV";
+    }
+    if ((tip == NULL) && (link_state == RC_LINK_CONNECTING)) {
+        tip = "CONNECT";
+    }
+    screen_home_paint(js, dt_ms, link_state, tip);
+}
+
+void rc_ui_tick(uint32_t dt_ms)
+{
+    rc_input_snapshot_t in;
+    bool_t link_up;
+
+    if (!rc_input_tick(dt_ms, &in)) {
+        return;
+    }
+
+    link_up = rc_link_up();
+
+    if (s_mode == RC_UI_MODE_HOME) {
+        rc_ui_handle_home(&in, dt_ms);
         return;
     }
 
     if (s_mode == RC_UI_MODE_DRIVE) {
-        /*
-         * 链路闪断：留在 DRIVE，只停驶 + 顶栏 LINK --；
-         * 恢复后重发 SUBSCRIBE，避免被踢回 HOME 打断控车。
-         */
+        const board_joystick_state_t *js = in.js;
+        const rc_model_t *model = rc_model_active();
+        rc_model_input_src_t src = RC_MODEL_INPUT_STICK;
+
+        if (model != NULL) {
+            src = model->input_src;
+        }
+
         if ((s_link_up_prev != FALSE) && (link_up == FALSE)) {
             s_throttle = 0;
             s_steer = 0;
-            (void)proto_client_send_drive_stop();
+            (void)rc_link_send_drive_stop();
             LOG_WARN("rc_ui: link down (stay DRIVE, muted)");
         } else if ((s_link_up_prev == FALSE) && (link_up != FALSE)) {
-            (void)proto_client_subscribe(rc_sub_get_mask());
+            (void)rc_link_subscribe(rc_sub_get_mask());
             LOG_INFO("rc_ui: link up (resume DRIVE, resubscribe)");
         }
         s_link_up_prev = link_up;
@@ -1044,31 +1157,23 @@ void rc_ui_tick(uint32_t dt_ms)
             s_throttle = 0;
             s_steer = 0;
         } else {
-            s_throttle = js[BOARD_JOYSTICK_1].mapped.y_cmd;
-            s_steer = js[BOARD_JOYSTICK_1].mapped.x_cmd;
+            rc_mixer_get_drive(&s_throttle, &s_steer, src, js);
         }
 
-        if (js1_edge) {
-            /* 推杆过程中易误触 JS1 键；与进控对称：须回中再短按才退出 */
-            if (rc_ui_sticks_centered(js)) {
+        if (in.js1_edge) {
+            if (rc_ui_drive_sticks_released(js)) {
                 rc_ui_disarm_to_home();
                 return;
             }
         }
 
-        if (js2_down) {
-            s_js2_hold_ms = (uint16_t)(s_js2_hold_ms + dt_ms);
-            if (s_js2_hold_ms >= RC_UI_MENU_HOLD_MS) {
-                rc_ui_enter_menu();
-                return;
-            }
-        } else {
-            if (js2_short) {
-                s_js2_hold_ms = 0U;
-                rc_ui_enter_subscribe();
-                return;
-            }
-            s_js2_hold_ms = 0U;
+        if (in.js2_long) {
+            rc_ui_enter_menu();
+            return;
+        }
+        if (in.js2_short) {
+            rc_ui_switch_model(TRUE);
+            return;
         }
 
         rc_ui_paint_drive();
@@ -1086,30 +1191,24 @@ void rc_ui_tick(uint32_t dt_ms)
         s_throttle = 0;
         s_steer = 0;
 
-        if (js2_short) {
-            s_js2_hold_ms = 0U;
+        if (in.js2_short) {
             rc_ui_leave_subscribe(FALSE);
             return;
         }
 
-        if (js1_edge) {
+        if (in.js1_edge) {
             rc_ui_subscribe_activate();
             if (s_mode != RC_UI_MODE_SUBSCRIBE) {
                 return;
             }
         }
 
-        if (js2_down) {
-            s_js2_hold_ms = (uint16_t)(s_js2_hold_ms + dt_ms);
-            if (s_js2_hold_ms >= RC_UI_MENU_HOLD_MS) {
-                rc_ui_enter_menu();
-                return;
-            }
-        } else {
-            s_js2_hold_ms = 0U;
+        if (in.js2_long) {
+            rc_ui_enter_menu();
+            return;
         }
 
-        rc_ui_subscribe_nav(&js[BOARD_JOYSTICK_1]);
+        rc_ui_subscribe_nav(&in.js[BOARD_JOYSTICK_1]);
         if (s_sub_dirty) {
             rc_ui_render_subscribe();
         }
@@ -1117,12 +1216,12 @@ void rc_ui_tick(uint32_t dt_ms)
     }
 
     if (s_mode == RC_UI_MODE_CAL) {
-        rc_ui_cal_tick(js, js1_edge, js2_edge);
+        rc_ui_cal_tick(in.js, in.js1_edge, in.js2_edge);
         return;
     }
 
     /* MENU */
-    if (js1_edge) {
+    if (in.js1_edge) {
         menu_result_t r = menu_dispatch(&s_menu, MENU_EVT_ENTER);
         if (r == MENU_RESULT_EXIT) {
             return;
@@ -1132,7 +1231,7 @@ void rc_ui_tick(uint32_t dt_ms)
         }
         s_menu_dirty = TRUE;
     }
-    if (js2_edge) {
+    if (in.js2_edge) {
         menu_result_t r = menu_dispatch(&s_menu, MENU_EVT_BACK);
         if (r == MENU_RESULT_EXIT) {
             return;
@@ -1140,10 +1239,10 @@ void rc_ui_tick(uint32_t dt_ms)
         s_menu_dirty = TRUE;
     }
 
-    rc_ui_menu_nav_from_stick(&js[BOARD_JOYSTICK_1]);
+    rc_ui_menu_nav_from_stick(&in.js[BOARD_JOYSTICK_1]);
 
     if (menu_current_page(&s_menu) == &s_monitor_page) {
-        uint8_t mon_dirty = rc_ui_update_monitor_cache(js);
+        uint8_t mon_dirty = rc_ui_update_monitor_cache(in.js);
 
         if (s_menu_dirty) {
             rc_ui_render_menu();
@@ -1171,7 +1270,7 @@ bool_t rc_ui_drive_muted(void)
         return TRUE;
     }
     /* 闪断期间禁发，避免 link 刚恢复前误发旧杆量 */
-    if (proto_client_link_up() == FALSE) {
+    if (rc_link_up() == FALSE) {
         return TRUE;
     }
     return FALSE;

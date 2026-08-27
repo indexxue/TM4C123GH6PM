@@ -9,7 +9,11 @@
 #include "joystick.h"
 #include "lcd_panel.h"
 #include "nrf24.h"
+#include "rc_link.h"
+#include "rc_model.h"
+#include "rc_target.h"
 #include "rc_sub.h"
+#include "rc_mixer.h"
 #include "rc_ui.h"
 
 #include "attitude.h"
@@ -107,10 +111,35 @@ static void rc_peripherals_init(void)
     if (rc_sub_init() != STATUS_OK) {
         LOG_WARN("rc: sub mask init fail");
     }
+    if (rc_target_init() != STATUS_OK) {
+        LOG_WARN("rc: target init fail");
+    }
+    if (rc_model_init() != STATUS_OK) {
+        LOG_WARN("rc: model init fail");
+    }
+    if (rc_mixer_init() != STATUS_OK) {
+        LOG_WARN("rc: mixer init fail");
+    }
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_NRF24)) {
         board_nrf24_gpio_init();
         LOG_INFO("rc: nrf gpio ready (driver TBD)");
+    }
+}
+
+static bool_t rc_app_tilt_active(void)
+{
+    const rc_model_t *model = rc_model_active();
+
+    if ((model == NULL) || (model->input_src != RC_MODEL_INPUT_IMU_TILT)) {
+        return FALSE;
+    }
+    switch (rc_ui_mode()) {
+    case RC_UI_MODE_HOME:
+    case RC_UI_MODE_DRIVE:
+        return TRUE;
+    default:
+        return FALSE;
     }
 }
 
@@ -132,18 +161,25 @@ static void rc_sensors_try_init(void)
     if (s_imu_ready && s_mag_ready) {
         (void)attitude_init(RC_ATT_SAMPLE_HZ);
     }
+#else
+    if (s_imu_ready && (attitude_is_ready() == FALSE)) {
+        if (attitude_init(RC_ATT_SAMPLE_HZ) == STATUS_OK) {
+            LOG_INFO("rc: attitude 6-dof ready");
+        }
+    }
 #endif
 }
 
 static void rc_on_timer(void)
 {
-    proto_client_tick(RC_CTRL_PERIOD_MS);
+    rc_link_tick(RC_CTRL_PERIOD_MS);
+
+    rc_mixer_tick(RC_CTRL_PERIOD_MS, rc_app_tilt_active());
 
     rc_ui_tick(RC_CTRL_PERIOD_MS);
 
     if (device_profile_board_wants(DEVICE_BOARD_MASK_JOYSTICK)) {
-        proto_client_drive_update(rc_ui_last_throttle(), rc_ui_last_steer(),
-                                  rc_ui_drive_muted());
+        rc_link_drive_update(rc_ui_last_throttle(), rc_ui_last_steer(), rc_ui_drive_muted());
     }
 
     if (s_sensor_retry_ms < RC_SENSOR_RETRY_MS) {
@@ -153,7 +189,7 @@ static void rc_on_timer(void)
         rc_sensors_try_init();
     }
 
-    if (proto_client_link_up() != FALSE) {
+    if (rc_link_up() != FALSE) {
         s_stats_log_ms += RC_CTRL_PERIOD_MS;
         if (s_stats_log_ms >= RC_PROTO_STATS_LOG_MS) {
             s_stats_log_ms = 0U;
@@ -215,7 +251,7 @@ static void rc_evt_task_fn(void *arg)
     }
 
     event_set(EVT_ID_TIMER);
-    LOG_INFO("rc: ui ready mode=HOME (hold JS2 for menu)");
+    LOG_INFO("rc: ui ready mode=HOME (JS1 connect, JS2 target)");
 
     for (;;) {
         event_schedule();
@@ -253,8 +289,7 @@ status_t App_Start(void)
         return STATUS_FAIL;
     }
 
-    (void)proto_client_init();
-    /* HELLO 由 proto_client_tick 在未建链时周期重发，避免上电瞬间对端未就绪 */
+    (void)rc_link_init();
 
     if (xTaskCreate(rc_evt_task_fn, APP_TASK_NAME_EVT, RC_EVT_STACK_WORDS, NULL, RC_TASK_PRIO_EVT,
                     &s_evt_task) != pdPASS) {

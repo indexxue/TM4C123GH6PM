@@ -1356,20 +1356,28 @@ static uint32_t proto_caps(void)
     return caps;
 }
 
-static void proto_handle_hello(uint8_t seq)
+static void proto_handle_hello(uint8_t seq, const uint8_t *payload, uint16_t len)
 {
     const nvs_cfg_t *cfg = nvs_cfg_get();
-    uint8_t payload[1U + NVS_CFG_FW_VER_MAX + 8U];
+    uint8_t reply[1U + NVS_CFG_FW_VER_MAX + 8U + NVS_CFG_SERIAL_MAX];
 
-    payload[0] = PROTO_VER;
+    (void)payload;
+    (void)len;
+
+    reply[0] = PROTO_VER;
     if (cfg != NULL) {
-        (void)memcpy(&payload[1], cfg->fw_version, NVS_CFG_FW_VER_MAX);
-        proto_put_u32(&payload[1U + NVS_CFG_FW_VER_MAX], cfg->hw_rev);
+        (void)memcpy(&reply[1], cfg->fw_version, NVS_CFG_FW_VER_MAX);
+        proto_put_u32(&reply[1U + NVS_CFG_FW_VER_MAX], cfg->hw_rev);
     } else {
-        (void)memset(&payload[1], 0, NVS_CFG_FW_VER_MAX + 4U);
+        (void)memset(&reply[1], 0, NVS_CFG_FW_VER_MAX + 4U);
     }
-    proto_put_u32(&payload[1U + NVS_CFG_FW_VER_MAX + 4U], proto_caps());
-    proto_reply_ack(PROTO_CMD_HELLO, seq, payload, (uint16_t)sizeof(payload));
+    proto_put_u32(&reply[1U + NVS_CFG_FW_VER_MAX + 4U], proto_caps());
+    if (cfg != NULL) {
+        (void)memcpy(&reply[1U + NVS_CFG_FW_VER_MAX + 4U + 4U], cfg->serial, NVS_CFG_SERIAL_MAX);
+    } else {
+        (void)memset(&reply[1U + NVS_CFG_FW_VER_MAX + 4U + 4U], 0, NVS_CFG_SERIAL_MAX);
+    }
+    proto_reply_ack(PROTO_CMD_HELLO, seq, reply, (uint16_t)sizeof(reply));
 }
 
 static void proto_handle_ping(uint8_t seq)
@@ -2173,7 +2181,7 @@ static void proto_dispatch(uint16_t cmd, uint8_t seq, const uint8_t *payload, ui
 
     switch (cmd) {
     case PROTO_CMD_HELLO:
-        proto_handle_hello(seq);
+        proto_handle_hello(seq, payload, len);
         break;
     case PROTO_CMD_PING:
         proto_handle_ping(seq);

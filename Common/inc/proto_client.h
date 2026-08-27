@@ -33,6 +33,12 @@ extern "C" {
 
 #define PROTO_CLIENT_TELEM_STALE_MS       4000U
 
+/** HELLO ACK：1+fw16+hw4+caps4+serial16（见 docs/bluetooth-protocol.md） */
+#define PROTO_CLIENT_HELLO_SERIAL_LEN     16U
+#define PROTO_CLIENT_HELLO_ACK_SERIAL_OFF 25U
+#define PROTO_CLIENT_HELLO_ACK_MIN_LEN    25U
+#define PROTO_CLIENT_HELLO_ACK_FULL_LEN   41U
+
 typedef struct {
     bool_t bat_valid;
     uint8_t bat_pct;
@@ -71,6 +77,8 @@ typedef struct {
 
 status_t proto_client_init(void);
 status_t proto_client_send_hello(void);
+/** @a target_serial 为空或全 0 → 任意设备；否则仅接受 ACK serial 匹配 */
+status_t proto_client_send_hello_to(const char *target_serial);
 status_t proto_client_send_ping(void);
 status_t proto_client_send_drive(int16_t throttle, int16_t steer);
 status_t proto_client_send_drive_stop(void);
@@ -94,6 +102,16 @@ void proto_client_drive_update(int16_t throttle, int16_t steer, bool_t muted);
 void proto_client_tick(uint32_t period_ms);
 
 bool_t proto_client_link_up(void);
+
+/** 最近一次 HELLO ACK 与 filter serial 不匹配 */
+bool_t proto_client_hello_rejected(void);
+
+/** 最近一次 HELLO ACK 中的设备 serial（无则 buf[0]='\\0'） */
+void proto_client_peer_serial(char *buf, size_t buflen);
+
+/** FALSE：仅外部调用 proto_client_send_hello / rc_link_connect 时握手 */
+void proto_client_set_auto_hello(bool_t enable);
+bool_t proto_client_auto_hello(void);
 
 /** 清空遥测缓存（进控时调用） */
 void proto_client_telem_clear(void);

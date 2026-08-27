@@ -5,13 +5,16 @@
 **使用说明（操作/校准/菜单）** → [docs/rc-controller-usage.md](../../docs/rc-controller-usage.md)  
 **设计文档** → [docs/rc-joystick-menu-design.md](../../docs/rc-joystick-menu-design.md)
 
-## 功能摘要（阶段 A + B1）
+## 功能摘要（阶段 A + B1 + R1 + R2）
 
 | 功能 | 说明 |
 |------|------|
-| 主屏 HOME | 双十字准星 + 电池 + 蓝牙 LINK |
-| JS1 遥控 | Y→throttle，X→steer，50 Hz `DRIVE` |
-| 设置菜单 | 长按 JS2 ≥1.5 s 进入；菜单/校准时 **禁发 DRIVE（发 0）** |
+| 主屏 HOME | 双十字 + 电池 + LINK + **当前模型名**（顶栏） |
+| **手动建链** | 上电 **LINK --**；**JS1 短按** 发起 HELLO → LINK OK |
+| **多模型** | 出厂 Stick / Line / Tilt；NVS `rc/models`；**JS2 短按**循环切换 |
+| **Tilt 模型** | JS2 切到 Tilt；水平持握 0.5 s 零点；JS1 进 DRIVE 后倾斜控车 |
+| **JS2 长按** | 目标设备 overlay（R3 占位） |
+| **Settings** | HOME 下 **JS1+JS2 同时短按**；含 Switch Model / Subscribe |
 | 摇杆校准 | 回中 → 极限（每侧 ≥600 ADC）→ 确认写 NVS |
 | NVS | `cal/joy` blob：min/center/max ×4 轴 + deadband + invert |
 | 通道监视 | 四轴 raw/cmd |
@@ -35,7 +38,13 @@
 | 文件 | 说明 |
 |------|------|
 | `joy_cal.*` | 摇杆校准 NVS |
-| `rc_ui.*` | HOME/菜单/校准 UI 状态机 |
+| `rc_mixer.*` | 摇杆/IMU 倾斜 → throttle/steer |
+| `rc_model.*` | 多模型 NVS（最多 8 套） |
+| `rc_input.*` | 摇杆采样 + 按键边沿 |
+| `rc_link.*` | 手动建链 + proto 封装 |
+| `screen/screen_home.*` | HOME 屏绘制 |
+| `screen/screen_target.*` | Target overlay（R3 占位） |
+| `rc_ui.*` | DRIVE/菜单/校准 UI 状态机 |
 | `rc_lcd_cfg.h` | 屏向翻转 / BGR·RGB / 主题色宏 |
 
 共享菜单引擎：`components/menu/`（`build.ps1` 已编入本工程）。

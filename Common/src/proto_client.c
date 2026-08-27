@@ -13,6 +13,8 @@
 
 #include "driverlib/uart.h"
 
+#include <stddef.h>
+#include <stdio.h>
 #include <string.h>
 
 #define PC_SOF0                 0x54U
@@ -74,6 +76,11 @@ static uint32_t s_rx_byte_count;
 static int16_t s_last_sent_throttle;
 static int16_t s_last_sent_steer;
 static bool_t s_drive_session;
+static bool_t s_auto_hello = TRUE;
+static char s_hello_filter[PROTO_CLIENT_HELLO_SERIAL_LEN];
+static char s_peer_serial[PROTO_CLIENT_HELLO_SERIAL_LEN];
+static bool_t s_peer_valid;
+static bool_t s_hello_rejected;
 
 static pc_rx_state_t s_rx_state;
 static uint8_t s_rx_hdr[PC_HEADER_SIZE];
@@ -340,10 +347,56 @@ static void proto_client_handle_push(const uint8_t *payload, uint16_t len)
     }
 }
 
+static bool_t proto_client_serial_broadcast(const char *serial)
+{
+    size_t i;
+
+    if (serial == NULL) {
+        return TRUE;
+    }
+    for (i = 0U; i < PROTO_CLIENT_HELLO_SERIAL_LEN; i++) {
+        if (serial[i] != '\0') {
+            return FALSE;
+        }
+    }
+    return TRUE;
+}
+
+static void proto_client_handle_hello_ack(const uint8_t *payload, uint16_t len)
+{
+    s_peer_valid = FALSE;
+    s_peer_serial[0] = '\0';
+    s_hello_rejected = FALSE;
+
+    if ((payload == NULL) || (len < PROTO_CLIENT_HELLO_ACK_MIN_LEN)) {
+        return;
+    }
+
+    if (len >= PROTO_CLIENT_HELLO_ACK_FULL_LEN) {
+        (void)memcpy(s_peer_serial, &payload[PROTO_CLIENT_HELLO_ACK_SERIAL_OFF],
+                     PROTO_CLIENT_HELLO_SERIAL_LEN);
+        s_peer_serial[PROTO_CLIENT_HELLO_SERIAL_LEN - 1U] = '\0';
+        s_peer_valid = TRUE;
+    }
+
+    if (proto_client_serial_broadcast(s_hello_filter) != FALSE) {
+        return;
+    }
+
+    if ((s_peer_valid == FALSE) ||
+        (strncmp(s_hello_filter, s_peer_serial, PROTO_CLIENT_HELLO_SERIAL_LEN) != 0)) {
+        s_hello_rejected = TRUE;
+        s_link_up = FALSE;
+        LOG_WARN("proto_client: HELLO serial mismatch (WRONG DEV)");
+    }
+}
+
 static void proto_client_on_frame(uint8_t flags, uint16_t cmd, const uint8_t *payload,
                                   uint16_t len)
 {
-    (void)flags;
+    if ((cmd == (uint16_t)(PC_CMD_HELLO | 0x8000U)) && ((flags & PC_FLAG_NAK) == 0U)) {
+        proto_client_handle_hello_ack(payload, len);
+    }
 
     if ((cmd == PC_CMD_TELEMETRY_PUSH) &&
         (((flags & PC_FLAG_UNSOLICITED) != 0U) || (len >= 5U))) {
@@ -351,7 +404,7 @@ static void proto_client_on_frame(uint8_t flags, uint16_t cmd, const uint8_t *pa
         return;
     }
 
-    /* HELLO/PING/SUBSCRIBE ACK 等：仅刷新链路 */
+    /* 其它 ACK：仅刷新链路 */
     (void)payload;
     (void)len;
 }
@@ -482,6 +535,10 @@ status_t proto_client_init(void)
     s_last_sent_throttle = 0;
     s_last_sent_steer = 0;
     s_drive_session = FALSE;
+    s_hello_filter[0] = '\0';
+    s_peer_serial[0] = '\0';
+    s_peer_valid = FALSE;
+    s_hello_rejected = FALSE;
     s_rx_ring_head = 0U;
     s_rx_ring_tail = 0U;
     s_rx_drop_count = 0U;
@@ -621,7 +678,25 @@ void proto_client_stats_log_delta(const char *mode_tag, uint32_t heap_free, uint
 
 status_t proto_client_send_hello(void)
 {
-    if (!proto_client_send(PC_CMD_HELLO, NULL, 0U)) {
+    return proto_client_send_hello_to(NULL);
+}
+
+status_t proto_client_send_hello_to(const char *target_serial)
+{
+    uint8_t payload[PROTO_CLIENT_HELLO_SERIAL_LEN];
+
+    (void)memset(s_hello_filter, 0, sizeof(s_hello_filter));
+    (void)memset(payload, 0, sizeof(payload));
+    s_hello_rejected = FALSE;
+    s_peer_valid = FALSE;
+    s_peer_serial[0] = '\0';
+
+    if (proto_client_serial_broadcast(target_serial) == FALSE) {
+        (void)memcpy(s_hello_filter, target_serial, PROTO_CLIENT_HELLO_SERIAL_LEN);
+        (void)memcpy(payload, target_serial, PROTO_CLIENT_HELLO_SERIAL_LEN);
+    }
+
+    if (!proto_client_send(PC_CMD_HELLO, payload, (uint16_t)sizeof(payload))) {
         return STATUS_FAIL;
     }
     return STATUS_OK;
@@ -765,6 +840,36 @@ bool_t proto_client_link_up(void)
     return s_link_up;
 }
 
+bool_t proto_client_hello_rejected(void)
+{
+    return s_hello_rejected;
+}
+
+void proto_client_peer_serial(char *buf, size_t buflen)
+{
+    if ((buf == NULL) || (buflen == 0U)) {
+        return;
+    }
+    buf[0] = '\0';
+    if (s_peer_valid == FALSE) {
+        return;
+    }
+    (void)snprintf(buf, buflen, "%s", s_peer_serial);
+}
+
+void proto_client_set_auto_hello(bool_t enable)
+{
+    s_auto_hello = enable;
+    if (enable == FALSE) {
+        s_last_hello_ms = 0U;
+    }
+}
+
+bool_t proto_client_auto_hello(void)
+{
+    return s_auto_hello;
+}
+
 void proto_client_tick(uint32_t period_ms)
 {
     uint32_t now = proto_client_uptime_ms();
@@ -773,15 +878,17 @@ void proto_client_tick(uint32_t period_ms)
     proto_client_poll_rx();
 
     if (s_link_up == FALSE) {
-        if ((s_last_hello_ms == 0U) || ((now - s_last_hello_ms) >= PC_HELLO_RETRY_MS)) {
-            if (proto_client_send_hello() == STATUS_OK) {
-                LOG_INFO("proto_client: HELLO (retry, waiting RX)");
+        if (s_auto_hello != FALSE) {
+            if ((s_last_hello_ms == 0U) || ((now - s_last_hello_ms) >= PC_HELLO_RETRY_MS)) {
+                if (proto_client_send_hello() == STATUS_OK) {
+                    LOG_INFO("proto_client: HELLO (retry, waiting RX)");
+                }
+                s_last_hello_ms = (now == 0U) ? 1U : now;
             }
-            s_last_hello_ms = (now == 0U) ? 1U : now;
-        }
-        if ((now - s_last_link_log_ms) >= PC_LINK_LOG_PERIOD_MS) {
-            s_last_link_log_ms = now;
-            LOG_INFO("proto_client: waiting BT link (UART0, no RX yet)");
+            if ((now - s_last_link_log_ms) >= PC_LINK_LOG_PERIOD_MS) {
+                s_last_link_log_ms = now;
+                LOG_INFO("proto_client: waiting BT link (UART0, no RX yet)");
+            }
         }
     } else if ((now - s_last_ping_ms) >= PC_PING_PERIOD_MS) {
         (void)proto_client_send_ping();
